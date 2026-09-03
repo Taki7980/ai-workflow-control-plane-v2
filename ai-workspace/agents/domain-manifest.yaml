@@ -1,0 +1,10 @@
+# Optional human-maintained routing hints.
+# The Python broker parses keyword/path pairs conservatively; unsupported syntax is ignored.
+backend:
+  # auth:
+  #   keywords: ["auth", "login", "token"]
+  #   paths: ["backend/auth/"]
+frontend:
+  # auth:
+  #   keywords: ["login", "session"]
+  #   paths: ["frontend/src/auth/"]

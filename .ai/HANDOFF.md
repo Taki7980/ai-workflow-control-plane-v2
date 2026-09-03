@@ -1,0 +1,11 @@
+# Handoff
+- **Lane / risk**: none / none
+- **Goal / state**: no active task
+- **Exact paths+symbols**: none
+- **Context sources**: none
+- **Ordered edits**: none
+- **Invariants**: none
+- **Changed files**: none
+- **Checks**: none
+- **Blockers**: none
+- **Exact next step**: route the next task with `python -m ai_workflow brief "<task>"`

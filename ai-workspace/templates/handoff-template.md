@@ -1,0 +1,11 @@
+# Handoff
+- **Lane / risk**: [answer|small|full] / [low|medium|high]
+- **Goal / state**: [goal and current state]
+- **Exact paths+symbols**: [bounded edit/read sites]
+- **Context sources**: [cache/index/CRG/source]
+- **Ordered edits**: [max 8 compact steps]
+- **Invariants**: [contracts that must hold]
+- **Changed files**: [files changed]
+- **Checks**: [exact verification commands]
+- **Blockers**: none
+- **Exact next step**: [one action]

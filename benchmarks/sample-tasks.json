@@ -1,0 +1,6 @@
+[
+  {"task": "Explain how request routing works"},
+  {"task": "Rename a typo in src/ui.ts"},
+  {"task": "What is the blast radius if ProcessPayment changes?", "symbol": "ProcessPayment"},
+  {"task": "Refactor authentication across the service boundary"}
+]

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.code-review-graph/
+ai-workspace/generated/*
+!ai-workspace/generated/.gitkeep
+*.log
