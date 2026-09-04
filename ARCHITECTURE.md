@@ -8,7 +8,9 @@ Task
  → choose execution provider
  → choose model tier
  → allocate context budget
- → broker context (cache → local index → CRG → targeted source)
+ → broker context (cache → local index → ready CRG → targeted source)
+ → fuse source and lexical ranks (RRF)
+ → filter non-relevant hits and diversify (MMR)
  → execute in agent/harness
  → compress noisy output
  → verify explicit checks + handoff

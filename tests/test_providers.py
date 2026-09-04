@@ -1,4 +1,4 @@
-import json, os, unittest
+import json, os, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from ai_workflow.models import Lane, Risk, RouteDecision
@@ -13,6 +13,16 @@ class ProviderTests(unittest.TestCase):
             status = detect(ROOT, CFG)
             self.assertTrue(status.superpowers)
             self.assertEqual(execution_provider(Lane.FULL, CFG, status), 'superpowers')
+    def test_crg_is_available_only_when_its_graph_exists(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with patch('ai_workflow.providers.shutil.which', return_value='code-review-graph'):
+                self.assertFalse(detect(root, CFG).code_review_graph)
+                graph = root / '.code-review-graph' / 'graph.db'
+                graph.parent.mkdir()
+                graph.touch()
+                self.assertTrue(detect(root, CFG).code_review_graph)
+
     def test_model_tier_scales_with_risk(self):
         low = RouteDecision(Lane.SMALL, Risk.LOW)
         high = RouteDecision(Lane.FULL, Risk.HIGH)

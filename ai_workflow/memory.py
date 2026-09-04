@@ -1,8 +1,9 @@
 from __future__ import annotations
-import hashlib, json, re, uuid
+import json, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from .indexer import sha256
+from .math_retrieval import BM25Scorer, tokenize
 
 MEMORY_TYPES = {"decision", "incident", "verified-fix", "architecture", "pattern", "optimization", "constraint"}
 
@@ -27,7 +28,7 @@ def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: st
             source_hashes[rel] = sha256(p)
     record = {
         "id": f"mem-{uuid.uuid4().hex[:12]}", "type": type_, "created_at": now, "verified_at": now,
-        "keywords": [x for x in re.split(r"[\s,]+", keywords.lower()) if x],
+        "keywords": list(dict.fromkeys(tokenize(keywords))),
         "summary": summary.strip(), "evidence": evidence.strip(), "files": related,
         "source_hashes": source_hashes, "confidence": max(0.0, min(1.0, float(confidence)))
     }
@@ -37,7 +38,10 @@ def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: st
     return record
 
 def _stale(root: Path, record: dict) -> bool:
-    for rel, expected in record.get("source_hashes", {}).items():
+    source_hashes = record.get("source_hashes", {})
+    if any(rel not in source_hashes for rel in record.get("files", [])):
+        return True
+    for rel, expected in source_hashes.items():
         p = root / rel
         if not p.exists():
             return True
@@ -49,8 +53,8 @@ def _stale(root: Path, record: dict) -> bool:
     return False
 
 def search_memory(root: Path, query: str, limit: int = 5, minimum_confidence: float = 0.0, exclude_stale: bool = False) -> list[dict]:
-    terms = {x for x in re.split(r"\W+", query.lower()) if len(x) >= 2}
-    rows = []
+    records: list[dict] = []
+    texts: list[str] = []
     try:
         lines = _path(root).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -59,21 +63,26 @@ def search_memory(root: Path, query: str, limit: int = 5, minimum_confidence: fl
         if not line.strip():
             continue
         try:
-            r = json.loads(line)
+            record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if float(r.get("confidence", 0)) < minimum_confidence:
+        if float(record.get("confidence", 0)) < minimum_confidence:
             continue
-        hay = " ".join(r.get("keywords", [])) + " " + r.get("summary", "") + " " + r.get("evidence", "")
-        score = sum(1 for t in terms if t in hay.lower())
-        if score:
-            out = dict(r)
-            out["score"] = score
-            out["stale"] = _stale(root, r)
-            if exclude_stale and out["stale"]:
-                continue
-            rows.append(out)
-    rows.sort(key=lambda x: (x["stale"], -x["score"], -float(x.get("confidence", 0))))
+        stale = _stale(root, record)
+        if exclude_stale and stale:
+            continue
+        text = " ".join(record.get("keywords", [])) + " " + record.get("summary", "") + " " + record.get("evidence", "")
+        records.append({**record, "stale": stale})
+        texts.append(text)
+
+    scorer = BM25Scorer()
+    scorer.fit(texts, records)
+    rows = []
+    for score, record in scorer.rank(query):
+        out = dict(record)
+        out["score"] = score * float(out.get("confidence", 0))
+        rows.append(out)
+    rows.sort(key=lambda item: (item["stale"], -item["score"], -float(item.get("confidence", 0))))
     return rows[:limit]
 
 

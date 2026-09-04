@@ -1,6 +1,30 @@
 [
-  {"task": "Explain how request routing works"},
-  {"task": "Rename a typo in src/ui.ts"},
-  {"task": "What is the blast radius if ProcessPayment changes?", "symbol": "ProcessPayment"},
-  {"task": "Refactor authentication across the service boundary"}
+  {
+    "task": "Explain how BM25Scorer ranks documents",
+    "symbol": "BM25Scorer",
+    "expected_lane": "answer",
+    "relevant_context": ["BM25Scorer"],
+    "retrieval_k": 5
+  },
+  {
+    "task": "Fix tokenization in ai_workflow/math_retrieval.py",
+    "symbol": "tokenize",
+    "expected_lane": "small",
+    "relevant_context": ["tokenize"],
+    "retrieval_k": 5
+  },
+  {
+    "task": "What tests for memory hash invalidation exist?",
+    "symbol": "test_hash_invalidation",
+    "expected_lane": "full",
+    "relevant_context": ["test_hash_invalidation"],
+    "retrieval_k": 5
+  },
+  {
+    "task": "Refactor context retrieval architecture across providers",
+    "symbol": "gather",
+    "expected_lane": "full",
+    "relevant_context": ["gather"],
+    "retrieval_k": 5
+  }
 ]

@@ -23,7 +23,7 @@ class ContextDedupeTests(unittest.TestCase):
             ContextItem("source", "def get_invoice(id): return db.find(id)"), 
         ]
         
-        # Testing submodular diversity
+        # Diversity-aware reranking
         # Query: ProcessPayment invoice
         deduped = _cap_items(items, chars=1000, seen_keys=set(), query="ProcessPayment invoice")
         texts = [i.text for i in deduped]

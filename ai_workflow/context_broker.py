@@ -6,7 +6,7 @@ from .indexer import load_state, row_fresh, sha256
 from .memory import search_memory
 from .models import ContextItem, RouteDecision, Lane
 from .providers import ProviderStatus
-from .math_retrieval import BM25Scorer, maximal_marginal_relevance, TokenizedDoc, tokenize
+from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 
 
 def _jsonl(path: Path):
@@ -48,9 +48,7 @@ def detect_changed_files(root: Path) -> list[str]:
         return []
 
 def _score(query: str, text: str) -> int:
-    terms = {x for x in re.split(r"\W+", query.lower()) if len(x) >= 2}
-    low = text.lower()
-    return sum(1 for t in terms if t in low)
+    return len(set(tokenize(query)) & set(tokenize(text)))
 
 def resolve_test_files(changed_files: list[str]) -> list[dict]:
     results = []
@@ -95,19 +93,34 @@ def _cap_items(items: list[ContextItem], chars: int, seen_keys: set[str] | None 
     used = 0
     seen = seen_keys if seen_keys is not None else set()
     
-    # Submodular maximization via MMR if items are plenty and query is provided
+    # Fuse source-provided ranks with lexical ranks, then diversify relevant hits.
     if query and len(items) > 1:
         bm25 = BM25Scorer()
-        texts = [i.text for i in items]
-        bm25.fit(texts, items)
-        
-        candidates = bm25.docs
-        scores = [bm25.score_document(list(set(tokenize(query))), doc) for doc in candidates]
-        
-        # We fetch up to len(items) optimally sorted items
-        ordered_items = maximal_marginal_relevance(tokenize(query), candidates, scores, lambda_param=0.5, max_items=len(items))
+        bm25.fit([item.text for item in items], items)
+        lexical_rank = [item for _, item in bm25.rank(query)]
+        source_rank = sorted(
+            (item for item in items if item.score > 0),
+            key=lambda item: -item.score,
+        )
+        fused = reciprocal_rank_fusion(
+            [source_rank, lexical_rank],
+            key=lambda item: item.dedupe_key,
+        )
+        fused_items = [item for _, item in fused]
+        fused_scores = [score for score, _ in fused]
+        if fused_items:
+            fused_bm25 = BM25Scorer()
+            fused_bm25.fit([item.text for item in fused_items], fused_items)
+            ordered_items = maximal_marginal_relevance(
+                tokenize(query),
+                fused_bm25.docs,
+                fused_scores,
+                lambda_param=0.7,
+                max_items=len(fused_items),
+            )
+        else:
+            ordered_items = []
     else:
-        # Fallback to greedy if no query or only 1 item
         ordered_items = items
 
     for item in ordered_items:
@@ -329,15 +342,14 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
     hot = hot_cache(root, query, limit)
     items += _cap_items(hot, budget.source_chars.get("hot_cache", 1000), seen_keys, query=query)
     
-    # Run async gathering for remaining sources
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    # Gather only potentially useful expensive providers in parallel.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_light = executor.submit(lightweight, root, query, symbol, endpoint, limit, float(config["memory"].get("minimum_confidence", 0.55)))
         f_crg = executor.submit(crg_context, root, query, symbol, changed_files, limit) if wants_crg else None
-        f_source = executor.submit(targeted_source, root, query, int(config["context"]["targeted_search"].get("max_matches", 12)))
 
         # Priority 1: Lightweight index + domain hints + research + memory
         remaining = max(0, budget.context_chars - sum(len(i.text) for i in items))
-        light_budget = max(budget.source_chars.get("lightweight", 2000), remaining // 2)
+        light_budget = budget.source_chars.get("lightweight", 2000)
         light = f_light.result()
         items += _cap_items(light, min(remaining, light_budget), seen_keys, query=query)
 
@@ -350,14 +362,21 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
 
         # Priority 3: Targeted Source Fallback
         code_sources = {"lightweight_index", "domain_manifest", "code_review_graph"}
-        has_code_evidence = any(i.source in code_sources for i in items)
+        has_code_evidence = any(
+            item.source in code_sources and _score(query, item.text) > 0
+            for item in items
+        )
         needs_structural_fallback = decision.structural_context and not crg_items
         needs_mutation_fallback = decision.lane != Lane.ANSWER and not has_code_evidence
         
         if not items or needs_structural_fallback or needs_mutation_fallback:
             remaining = max(0, budget.context_chars - sum(len(i.text) for i in items))
             if remaining > 80:
-                source_items = f_source.result()
+                source_items = targeted_source(
+                    root,
+                    query,
+                    int(config["context"]["targeted_search"].get("max_matches", 12)),
+                )
                 items += _cap_items(source_items, remaining, seen_keys, query=query)
 
 

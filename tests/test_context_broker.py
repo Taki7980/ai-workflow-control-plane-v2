@@ -1,8 +1,13 @@
 import tempfile, unittest
 from pathlib import Path
-from ai_workflow.context_broker import _domain_hints
+from unittest.mock import patch
+from ai_workflow.context_broker import _domain_hints, _score
 
 class ContextBrokerTests(unittest.TestCase):
+    def test_score_uses_tokens_not_substrings(self):
+        self.assertEqual(_score("auth", "author guide"), 0)
+        self.assertEqual(_score("ProcessPayment", "def ProcessPayment():"), 3)
+
     def test_domain_manifest_routes_matching_module(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -26,11 +31,35 @@ class ContextBrokerTests(unittest.TestCase):
 
 from ai_workflow.context_broker import gather
 from ai_workflow.budget import budget_for
-from ai_workflow.models import Lane, Risk, RouteDecision
+from ai_workflow.models import ContextItem, Lane, Risk, RouteDecision
 from ai_workflow.providers import ProviderStatus
 import json
 
 class StructuralFallbackTests(unittest.TestCase):
+    def test_targeted_source_is_lazy_when_lightweight_evidence_is_sufficient(self):
+        cfg = json.loads(
+            (Path(__file__).parents[1] / "ai-workspace/config/control-plane.json").read_text()
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            decision = RouteDecision(Lane.SMALL, Risk.LOW, ["bounded"], False)
+            evidence = [ContextItem("lightweight_index", "payment handler", 1.0)]
+            with patch("ai_workflow.context_broker.hot_cache", return_value=[]), patch(
+                "ai_workflow.context_broker.lightweight",
+                return_value=evidence,
+            ), patch("ai_workflow.context_broker.targeted_source") as fallback:
+                items = gather(
+                    root,
+                    "update payment handler",
+                    decision,
+                    budget_for(Lane.SMALL, cfg),
+                    cfg,
+                    ProviderStatus(False, False, False, False),
+                )
+
+            self.assertTrue(items)
+            fallback.assert_not_called()
+
     def test_crg_invocation_args(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -53,7 +53,8 @@ Task + Risk Classifier
 
 - **Task + risk routing** — Answer / Small / Full lanes.
 - **Provider selection** — native lightweight execution or Superpowers for rigorous Full-lane work.
-- **Context brokering** — cache → local index → CRG → targeted source fallback.
+- **Context brokering** — cache → local index → ready CRG → targeted source fallback.
+- **Retrieval ranking** — code-aware lexical tokenization, robust Okapi BM25, reciprocal-rank fusion, then relevance-filtered MMR diversification.
 - **Context budgeting** — hard estimated-token limits per lane so tools cannot flood the agent.
 - **Cross-agent handoff** — compact, validated `.ai/HANDOFF.md`.
 - **Output compression policy** — RTK when available, deterministic line/character caps otherwise.
@@ -131,10 +132,10 @@ The broker queries sources in increasing-cost order:
 
 1. `hot-cache.jsonl` / incident cache
 2. `symbol-index.jsonl`, `endpoint-index.jsonl`, domain manifest, durable memory
-3. Code Review Graph when the query is structural/multi-hop and CRG is installed
+3. Code Review Graph when the query is structural/multi-hop and a repository graph is ready
 4. targeted source search (bounded `rg`, or Python fallback)
 
-Every source receives a character allowance derived from the lane budget. Truncation is explicit.
+Every source receives a character allowance derived from the lane budget. Configured shares are enforced rather than silently expanded. Targeted source search starts lazily only when cheaper evidence is insufficient; truncation is explicit.
 
 ## Agent / model tier
 
@@ -154,7 +155,7 @@ The control plane does not vendor or silently install Superpowers. It detects it
 
 ## Code Review Graph integration
 
-If `code-review-graph` is on `PATH`, `doctor` reports it. Structural context requests can call its CLI wrappers (`query`, `impact`, `search`) when supported by the installed CRG version. Failures degrade safely to the next context source.
+If `code-review-graph` is on `PATH`, `doctor` reports its installation and graph health separately. Structural context requests call its CLI wrappers (`query`, `impact`, `search`) only when `.code-review-graph/graph.db` exists. Missing or failed graphs degrade safely to targeted source search.
 
 Example:
 
@@ -178,7 +179,7 @@ At recall time, memories whose referenced files changed are marked stale instead
 
 ## Configuration
 
-Edit `ai-workspace/config/control-plane.json` to tune budgets, risk keywords, CRG escalation, result caps, and provider preferences.
+Edit `ai-workspace/config/control-plane.json` to tune budgets, risk keywords, CRG escalation, result caps, and provider preferences. Configuration is validated at load time: required sections, positive lane budgets, and source shares outside `[0, 1]` fail with explicit errors.
 
 ## Design principles
 
@@ -199,6 +200,6 @@ python -m ai_workflow doctor --strict
 
 ## Benchmarking
 
-`ai-workflow benchmark --tasks benchmarks/sample-tasks.json` measures the routing/context layer: selected lane/provider/model tier, context sources, estimated context tokens, budget utilization, and local broker latency.
+`ai-workflow benchmark --tasks benchmarks/sample-tasks.json` measures the routing/context layer: selected lane/provider/model tier, context sources, estimated context tokens, budget utilization, and local broker latency. Labeled cases can also declare `expected_lane`, `relevant_context`, and `retrieval_k`; the report then computes lane accuracy, Precision@k, pattern Recall@k, mean reciprocal rank, and pattern-level nDCG@k. Each gold pattern contributes at most once, so duplicate supporting items cannot inflate nDCG.
 
-The CLI reports **estimated context tokens** using a conservative character heuristic. This is not billed provider usage and the built-in benchmark does not prove task correctness. Provider tokens, output-filter savings, wall time, and task correctness should be measured separately when benchmarking real agents.
+The CLI reports **estimated context tokens** using a conservative character heuristic. This is not billed provider usage. Retrieval metrics prove ranking behavior only against the supplied gold patterns; they do not prove downstream task correctness. Provider tokens, output-filter savings, wall time, and end-to-end task correctness must still be measured separately.

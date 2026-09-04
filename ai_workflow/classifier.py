@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 from .models import Lane, Risk, RouteDecision
 
-CHANGE_WORDS = re.compile(r"\b(add|build|create|change|edit|fix|implement|modify|remove|rename|replace|update|refactor|migrate|deploy)\b", re.I)
+CHANGE_WORDS = re.compile(r"\b(add|alter|build|create|change|edit|fix|implement|modify|patch|remove|rename|replace|rewrite|update|refactor|migrate|deploy)\b", re.I)
 QUESTION_WORDS = re.compile(r"\b(what|why|how|where|which|who|whom|whose|when|explain|describe|compare|difference|understand|show|find|list|locate|tell)\b", re.I)
 FILE_HINT = re.compile(r"(?:[\w./\\-]+\.(?:py|go|rs|js|ts|tsx|java|cs|cpp|h|rb|php|md|json|ya?ml))", re.I)
 

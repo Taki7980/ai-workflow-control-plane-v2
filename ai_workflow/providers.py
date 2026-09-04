@@ -47,11 +47,18 @@ def _has_superpowers(root: Path) -> bool:
             pass
     return False
 
+def _has_crg(root: Path) -> bool:
+    return (
+        shutil.which("code-review-graph") is not None
+        and (root / ".code-review-graph" / "graph.db").is_file()
+    )
+
+
 def detect(root: Path, config: dict | None = None) -> ProviderStatus:
     sp_mode = ((config or {}).get('execution', {}).get('superpowers', {}) or {}).get('mode','auto')
     crg_mode = ((config or {}).get('context', {}).get('crg', {}) or {}).get('mode','auto')
     sp = _has_superpowers(root) if sp_mode == 'auto' else sp_mode == 'on'
-    crg = (shutil.which('code-review-graph') is not None) if crg_mode == 'auto' else crg_mode == 'on'
+    crg = _has_crg(root) if crg_mode == 'auto' else crg_mode == 'on'
     return ProviderStatus(
         superpowers=sp, code_review_graph=crg,
         rtk=shutil.which('rtk') is not None, ripgrep=shutil.which('rg') is not None,
