@@ -1,5 +1,5 @@
 # Domain Documentation
 
-Use the Obsidian vault as the human-readable domain layer. Source code and tests remain authoritative.
+Use `ai-workspace/agents/domain-manifest.yaml` for domain routing hints. Source code and tests remain authoritative.
 
-Before expanding context, read only the domain note linked by the task or `domain-manifest.yaml`. Record durable terminology or architectural decisions only when they are verified and reusable.
+Before expanding context, read only the source or documentation linked by the task or domain manifest. Record durable terminology or architectural decisions only when they are verified and reusable.

@@ -75,6 +75,10 @@ CRG is optional. The workflow still works without it.
 
 Requires Python 3.10+.
 
+Run these commands from an existing copy of this template. `init` validates
+`AGENTS.md` and `ai-workspace/config/control-plane.json` before writing project
+state; it does not scaffold an empty directory.
+
 ```bash
 python -m ai_workflow init --project-name MyProject
 python -m ai_workflow doctor

@@ -27,6 +27,7 @@ def run_checks(root: Path, checks: list[str], max_lines: int = 60) -> dict:
             results.append({"check": raw, "returncode": 2, "output": f"parse error: {exc}"})
             continue
         if not argv:
+            results.append({"check": raw, "returncode": 2, "output": "empty check command"})
             continue
         try:
             proc = subprocess.run(argv, cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120, check=False)
@@ -34,7 +35,7 @@ def run_checks(root: Path, checks: list[str], max_lines: int = 60) -> dict:
             results.append({"check": raw, "returncode": proc.returncode, "output": output})
         except (OSError, subprocess.TimeoutExpired) as exc:
             results.append({"check": raw, "returncode": 124, "output": str(exc)})
-    return {"ok": bool(checks) and all(r["returncode"] == 0 for r in results), "checks": results}
+    return {"ok": bool(results) and all(r["returncode"] == 0 for r in results), "checks": results}
 
 
 def verify(root: Path, checks: list[str], handoff_max_lines: int) -> dict:

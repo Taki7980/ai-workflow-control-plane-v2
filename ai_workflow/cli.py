@@ -23,13 +23,16 @@ def _json(data):
 
 def cmd_init(args):
     root = _root(args)
+    agents = root / "AGENTS.md"
+    try:
+        load_config(root)
+        text = agents.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", args.project_name)
+    except FileNotFoundError as exc:
+        raise SystemExit("Copy the workflow template into the project before running init; config and AGENTS.md are required.") from exc
     (root / ".ai").mkdir(parents=True, exist_ok=True)
     project_file = root / ".ai" / "PROJECT"
     project_file.write_text(str(root) + "\n", encoding="utf-8")
-    agents = root / "AGENTS.md"
-    if agents.exists():
-        text = agents.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", args.project_name)
-        agents.write_text(text, encoding="utf-8")
+    agents.write_text(text, encoding="utf-8")
     stats = build_indexes(root)
     _json({"status": "initialized", "project": args.project_name, "root": str(root), "index": stats})
 
@@ -108,11 +111,13 @@ def cmd_brief(args):
     }
     if args.write_handoff and decision.lane.value != "answer":
         text = render_handoff(decision, provider, [i.source for i in items], args.task)
+        (root / ".ai").mkdir(parents=True, exist_ok=True)
         (root / ".ai" / "HANDOFF.md").write_text(text, encoding="utf-8")
         packet["handoff_written"] = ".ai/HANDOFF.md"
-    out = root / "ai-workspace" / "generated" / "last-brief.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(packet, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if decision.lane.value != "answer":
+        out = root / "ai-workspace" / "generated" / "last-brief.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(packet, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     fmt = getattr(args, "format", "json")
     print(_format_brief(packet, fmt))
 

@@ -50,7 +50,7 @@ def classify(task: str, config: dict) -> RouteDecision:
         return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=structural)
 
     if has_change:
-        if len(file_hints) <= 2 and (small or len(text.split()) <= 22):
+        if 1 <= len(file_hints) <= 2 and (small or len(text.split()) <= 22):
             reasons.append("bounded low-complexity edit")
             if file_hints:
                 reasons.append(f"explicit file scope: {len(file_hints)} file(s)")

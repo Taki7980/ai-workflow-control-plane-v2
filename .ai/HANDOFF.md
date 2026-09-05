@@ -1,11 +1,11 @@
 # Handoff
-- **Lane / risk**: none / none
-- **Goal / state**: no active task
-- **Exact paths+symbols**: none
-- **Context sources**: none
-- **Ordered edits**: none
-- **Invariants**: none
-- **Changed files**: none
-- **Checks**: none
-- **Blockers**: none
-- **Exact next step**: route the next task with `python -m ai_workflow brief "<task>"`
+- **Lane / risk**: full / medium
+- **Goal / state**: six audit gaps fixed; prior cleanup retained; local verification complete
+- **Exact paths+symbols**: cli.cmd_init/cmd_brief; classifier.classify; verify.run_checks; generate-index.ps1; CI; tests
+- **Context sources**: AUDIT.md, Full brief, source callers, failing regression tests
+- **Ordered edits**: regressions; minimal runtime fixes; CI/wrapper; review; full checks; commit and push
+- **Invariants**: retain prior cleanup; no new dependencies; Answer read-only; initialization validates before writes
+- **Changed files**: prior cleanup plus runtime/tests/CI/README/AUDIT
+- **Checks**: 60 tests pass; doctor --strict passes; diff check passes; 4/4 benchmark lanes correct
+- **Blockers**: none; GitHub Taki7980 authenticated and origin verified
+- **Exact next step**: finish independent review, commit, push origin/main as authorized, verify remote CI

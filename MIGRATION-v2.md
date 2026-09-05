@@ -28,6 +28,6 @@ Then optionally install/configure Superpowers and Code Review Graph in the codin
 
 ## Memory migration
 
-The old Markdown brain files are retained as compatibility markers. New machine memories go to `ai-workspace/memory/memory.jsonl` and can carry file hashes so stale memories are rejected.
+Machine memories go to `ai-workspace/memory/memory.jsonl` and can carry file hashes so stale memories are rejected. The obsolete Markdown brain compatibility markers have been removed.
 
 Migrate only verified, reusable old entries; do not blindly copy historical transcripts.

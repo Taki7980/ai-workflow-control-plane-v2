@@ -7,6 +7,5 @@ Runtime state and configuration for the AI Workflow Efficiency Control Plane.
 - `generated/` — rebuildable indexes, caches, and brief snapshots.
 - `agents/` — human/project conventions and domain routing hints.
 - `scripts/` — PowerShell compatibility wrappers around the cross-platform Python CLI.
-- `Obsidian/` — optional human-readable knowledge vault.
 
 The Python package at repository root is the source of runtime behavior. PowerShell wrappers should stay thin to prevent rule drift.

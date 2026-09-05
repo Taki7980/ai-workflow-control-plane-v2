@@ -8,11 +8,7 @@ from .math_retrieval import BM25Scorer, tokenize
 MEMORY_TYPES = {"decision", "incident", "verified-fix", "architecture", "pattern", "optimization", "constraint"}
 
 def _path(root: Path) -> Path:
-    p = root / "ai-workspace" / "memory" / "memory.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if not p.exists():
-        p.write_text("", encoding="utf-8")
-    return p
+    return root / "ai-workspace" / "memory" / "memory.jsonl"
 
 def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: str = "", files: list[str] | None = None, confidence: float = 0.8) -> dict:
     if type_ not in MEMORY_TYPES:
@@ -33,6 +29,7 @@ def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: st
         "source_hashes": source_hashes, "confidence": max(0.0, min(1.0, float(confidence)))
     }
     p = _path(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return record

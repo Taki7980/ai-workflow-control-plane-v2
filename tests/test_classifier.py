@@ -47,3 +47,9 @@ class ClassifierTests(unittest.TestCase):
         decision = classify("who is the author of src/ui.ts", CFG)
         self.assertEqual(decision.lane, Lane.ANSWER)
         self.assertEqual(decision.risk, Risk.LOW)
+
+    def test_unbounded_mutations_require_full(self):
+        for task in ('remove unused files and folders', 'fix all bugs',
+                     'rename everything', 'update text across project'):
+            with self.subTest(task=task):
+                self.assertEqual(classify(task, CFG).lane, Lane.FULL)

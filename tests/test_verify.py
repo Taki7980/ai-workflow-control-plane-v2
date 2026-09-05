@@ -1,6 +1,6 @@
 import tempfile, unittest, sys
 from pathlib import Path
-from ai_workflow.verify import verify
+from ai_workflow.verify import verify, run_checks
 
 GOOD='''# Handoff\n- **Lane / risk**: small / low\n- **Goal / state**: x\n- **Exact paths+symbols**: a.py\n- **Context sources**: source\n- **Ordered edits**: x\n- **Invariants**: x\n- **Changed files**: a.py\n- **Checks**: python\n- **Blockers**: none\n- **Exact next step**: done\n'''
 class VerifyTests(unittest.TestCase):
@@ -10,3 +10,8 @@ class VerifyTests(unittest.TestCase):
             result=verify(root,[f'{sys.executable} -c "print(123)"'],30)
             self.assertTrue(result['ok'])
             self.assertIn('123', result['checks'][0]['output'])
+
+    def test_blank_checks_fail(self):
+        for checks in ([], ['   '], [f'{sys.executable} -c "print(123)"', '']):
+            with self.subTest(checks=checks):
+                self.assertFalse(run_checks(Path.cwd(), checks)['ok'])
