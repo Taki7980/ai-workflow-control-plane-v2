@@ -9,9 +9,9 @@ from .semantic import semantic_ready
 class ProviderStatus:
     superpowers: bool
     code_review_graph: bool
-    semantic: bool
     rtk: bool
     ripgrep: bool
+    semantic: bool = False
 
     def to_dict(self):
         return asdict(self)
@@ -60,9 +60,9 @@ def detect(root: Path, config: dict | None = None) -> ProviderStatus:
     return ProviderStatus(
         superpowers=sp,
         code_review_graph=crg,
-        semantic=semantic_ready(cfg),
         rtk=shutil.which('rtk') is not None,
         ripgrep=shutil.which('rg') is not None,
+        semantic=semantic_ready(cfg),
     )
 
 def execution_provider(lane: Lane, config: dict, status: ProviderStatus) -> str:
