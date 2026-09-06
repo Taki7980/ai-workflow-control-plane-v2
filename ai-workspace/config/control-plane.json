@@ -21,12 +21,8 @@
       "min_source_files": 250,
       "changed_files_threshold": 3
     },
-    "semantic": {
-      "mode": "auto",
-      "command": "",
-      "timeout_seconds": 8,
-      "max_results": 6
-    },
+    "semantic": {"mode": "auto", "command": "", "timeout_seconds": 8, "max_results": 6},
+    "external_retrievers": [],
     "sufficiency": {"threshold": 0.72},
     "adaptive_budget": {
       "enabled": true,
@@ -37,6 +33,7 @@
     "telemetry": {"mode": "mutations"},
     "targeted_search": {"max_matches": 12, "max_file_bytes": 500000}
   },
+  "workspace": {"roots": [], "max_roots": 4},
   "execution": {
     "prefer_superpowers_for_full": true,
     "native_fallback": true,
