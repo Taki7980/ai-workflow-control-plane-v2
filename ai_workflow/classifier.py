@@ -29,34 +29,27 @@ def classify(task: str, config: dict) -> RouteDecision:
     structural = bool(_contains_any(lower, config["context"]["crg"].get("structural_keywords", [])))
     file_hints = FILE_HINT.findall(text)
     reasons: list[str] = []
-
     has_change = bool(CHANGE_WORDS.search(text))
     looks_question = bool(QUESTION_WORDS.search(text)) or text.endswith("?") or bool(answer)
 
-    # Sensitive domains are high-risk for mutation, not for read-only explanation.
     if looks_question and not has_change and not structural:
         reasons.append("read-only question/explanation")
-        return RouteDecision(Lane.ANSWER, Risk.LOW, reasons, structural_context=False)
-
+        return RouteDecision(Lane.ANSWER, Risk.LOW, reasons, structural_context=False, confidence=0.96 if answer else 0.88)
     if high:
         reasons.append("high-risk change keyword: " + ", ".join(high[:3]))
-        return RouteDecision(Lane.FULL, Risk.HIGH, reasons, structural_context=True)
-
+        return RouteDecision(Lane.FULL, Risk.HIGH, reasons, structural_context=True, confidence=0.99)
     if full or structural:
         if full:
             reasons.append("full-lane signal: " + ", ".join(full[:3]))
         if structural:
             reasons.append("multi-hop/structural context requested")
-        return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=structural)
-
+        return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=structural, confidence=0.94 if structural else 0.9)
     if has_change:
         if 1 <= len(file_hints) <= 2 and (small or len(text.split()) <= 22):
             reasons.append("bounded low-complexity edit")
-            if file_hints:
-                reasons.append(f"explicit file scope: {len(file_hints)} file(s)")
-            return RouteDecision(Lane.SMALL, Risk.LOW, reasons, structural_context=False)
+            reasons.append(f"explicit file scope: {len(file_hints)} file(s)")
+            return RouteDecision(Lane.SMALL, Risk.LOW, reasons, structural_context=False, confidence=0.9 if small else 0.82)
         reasons.append("implementation scope not safely bounded")
-        return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=False)
-
+        return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=False, confidence=0.78)
     reasons.append("ambiguous task defaults to safe full-lane planning")
-    return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=False)
+    return RouteDecision(Lane.FULL, Risk.MEDIUM, reasons, structural_context=False, confidence=0.62)
