@@ -7,29 +7,44 @@ class BriefFormatTests(unittest.TestCase):
             "task": "Add rate limiter",
             "lane": "full",
             "risk": "high",
+            "confidence": 0.9,
             "model_tier": "capable",
             "execution_provider": "superpowers",
             "execution_hint": "Use subagent-driven-development",
             "budget": {"estimated_context_tokens": 6000, "max_output_tokens": 1200},
             "changed_files_detected": ["auth.py"],
+            "retrieval": {
+                "retrieval_intent": "structural",
+                "evidence_state": "requires_exploration",
+                "workspace_state": {"fingerprint": "abc123"},
+                "orchestration": {
+                    "superpowers_skills": ["writing-plans", "subagent-driven-development"],
+                    "crg_plan": ["get_minimal_context_tool", "get_impact_radius_tool"],
+                    "agent_slots": 3,
+                },
+            },
             "context": [{"source": "source", "text": "def check_rate(): pass"}],
             "invariants": "no breaking change"
         }
-        
-        # JSON
         out_json = _format_brief(packet, "json")
         self.assertIn('"task": "Add rate limiter"', out_json)
 
-        # Markdown
         out_md = _format_brief(packet, "markdown")
         self.assertIn("# Brief: Add rate limiter", out_md)
         self.assertIn("**Lane**: full", out_md)
+        self.assertIn("**Evidence**: requires_exploration", out_md)
+        self.assertIn("**Superpowers**: writing-plans, subagent-driven-development", out_md)
+        self.assertIn("**CRG**: get_minimal_context_tool, get_impact_radius_tool", out_md)
         self.assertIn("def check_rate(): pass", out_md)
 
-        # Prompt
         out_prompt = _format_brief(packet, "prompt")
         self.assertIn("[TASK] Add rate limiter", out_prompt)
         self.assertIn("[LANE] full [RISK] high", out_prompt)
+        self.assertIn("[EVIDENCE_STATE] requires_exploration", out_prompt)
+        self.assertIn("[WORKSPACE_FINGERPRINT] abc123", out_prompt)
+        self.assertIn("[SUPERPOWERS_SKILLS] writing-plans, subagent-driven-development", out_prompt)
+        self.assertIn("[CRG_PLAN] get_minimal_context_tool, get_impact_radius_tool", out_prompt)
+        self.assertIn("[AGENT_SLOTS] 3", out_prompt)
         self.assertIn("[CONTEXT_START]", out_prompt)
         self.assertIn("def check_rate(): pass", out_prompt)
         self.assertIn("[INVARIANTS] no breaking change", out_prompt)
