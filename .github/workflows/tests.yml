@@ -20,3 +20,18 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Run unit tests
       run: python -m unittest discover -s tests -v
+    - name: Benchmark smoke gate
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+      shell: bash
+      run: |
+        python -m ai_workflow index
+        python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json --output benchmark-result.json > /dev/null
+        python - <<'PY'
+        import json
+        from pathlib import Path
+        data = json.loads(Path('benchmark-result.json').read_text())
+        assert data['summary']['cases'] >= 24, data['summary']
+        assert len(data.get('by_query_type', {})) >= 6, data.get('by_query_type')
+        assert data['summary']['lane_accuracy'] is not None
+        assert data['summary']['intent_accuracy'] is not None
+        PY
