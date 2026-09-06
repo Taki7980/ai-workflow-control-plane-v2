@@ -5,14 +5,17 @@ from pathlib import Path
 
 from .budget import ContextBudget, truncate
 from .context_broker import gather as gather_base
+from .context_selection import select_context
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
-from .models import ContextItem, RouteDecision
+from .models import ContextItem, Lane, RouteDecision
+from .orchestration import build_orchestration_contract
 from .providers import ProviderStatus
 from .retrieval_policy import classify_retrieval_intent, evaluate_sufficiency
 from .retriever_plugins import configured_retrievers, run_retriever
 from .semantic import semantic_context
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
+from .workspace_state import workspace_fingerprint
 
 
 def _provenance(item: ContextItem, workspace_root: Path | None = None) -> ContextItem:
@@ -113,6 +116,14 @@ def _base_across_workspace(
     return items
 
 
+def _evidence_state(decision: RouteDecision, sufficient: bool) -> str:
+    if sufficient:
+        return "sufficient"
+    if decision.lane == Lane.ANSWER:
+        return "abstain"
+    return "requires_exploration"
+
+
 def gather_detailed(
     root: Path,
     query: str,
@@ -126,11 +137,10 @@ def gather_detailed(
     *,
     write_telemetry: bool = False,
 ) -> tuple[list[ContextItem], dict]:
+    changed = changed_files or []
     plan = classify_retrieval_intent(query, decision, symbol=symbol, endpoint=endpoint)
     trace = RetrievalTrace(query, decision.lane.value, decision.risk.value, plan.intent.value, budget_chars=budget.context_chars)
-    base_items = _base_across_workspace(
-        root, query, decision, budget, config, providers, symbol, endpoint, changed_files or [], trace
-    )
+    base_items = _base_across_workspace(root, query, decision, budget, config, providers, symbol, endpoint, changed, trace)
 
     threshold = float((((config.get("context") or {}).get("sufficiency") or {}).get("threshold", 0.72)))
     suff = evaluate_sufficiency(query, base_items, structural_required=plan.use_structural, threshold=threshold)
@@ -159,21 +169,44 @@ def gather_detailed(
             specialist_items.extend(_provenance(item, root) for item in plugin_items)
 
     limit = int(config["context"].get("max_results_per_source", 6)) * 3
-    selected = _hybrid_rank(query, base_items, specialist_items, limit) if specialist_items else base_items
-    suff = evaluate_sufficiency(query, selected, structural_required=plan.use_structural, threshold=threshold)
-
+    candidates = _hybrid_rank(query, base_items, specialist_items, limit) if specialist_items else base_items
+    suff = evaluate_sufficiency(query, candidates, structural_required=plan.use_structural, threshold=threshold)
     adaptive_chars = _adaptive_char_limit(budget, suff.score, config)
-    selected = _hard_cap(selected, adaptive_chars)
+
+    selector_cfg = ((config.get("context") or {}).get("selector") or {})
+    if selector_cfg.get("enabled", True):
+        mandatory_sources = (
+            ("code_review_graph",)
+            if plan.use_structural and selector_cfg.get("mandatory_structural_evidence", True)
+            and any(item.source == "code_review_graph" for item in candidates)
+            else ()
+        )
+        selected, selector = select_context(
+            query, candidates, adaptive_chars, config,
+            mandatory_sources=mandatory_sources,
+        )
+        if not selected and candidates:
+            selected = _hard_cap(candidates, adaptive_chars)
+            selector["fallback"] = "hard_cap"
+    else:
+        selected = _hard_cap(candidates, adaptive_chars)
+        selector = {"mode": "legacy_hard_cap", "selected_count": len(selected), "used_chars": sum(len(i.text) for i in selected)}
+
+    final_suff = evaluate_sufficiency(query, selected, structural_required=plan.use_structural, threshold=threshold)
+    state = _evidence_state(decision, final_suff.sufficient)
+    roots = workspace_roots(root, config)
+    snapshot = workspace_fingerprint(root, changed)
+
     trace.selected = {source: sum(1 for item in selected if item.source == source) for source in {i.source for i in selected}}
     trace.sufficiency = {
-        "score": suff.score,
-        "sufficient": suff.sufficient,
-        "lexical_coverage": suff.lexical_coverage,
-        "source_diversity": suff.source_diversity,
-        "exact_match": suff.exact_match,
-        "structural_complete": suff.structural_complete,
+        "score": final_suff.score,
+        "sufficient": final_suff.sufficient,
+        "lexical_coverage": final_suff.lexical_coverage,
+        "source_diversity": final_suff.source_diversity,
+        "exact_match": final_suff.exact_match,
+        "structural_complete": final_suff.structural_complete,
     }
-    if plan.use_semantic and not any(item.source == "semantic" for item in specialist_items) and not suff.sufficient:
+    if plan.use_semantic and not any(item.source == "semantic" for item in specialist_items) and not final_suff.sufficient:
         trace.fallbacks.append("semantic unavailable or returned no candidates")
     if plan.use_structural and not any(item.source == "code_review_graph" for item in selected):
         trace.fallbacks.append("structural provider unavailable; base broker source fallback used")
@@ -182,8 +215,11 @@ def gather_detailed(
     diagnostics = {
         "retrieval_intent": plan.intent.value,
         "retrieval_reason": plan.reason,
-        "workspace_roots": [str(path) for path in workspace_roots(root, config)],
+        "workspace_roots": [str(path) for path in roots],
+        "workspace_state": snapshot,
+        "evidence_state": state,
         "sufficiency": trace.sufficiency,
+        "selector": selector,
         "adaptive_context_chars": adaptive_chars,
         "hard_context_chars": budget.context_chars,
         "providers_attempted": trace.providers_attempted,
@@ -191,6 +227,9 @@ def gather_detailed(
         "fallbacks": trace.fallbacks,
         "stage_latency_ms": trace.stage_latency_ms,
     }
+    diagnostics["orchestration"] = build_orchestration_contract(
+        decision, diagnostics, changed, len(roots), providers, config
+    )
     if write_telemetry and trace_enabled(config, decision.lane.value):
         diagnostics["trace"] = write_trace(root, trace)
     return selected, diagnostics
