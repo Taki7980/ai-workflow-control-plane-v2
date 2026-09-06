@@ -1,17 +1,19 @@
 from __future__ import annotations
-import argparse, json, shutil, subprocess, sys
+import argparse, json, sys
 from pathlib import Path
 from .benchmark import load_tasks, run_benchmark
 from .budget import budget_for
 from .classifier import classify
 from .compress import compress_text
 from .config import find_project_root, load_config, estimate_tokens
-from .context_broker import gather, detect_changed_files
+from .adaptive_broker import gather_detailed
+from .context_broker import detect_changed_files
 from .doctor import run as doctor_run
 from .handoff import validate as validate_handoff, render as render_handoff
 from .indexer import build_indexes, incremental_indexes
 from .memory import add_memory, search_memory, list_memories, prune_stale
 from .providers import detect, execution_provider, model_tier
+from .telemetry import summarize_traces
 from .verify import verify
 
 
@@ -50,9 +52,7 @@ def cmd_route(args):
     _json({**decision.to_dict(), "execution_provider": provider, "model_tier": model, "providers": providers.to_dict(), "budget": {"estimated_context_tokens": budget.estimated_tokens, "max_output_tokens": budget.output_tokens}})
 
 def _resolve_changed(root: Path, explicit: list[str]) -> list[str]:
-    if explicit:
-        return explicit
-    return detect_changed_files(root)
+    return explicit if explicit else detect_changed_files(root)
 
 def _format_brief(packet: dict, fmt: str) -> str:
     if fmt == "json":
@@ -61,36 +61,33 @@ def _format_brief(packet: dict, fmt: str) -> str:
     if fmt == "markdown":
         lines = [
             f"# Brief: {packet['task']}",
-            f"**Lane**: {packet['lane']} | **Risk**: {packet['risk']} | **Model tier**: {packet['model_tier']}",
+            f"**Lane**: {packet['lane']} | **Risk**: {packet['risk']} | **Confidence**: {packet.get('confidence', 0):.2f} | **Model tier**: {packet['model_tier']}",
+            f"**Retrieval**: {packet.get('retrieval', {}).get('retrieval_intent', 'unknown')}",
             f"**Execution**: {packet['execution_provider']} — {packet.get('execution_hint', '')}",
             f"**Budget**: {packet['budget']['estimated_context_tokens']} est. tokens | {packet['budget']['max_output_tokens']} output",
             f"**Changed files**: {', '.join(packet.get('changed_files_detected', [])) or 'none detected'}",
-            "", "## Context", "",
-            ctx_text or "(no context gathered)",
+            "", "## Context", "", ctx_text or "(no context gathered)",
         ]
         return "\n".join(lines)
-    # prompt format — ready-to-inject system packet
     lines = [
         f"[TASK] {packet['task']}",
-        f"[LANE] {packet['lane']} [RISK] {packet['risk']} [MODEL_TIER] {packet['model_tier']}",
+        f"[LANE] {packet['lane']} [RISK] {packet['risk']} [CONFIDENCE] {packet.get('confidence', 0):.2f} [MODEL_TIER] {packet['model_tier']}",
+        f"[RETRIEVAL_INTENT] {packet.get('retrieval', {}).get('retrieval_intent', 'unknown')}",
         f"[EXECUTION] {packet['execution_provider']}",
         f"[HINT] {packet.get('execution_hint', '')}",
         f"[BUDGET] context={packet['budget']['estimated_context_tokens']}tok output={packet['budget']['max_output_tokens']}tok",
         f"[CHANGED_FILES] {', '.join(packet.get('changed_files_detected', [])) or 'none'}",
     ]
     if packet.get("context"):
-        lines.append("[CONTEXT_START]")
-        lines.append(ctx_text)
-        lines.append("[CONTEXT_END]")
-    invariants = packet.get("invariants", "preserve existing contracts unless task explicitly changes them")
-    lines.append(f"[INVARIANTS] {invariants}")
+        lines += ["[CONTEXT_START]", ctx_text, "[CONTEXT_END]"]
+    lines.append(f"[INVARIANTS] {packet.get('invariants', 'preserve existing contracts unless task explicitly changes them')}")
     return "\n".join(lines)
 
 def cmd_brief(args):
     root = _root(args)
     config, providers, decision, budget, provider, model = _decision(root, args.task)
     changed = _resolve_changed(root, args.changed_file)
-    items = gather(root, args.task, decision, budget, config, providers, args.symbol, args.endpoint, changed)
+    items, retrieval = gather_detailed(root, args.task, decision, budget, config, providers, args.symbol, args.endpoint, changed, write_telemetry=(decision.lane.value != "answer" or args.trace))
     packet = {
         "task": args.task,
         **decision.to_dict(),
@@ -104,6 +101,7 @@ def cmd_brief(args):
             "Answer directly; no implementation workflow."
         ),
         "budget": {"estimated_context_tokens": budget.estimated_tokens, "max_output_tokens": budget.output_tokens},
+        "retrieval": retrieval,
         "context": [i.to_dict() for i in items],
         "estimated_context_tokens_used": estimate_tokens("\n".join(i.text for i in items)),
         "output_compression": "rtk" if providers.rtk else "builtin",
@@ -118,22 +116,18 @@ def cmd_brief(args):
         out = root / "ai-workspace" / "generated" / "last-brief.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(packet, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    fmt = getattr(args, "format", "json")
-    print(_format_brief(packet, fmt))
+    print(_format_brief(packet, getattr(args, "format", "json")))
 
 def cmd_context(args):
     root = _root(args)
     config, providers, decision, budget, _, _ = _decision(root, args.task)
     changed = _resolve_changed(root, args.changed_file)
-    items = gather(root, args.task, decision, budget, config, providers, args.symbol, args.endpoint, changed)
-    _json({"lane": decision.lane.value, "budget": budget.estimated_tokens, "items": [i.to_dict() for i in items], "estimated_tokens": estimate_tokens("\n".join(i.text for i in items))})
+    items, retrieval = gather_detailed(root, args.task, decision, budget, config, providers, args.symbol, args.endpoint, changed, write_telemetry=args.trace)
+    _json({"lane": decision.lane.value, "risk": decision.risk.value, "confidence": decision.confidence, "budget": budget.estimated_tokens, "retrieval": retrieval, "items": [i.to_dict() for i in items], "estimated_tokens": estimate_tokens("\n".join(i.text for i in items))})
 
 def cmd_index(args):
     root = _root(args)
-    if getattr(args, "incremental", False):
-        _json(incremental_indexes(root))
-    else:
-        _json(build_indexes(root))
+    _json(incremental_indexes(root) if getattr(args, "incremental", False) else build_indexes(root))
 
 def cmd_doctor(args):
     root = _root(args)
@@ -158,12 +152,10 @@ def cmd_memory_search(args):
     _json(search_memory(root, args.query, args.limit or int(cfg["memory"]["max_results"]), float(cfg["memory"].get("minimum_confidence", 0.55))))
 
 def cmd_memory_list(args):
-    root = _root(args)
-    _json(list_memories(root))
+    _json(list_memories(_root(args)))
 
 def cmd_memory_prune(args):
-    root = _root(args)
-    _json(prune_stale(root))
+    _json(prune_stale(_root(args)))
 
 def cmd_compress(args):
     text = Path(args.file).read_text(encoding="utf-8", errors="replace") if args.file else sys.stdin.read()
@@ -179,21 +171,22 @@ def cmd_verify(args):
 
 def cmd_benchmark(args):
     root = _root(args)
-    cfg = load_config(root)
-    result = run_benchmark(root, cfg, load_tasks(Path(args.tasks)))
+    result = run_benchmark(root, load_config(root), load_tasks(Path(args.tasks)))
     if args.output:
         Path(args.output).write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     _json(result)
+
+def cmd_stats(args):
+    _json(summarize_traces(_root(args), args.limit))
 
 def build_parser():
     p = argparse.ArgumentParser(prog="ai-workflow", description="AI Workflow Efficiency Control Plane")
     p.add_argument("--root", help="project root; auto-detected by default")
     sp = p.add_subparsers(dest="command", required=True)
-
     q = sp.add_parser("init"); q.add_argument("--project-name", required=True); q.set_defaults(func=cmd_init)
     q = sp.add_parser("route"); q.add_argument("task"); q.set_defaults(func=cmd_route)
     for name, fn in (("brief", cmd_brief), ("context", cmd_context)):
-        q = sp.add_parser(name); q.add_argument("task"); q.add_argument("--symbol"); q.add_argument("--endpoint"); q.add_argument("--changed-file", action="append", default=[])
+        q = sp.add_parser(name); q.add_argument("task"); q.add_argument("--symbol"); q.add_argument("--endpoint"); q.add_argument("--changed-file", action="append", default=[]); q.add_argument("--trace", action="store_true")
         if name == "brief":
             q.add_argument("--write-handoff", action="store_true")
             q.add_argument("--format", choices=["json", "markdown", "prompt"], default="json")
@@ -202,6 +195,7 @@ def build_parser():
     q = sp.add_parser("doctor"); q.add_argument("--strict", action="store_true"); q.set_defaults(func=cmd_doctor)
     q = sp.add_parser("verify"); q.add_argument("--check", action="append", default=[]); q.add_argument("--strict", action="store_true"); q.set_defaults(func=cmd_verify)
     q = sp.add_parser("benchmark"); q.add_argument("--tasks", required=True); q.add_argument("--output"); q.set_defaults(func=cmd_benchmark)
+    q = sp.add_parser("stats"); q.add_argument("--limit", type=int, default=200); q.set_defaults(func=cmd_stats)
     q = sp.add_parser("handoff"); q.add_argument("action", choices=["validate"]); q.set_defaults(func=cmd_handoff)
     q = sp.add_parser("memory"); msp = q.add_subparsers(dest="memory_command", required=True)
     m = msp.add_parser("add"); m.add_argument("--type", required=True); m.add_argument("--keywords", required=True); m.add_argument("--summary", required=True); m.add_argument("--evidence"); m.add_argument("--file", action="append"); m.add_argument("--confidence", type=float, default=0.8); m.set_defaults(func=cmd_memory_add)
