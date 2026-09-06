@@ -13,7 +13,7 @@ class ContextSelectionTests(unittest.TestCase):
         ]
         selected, diagnostics = select_context(
             'prevent duplicate payment', items, 26,
-            {'context': {'selector': {'tight_budget_fraction': 0.25}}},
+            {'context': {'selector': {'tight_budget_fraction': 0.5}}},
         )
         self.assertEqual(selected[0].source, 'a')
         self.assertEqual(diagnostics['mode'], 'relevance')
