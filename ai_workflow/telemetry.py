@@ -64,10 +64,10 @@ def write_trace(root: Path, trace: RetrievalTrace) -> str:
     return target.relative_to(root).as_posix()
 
 
-def summarize_traces(root: Path, limit: int = 200) -> dict[str, Any]:
+def _read_traces(root: Path, limit: int) -> list[dict[str, Any]]:
     directory = root / "ai-workspace" / "generated" / "traces"
     if not directory.exists():
-        return {"runs": 0, "by_intent": {}, "mean_budget_utilization": 0.0, "fallback_rate": 0.0}
+        return []
     records = []
     for path in sorted(directory.glob("*.json"), reverse=True)[: max(1, limit)]:
         try:
@@ -76,6 +76,11 @@ def summarize_traces(root: Path, limit: int = 200) -> dict[str, Any]:
             continue
         if isinstance(record, dict):
             records.append(record)
+    return records
+
+
+def summarize_traces(root: Path, limit: int = 200) -> dict[str, Any]:
+    records = _read_traces(root, limit)
     by_intent: dict[str, int] = {}
     utilizations = []
     fallbacks = 0
@@ -93,4 +98,48 @@ def summarize_traces(root: Path, limit: int = 200) -> dict[str, Any]:
         "by_intent": by_intent,
         "mean_budget_utilization": round(sum(utilizations) / len(utilizations), 4) if utilizations else 0.0,
         "fallback_rate": round(fallbacks / len(records), 4) if records else 0.0,
+    }
+
+
+def policy_recommendations(root: Path, limit: int = 200, minimum_runs: int = 20) -> dict[str, Any]:
+    """Recommend reviewable policy changes from traces; never mutates config."""
+    records = _read_traces(root, limit)
+    recommendations: list[dict[str, Any]] = []
+    if len(records) < minimum_runs:
+        return {
+            "runs": len(records),
+            "minimum_runs": minimum_runs,
+            "recommendations": [],
+            "note": "insufficient observations; no policy recommendation produced",
+        }
+
+    by_intent: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        by_intent.setdefault(str(record.get("intent", "unknown")), []).append(record)
+
+    for intent, rows in sorted(by_intent.items()):
+        if len(rows) < max(5, minimum_runs // 5):
+            continue
+        fallback_rate = sum(bool(row.get("fallbacks")) for row in rows) / len(rows)
+        suff_scores = [float((row.get("sufficiency") or {}).get("score", 0.0)) for row in rows]
+        mean_suff = sum(suff_scores) / len(suff_scores)
+        if fallback_rate >= 0.5:
+            recommendations.append({
+                "intent": intent,
+                "signal": "high_fallback_rate",
+                "observed": round(fallback_rate, 4),
+                "action": "review provider availability, query-intent rules, or retrieval threshold before changing policy",
+            })
+        if mean_suff >= 0.9:
+            recommendations.append({
+                "intent": intent,
+                "signal": "consistently_high_sufficiency",
+                "observed": round(mean_suff, 4),
+                "action": "benchmark a smaller soft context fraction; keep the hard lane ceiling unchanged",
+            })
+    return {
+        "runs": len(records),
+        "minimum_runs": minimum_runs,
+        "recommendations": recommendations,
+        "note": "recommendations are advisory only and never change deterministic safety routing",
     }
