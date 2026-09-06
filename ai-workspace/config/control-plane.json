@@ -30,6 +30,11 @@
       "medium_sufficiency_fraction": 0.7,
       "minimum_chars": 900
     },
+    "selector": {
+      "enabled": true,
+      "tight_budget_fraction": 0.3,
+      "mandatory_structural_evidence": true
+    },
     "telemetry": {"mode": "mutations"},
     "targeted_search": {"max_matches": 12, "max_file_bytes": 500000}
   },
@@ -37,7 +42,14 @@
   "execution": {
     "prefer_superpowers_for_full": true,
     "native_fallback": true,
-    "superpowers": {"mode": "auto"}
+    "superpowers": {"mode": "auto"},
+    "orchestration_budget": {
+      "max_agent_slots": 4,
+      "max_crg_calls": 6,
+      "max_graph_depth": 3,
+      "review_passes": 2,
+      "verification_passes": 2
+    }
   },
   "handoff": {"max_lines": 30},
   "memory": {"max_results": 5, "minimum_confidence": 0.55},
