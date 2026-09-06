@@ -1,127 +1,48 @@
 {
   "version": 2,
   "budgets": {
-    "answer": {
-      "estimated_tokens": 1200,
-      "output_tokens": 450
-    },
-    "small": {
-      "estimated_tokens": 2500,
-      "output_tokens": 700
-    },
-    "full": {
-      "estimated_tokens": 6000,
-      "output_tokens": 1200
-    }
+    "answer": {"estimated_tokens": 1200, "output_tokens": 450},
+    "small": {"estimated_tokens": 2500, "output_tokens": 700},
+    "full": {"estimated_tokens": 6000, "output_tokens": 1200}
   },
   "classifier": {
-    "high_risk_keywords": [
-      "auth",
-      "authentication",
-      "authorization",
-      "security",
-      "payment",
-      "billing",
-      "migration",
-      "schema",
-      "database",
-      "delete data",
-      "destructive",
-      "concurrency",
-      "race condition",
-      "deploy",
-      "production",
-      "public api",
-      "contract change",
-      "permission",
-      "credential",
-      "secret"
-    ],
-    "full_keywords": [
-      "refactor",
-      "architecture",
-      "multi-file",
-      "cross-cutting",
-      "end-to-end",
-      "redesign",
-      "performance",
-      "distributed",
-      "integration",
-      "implement feature"
-    ],
-    "answer_keywords": [
-      "explain",
-      "what is",
-      "how does",
-      "why does",
-      "compare",
-      "difference",
-      "where is",
-      "show me",
-      "understand"
-    ],
-    "small_keywords": [
-      "rename",
-      "typo",
-      "copy change",
-      "small fix",
-      "one-line",
-      "one line",
-      "adjust",
-      "update text"
-    ]
+    "high_risk_keywords": ["auth", "authentication", "authorization", "security", "payment", "billing", "migration", "schema", "database", "delete data", "destructive", "concurrency", "race condition", "deploy", "production", "public api", "contract change", "permission", "credential", "secret"],
+    "full_keywords": ["refactor", "architecture", "multi-file", "cross-cutting", "end-to-end", "redesign", "performance", "distributed", "integration", "implement feature"],
+    "answer_keywords": ["explain", "what is", "how does", "why does", "compare", "difference", "where is", "show me", "understand"],
+    "small_keywords": ["rename", "typo", "copy change", "small fix", "one-line", "one line", "adjust", "update text"]
   },
   "context": {
     "max_results_per_source": 6,
-    "source_shares": {
-      "hot_cache": 0.15,
-      "lightweight": 0.3,
-      "crg": 0.4,
-      "source_fallback": 0.15
-    },
+    "source_shares": {"hot_cache": 0.15, "lightweight": 0.3, "crg": 0.4, "source_fallback": 0.15},
     "crg": {
       "mode": "auto",
       "min_lane": "full",
-      "structural_keywords": [
-        "caller",
-        "callee",
-        "dependency",
-        "dependents",
-        "impact",
-        "blast radius",
-        "flow",
-        "architecture",
-        "tests for",
-        "refactor",
-        "what breaks",
-        "affected"
-      ],
+      "structural_keywords": ["caller", "callee", "dependency", "dependents", "impact", "blast radius", "flow", "architecture", "tests for", "refactor", "what breaks", "affected"],
       "min_source_files": 250,
       "changed_files_threshold": 3
     },
-    "targeted_search": {
-      "max_matches": 12,
-      "max_file_bytes": 500000
-    }
+    "semantic": {
+      "mode": "auto",
+      "command": "",
+      "timeout_seconds": 8,
+      "max_results": 6
+    },
+    "sufficiency": {"threshold": 0.72},
+    "adaptive_budget": {
+      "enabled": true,
+      "high_sufficiency_fraction": 0.45,
+      "medium_sufficiency_fraction": 0.7,
+      "minimum_chars": 900
+    },
+    "telemetry": {"mode": "mutations"},
+    "targeted_search": {"max_matches": 12, "max_file_bytes": 500000}
   },
   "execution": {
     "prefer_superpowers_for_full": true,
     "native_fallback": true,
-    "superpowers": {
-      "mode": "auto"
-    }
+    "superpowers": {"mode": "auto"}
   },
-  "handoff": {
-    "max_lines": 30
-  },
-  "memory": {
-    "max_results": 5,
-    "minimum_confidence": 0.55
-  },
-  "models": {
-    "answer": "fast",
-    "small": "fast",
-    "full_medium": "standard",
-    "full_high": "capable"
-  }
+  "handoff": {"max_lines": 30},
+  "memory": {"max_results": 5, "minimum_confidence": 0.55},
+  "models": {"answer": "fast", "small": "fast", "full_medium": "standard", "full_high": "capable"}
 }
