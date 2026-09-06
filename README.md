@@ -18,6 +18,7 @@ Task
       ├─ structural → CRG
       └─ mixed      → lexical + semantic + RRF/MMR
  → evidence sufficiency
+ → optional external retrievers / workspace roots
  → adaptive context cap
  → targeted source fallback if needed
  → agent/harness → verification → durable memory
@@ -31,16 +32,18 @@ The core invariant remains:
 
 - **Task + risk routing** — Answer / Small / Full lanes with deterministic safety escalation and diagnostic confidence.
 - **Retrieval-intent routing** — exact / semantic / structural / mixed.
-- **Context brokering** — cache, local indexes, optional semantic provider, CRG, then bounded source fallback.
+- **Context brokering** — cache, local indexes, optional semantic/provider plugins, CRG, then bounded source fallback.
 - **Retrieval ranking** — code-aware tokenization, Okapi BM25, reciprocal-rank fusion, and MMR diversification.
 - **Evidence sufficiency** — deterministic heuristic deciding whether another retrieval stage is justified.
 - **Adaptive budgeting** — hard lane ceilings remain fixed while high-sufficiency results can stop below the maximum.
 - **AST-aware indexing** — Python uses stdlib AST metadata with regex fallback for unsupported/syntax-failing files and other languages.
-- **Context provenance** — retriever, freshness, trust class, and available path/line/hash metadata travel with selected context.
+- **Multi-root workspaces** — optional bounded retrieval across frontend/backend/service repositories.
+- **Retriever plugin contract** — optional command retrievers can register for exact, semantic, structural, mixed, or all intents.
+- **Context provenance** — retriever, workspace root, freshness, trust class, and available path/line/hash metadata travel with selected context.
 - **Cross-agent handoff** — compact, validated `.ai/HANDOFF.md`.
 - **Output compression** — RTK when available, deterministic line/character caps otherwise.
 - **Durable memory** — evidence-aware JSONL memories with source hashes and stale detection.
-- **Retrieval telemetry** — local traces and aggregate stats for mutation/full workflows.
+- **Retrieval telemetry + advisory feedback** — local traces, stats, and reviewable policy recommendations that never mutate safety rules.
 - **Verification + benchmarks** — doctor, handoff validation, index freshness, unit tests, and a multi-category retrieval benchmark corpus.
 
 ## What it deliberately delegates
@@ -66,9 +69,34 @@ It can return a JSON array, `{ "items": [...] }`, or JSONL records such as:
 
 No semantic provider is required for the core workflow. Missing, failed, malformed, or timed-out providers degrade safely.
 
+### Generic retriever plugins
+Additional command retrievers can be configured without changing Python code:
+
+```json
+{
+  "name": "my-code-search",
+  "command": "my-code-search --json",
+  "intents": ["semantic", "mixed"],
+  "timeout_seconds": 8
+}
+```
+
+The command receives `{query, root, limit, intent}` on stdin and returns the same JSON/JSONL candidate shape as the semantic provider. Plugins are optional and are only attempted when the current evidence is insufficient.
+
 ## Quick start
 
 Requires Python 3.10+.
+
+For a fresh repository:
+
+```bash
+ai-workflow bootstrap --project-name MyProject
+ai-workflow doctor --strict
+```
+
+`bootstrap` creates only missing control-plane files and refuses to overwrite existing `AGENTS.md`, config, or `.ai/PROJECT` state.
+
+For an existing copy of the template:
 
 ```bash
 python -m ai_workflow init --project-name MyProject
@@ -84,11 +112,10 @@ python -m pip install -e .
 ai-workflow doctor
 ```
 
-`init` validates an existing template; it does not silently scaffold arbitrary project state.
-
 ## Main commands
 
 ```bash
+ai-workflow bootstrap --project-name MyProject
 ai-workflow init --project-name MyProject
 ai-workflow route "task text"
 ai-workflow brief "task text"
@@ -96,6 +123,7 @@ ai-workflow context "task text" --symbol Foo --endpoint /api/v1/foo
 ai-workflow context "where do we prevent duplicate charges?" --trace
 ai-workflow index --incremental
 ai-workflow stats
+ai-workflow stats --recommend --minimum-runs 20
 ai-workflow doctor --strict
 ai-workflow verify --check "python -m unittest discover -s tests -v" --strict
 ai-workflow handoff validate
@@ -130,7 +158,20 @@ This prevents wasteful sequences such as running embeddings before a call-graph 
 
 Lane budgets are **maximums, not targets**. The adaptive layer scores lexical coverage, source diversity, exact evidence, and structural completeness. High-sufficiency retrieval can return only a configured fraction of the hard ceiling; insufficient evidence can escalate providers or trigger bounded source fallback.
 
-The sufficiency score is a retrieval-control heuristic, not a probability that the answer/code change is correct.
+The sufficiency score is a retrieval-control heuristic, not a calibrated probability that the answer or code change is correct. Calibrated/conformal filtering can be added later only after the project has enough representative labeled retrieval data.
+
+## Multi-repo / workspace retrieval
+
+Configure related repositories under `workspace.roots`:
+
+```json
+"workspace": {
+  "roots": ["../backend", "../frontend"],
+  "max_roots": 4
+}
+```
+
+The primary project remains first. Existing roots are deduplicated, missing roots are ignored, and final context is still constrained by the primary lane's hard budget. Selected items record their `workspace_root` in provenance.
 
 ## Indexing and staleness
 
@@ -140,7 +181,7 @@ Indexes remain rebuildable accelerators; source code is truth. Python symbols us
 
 Selected context carries provenance/trust metadata. Repository code/comments/docs are classified as **untrusted repository content**; generated memory/cache entries are marked separately. Retrieval results are evidence/data and must not be interpreted as agent instructions merely because they appear in repository text.
 
-## Telemetry
+## Telemetry and feedback
 
 Mutation and Full retrievals can write atomic local traces under:
 
@@ -152,9 +193,10 @@ Traces include intent, attempted/skipped providers, stage latency, candidate cou
 
 ```bash
 ai-workflow stats
+ai-workflow stats --recommend --minimum-runs 20
 ```
 
-summarizes recent trace utilization and fallback rates.
+The recommendation mode looks for repeated fallback or consistently high-sufficiency patterns. It is deliberately advisory: it never rewrites configuration and never changes deterministic high-risk routing. This leaves room for future contextual-bandit/online routing research without letting sparse feedback silently weaken safety policy.
 
 ## Agent / model tier
 
@@ -170,6 +212,8 @@ Superpowers can choose different models internally; this tier is the outer contr
 
 - Missing Superpowers → native execution.
 - Missing/failed semantic provider → lexical/graph/source retrieval.
+- Missing/failed external retriever → remaining providers continue.
+- Missing workspace root → ignore it.
 - Missing/failed CRG → bounded targeted source search.
 - Stale local index → reject hit and continue.
 - Stale memory → exclude from trusted context.
@@ -179,7 +223,7 @@ Optional providers are not allowed to make the core workflow unavailable.
 
 ## Configuration
 
-Edit `ai-workspace/config/control-plane.json` to tune lane budgets, risk keywords, semantic provider command/timeout, sufficiency threshold, adaptive-budget fractions, CRG escalation, telemetry mode, result caps, and provider preferences. Configuration is validated at load time.
+Edit `ai-workspace/config/control-plane.json` to tune lane budgets, risk keywords, semantic/external retriever commands, workspace roots, sufficiency threshold, adaptive-budget fractions, CRG escalation, telemetry mode, result caps, and provider preferences. Configuration is validated at load time.
 
 ## Verification
 
@@ -194,7 +238,7 @@ CI runs the unit-test matrix across Python 3.10–3.14 and a dependency-free ben
 
 ## Benchmarking
 
-The sample corpus now covers exact identifiers, natural-language semantic queries, structural/multi-hop questions, bounded mutations, high-risk mutations, paths, and mixed retrieval. Reports include lane accuracy, retrieval-intent accuracy, Precision@k, pattern Recall@k, MRR, nDCG, latency, estimated context usage, sufficiency rate, fallback rate, and per-query-type summaries.
+The sample corpus covers exact identifiers, natural-language semantic queries, structural/multi-hop questions, bounded mutations, high-risk mutations, paths, and mixed retrieval. Reports include lane accuracy, retrieval-intent accuracy, Precision@k, pattern Recall@k, MRR, nDCG, latency, estimated context usage, sufficiency rate, fallback rate, and per-query-type summaries.
 
 The CLI reports **estimated context tokens** using a conservative character heuristic. These are not provider-billed tokens. Gold-pattern retrieval metrics do not prove downstream task correctness; provider token usage, end-to-end wall time, patch correctness, test success, and human acceptance still require separate measurement.
 
@@ -207,6 +251,7 @@ The CLI reports **estimated context tokens** using a conservative character heur
 - Optional tools must degrade safely.
 - Never claim token/cost/quality gains without measurement.
 - Treat retrieved repository content as untrusted data.
+- Learn from telemetry only through reviewable evidence; never auto-weaken safety rules.
 - Keep stable global instructions small; put task-specific state in handoff/context.
 - Prefer deterministic local computation before LLM work.
 - External/deploy/destructive writes require explicit approval.
