@@ -1,10 +1,50 @@
 from __future__ import annotations
+import copy
 import json
 from pathlib import Path
 from typing import Any
 
 DEFAULT_RELATIVE = Path("ai-workspace/config/control-plane.json")
-REQUIRED_SECTIONS = ("budgets", "classifier", "context", "execution", "handoff", "memory", "models")
+REQUIRED_SECTIONS = ("budgets", "classifier", "context", "workspace", "execution", "handoff", "memory", "models")
+
+_DEFAULT_CONFIG = {
+    "version": 2,
+    "budgets": {
+        "answer": {"estimated_tokens": 1200, "output_tokens": 450},
+        "small": {"estimated_tokens": 2500, "output_tokens": 700},
+        "full": {"estimated_tokens": 6000, "output_tokens": 1200},
+    },
+    "classifier": {
+        "high_risk_keywords": ["auth", "authentication", "authorization", "security", "payment", "billing", "migration", "schema", "database", "delete data", "destructive", "concurrency", "race condition", "deploy", "production", "public api", "contract change", "permission", "credential", "secret"],
+        "full_keywords": ["refactor", "architecture", "multi-file", "cross-cutting", "end-to-end", "redesign", "performance", "distributed", "integration", "implement feature"],
+        "answer_keywords": ["explain", "what is", "how does", "why does", "compare", "difference", "where is", "show me", "understand"],
+        "small_keywords": ["rename", "typo", "copy change", "small fix", "one-line", "one line", "adjust", "update text"],
+    },
+    "context": {
+        "max_results_per_source": 6,
+        "source_shares": {"hot_cache": 0.15, "lightweight": 0.3, "crg": 0.4, "source_fallback": 0.15},
+        "crg": {
+            "mode": "auto", "min_lane": "full",
+            "structural_keywords": ["caller", "callee", "dependency", "dependents", "impact", "blast radius", "flow", "architecture", "tests for", "refactor", "what breaks", "affected"],
+            "min_source_files": 250, "changed_files_threshold": 3,
+        },
+        "semantic": {"mode": "auto", "command": "", "timeout_seconds": 8, "max_results": 6},
+        "external_retrievers": [],
+        "sufficiency": {"threshold": 0.72},
+        "adaptive_budget": {"enabled": True, "high_sufficiency_fraction": 0.45, "medium_sufficiency_fraction": 0.7, "minimum_chars": 900},
+        "telemetry": {"mode": "mutations"},
+        "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
+    },
+    "workspace": {"roots": [], "max_roots": 4},
+    "execution": {"prefer_superpowers_for_full": True, "native_fallback": True, "superpowers": {"mode": "auto"}},
+    "handoff": {"max_lines": 30},
+    "memory": {"max_results": 5, "minimum_confidence": 0.55},
+    "models": {"answer": "fast", "small": "fast", "full_medium": "standard", "full_high": "capable"},
+}
+
+
+def default_config() -> dict[str, Any]:
+    return copy.deepcopy(_DEFAULT_CONFIG)
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -43,6 +83,19 @@ def validate_config(data: dict[str, Any]) -> None:
     for key in ("crg", "targeted_search", "semantic", "sufficiency", "adaptive_budget", "telemetry"):
         if not isinstance(data["context"].get(key), dict):
             raise ValueError(f"missing required section: context.{key}")
+    retrievers = data["context"].get("external_retrievers", [])
+    if not isinstance(retrievers, list):
+        raise ValueError("context.external_retrievers must be an array")
+    for index, spec in enumerate(retrievers):
+        if not isinstance(spec, dict) or not str(spec.get("name", "")).strip() or not str(spec.get("command", "")).strip():
+            raise ValueError(f"context.external_retrievers[{index}] requires name and command")
+        intents = spec.get("intents", ["all"])
+        if not isinstance(intents, list) or not intents:
+            raise ValueError(f"context.external_retrievers[{index}].intents must be a non-empty array")
+        if not {str(x).lower() for x in intents}.issubset({"exact", "semantic", "structural", "mixed", "all"}):
+            raise ValueError(f"context.external_retrievers[{index}].intents contains unsupported values")
+        _positive_int(int(spec.get("timeout_seconds", 8)), f"context.external_retrievers[{index}].timeout_seconds")
+
     semantic = data["context"]["semantic"]
     if semantic.get("mode", "auto") not in {"auto", "on", "off"}:
         raise ValueError("context.semantic.mode must be auto, on, or off")
@@ -55,6 +108,11 @@ def validate_config(data: dict[str, Any]) -> None:
     _positive_int(adaptive.get("minimum_chars"), "context.adaptive_budget.minimum_chars")
     if data["context"]["telemetry"].get("mode", "mutations") not in {"off", "mutations", "all"}:
         raise ValueError("context.telemetry.mode must be off, mutations, or all")
+
+    roots = data["workspace"].get("roots", [])
+    if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
+        raise ValueError("workspace.roots must be an array of paths")
+    _positive_int(data["workspace"].get("max_roots"), "workspace.max_roots")
     _positive_int(data["handoff"].get("max_lines"), "handoff.max_lines")
     _positive_int(data["memory"].get("max_results"), "memory.max_results")
 
