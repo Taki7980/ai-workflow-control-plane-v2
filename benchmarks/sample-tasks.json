@@ -26,5 +26,9 @@
   {"task":"Find where execution provider selection happens","expected_lane":"answer","expected_intent":"mixed","query_type":"mixed","relevant_context":["execution_provider"],"retrieval_k":5},
   {"task":"How does the system locate tests for files I changed?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["test"],"retrieval_k":5},
   {"task":"List the logic responsible for stale index rejection","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["fresh"],"retrieval_k":5},
-  {"task":"Understand how model tiers and provider selection interact","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["model_tier","execution_provider"],"retrieval_k":5}
+  {"task":"Understand how model tiers and provider selection interact","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["model_tier","execution_provider"],"retrieval_k":5},
+  {"task":"Where is QuantumBananaReplicator defined?","symbol":"QuantumBananaReplicator","expected_lane":"answer","expected_intent":"exact","expected_evidence_state":"abstain","query_type":"no-gold","no_gold":true},
+  {"task":"Explain the MoonshotCacheTeleport subsystem","expected_lane":"answer","expected_intent":"mixed","expected_evidence_state":"abstain","query_type":"no-gold","no_gold":true},
+  {"task":"Where do we implement HyperbolicInvoiceTeleportation?","symbol":"HyperbolicInvoiceTeleportation","expected_lane":"answer","expected_intent":"exact","expected_evidence_state":"abstain","query_type":"no-gold","no_gold":true},
+  {"task":"Show me the caller chain for NonexistentSpectralRouter","symbol":"NonexistentSpectralRouter","expected_lane":"full","expected_intent":"structural","expected_evidence_state":"requires_exploration","query_type":"no-gold","no_gold":true}
 ]
