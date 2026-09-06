@@ -33,6 +33,8 @@ def retrieval_metrics(items: list, relevant_patterns: list[str], k: int = 5) -> 
     return {
         "k": cutoff,
         "relevant_items": sum(relevance),
+        "matched_patterns": covered,
+        "relevant_item_density": sum(relevance) / max(1, len(ranked)),
         "precision_at_k": sum(relevance) / cutoff,
         "recall_at_k": covered / len(patterns),
         "mrr": 1.0 / first_relevant if first_relevant else 0.0,
@@ -72,6 +74,10 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
             'retrieval_intent': retrieval['retrieval_intent'],
             'retrieval_sufficient': retrieval['sufficiency']['sufficient'],
             'retrieval_sufficiency_score': retrieval['sufficiency']['score'],
+            'evidence_state': retrieval.get('evidence_state'),
+            'selector_mode': (retrieval.get('selector') or {}).get('mode'),
+            'workspace_fingerprint': (retrieval.get('workspace_state') or {}).get('fingerprint'),
+            'orchestration_complexity_score': (retrieval.get('orchestration') or {}).get('complexity_score'),
             'fallbacks': retrieval['fallbacks'],
             'context_sources': list(dict.fromkeys(i.source for i in items)),
             'estimated_context_tokens': used,
@@ -85,13 +91,21 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
         expected_intent = case.get('expected_intent')
         if expected_intent:
             row['intent_correct'] = retrieval['retrieval_intent'] == expected_intent
+        expected_evidence = case.get('expected_evidence_state')
+        if expected_evidence:
+            row['evidence_state_correct'] = retrieval.get('evidence_state') == expected_evidence
+        if case.get('no_gold'):
+            row['abstention_correct'] = retrieval.get('evidence_state') == 'abstain'
         metrics = retrieval_metrics(items, case.get('relevant_context') or [], int(case.get('retrieval_k', 5)))
         if metrics:
+            metrics['matched_patterns_per_1k_tokens'] = round(metrics['matched_patterns'] * 1000 / max(1, used), 4)
             row['retrieval'] = metrics
         rows.append(row)
 
     lane_rows = [row for row in rows if 'lane_correct' in row]
     intent_rows = [row for row in rows if 'intent_correct' in row]
+    evidence_rows = [row for row in rows if 'evidence_state_correct' in row]
+    abstention_rows = [row for row in rows if 'abstention_correct' in row]
     retrieval_rows = [row['retrieval'] for row in rows if 'retrieval' in row]
     groups: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -105,6 +119,8 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
             'intent_accuracy': round(sum(r.get('intent_correct', False) for r in group if 'intent_correct' in r) / max(1, sum('intent_correct' in r for r in group)), 4) if any('intent_correct' in r for r in group) else None,
             'mean_recall_at_k': _mean(rr, 'recall_at_k'),
             'mean_mrr': _mean(rr, 'mrr'),
+            'mean_relevant_item_density': _mean(rr, 'relevant_item_density'),
+            'mean_pattern_yield_per_1k_tokens': _mean(rr, 'matched_patterns_per_1k_tokens'),
         }
     return {
         'scope': 'routing-and-context-only',
@@ -119,10 +135,14 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
             'mean_elapsed_ms': round(statistics.mean([r['elapsed_ms'] for r in rows]), 2) if rows else 0,
             'lane_accuracy': round(sum(row['lane_correct'] for row in lane_rows) / len(lane_rows), 4) if lane_rows else None,
             'intent_accuracy': round(sum(row['intent_correct'] for row in intent_rows) / len(intent_rows), 4) if intent_rows else None,
+            'evidence_state_accuracy': round(sum(row['evidence_state_correct'] for row in evidence_rows) / len(evidence_rows), 4) if evidence_rows else None,
+            'abstention_accuracy': round(sum(row['abstention_correct'] for row in abstention_rows) / len(abstention_rows), 4) if abstention_rows else None,
             'mean_precision_at_k': _mean(retrieval_rows, 'precision_at_k'),
             'mean_recall_at_k': _mean(retrieval_rows, 'recall_at_k'),
             'mean_mrr': _mean(retrieval_rows, 'mrr'),
             'mean_ndcg_at_k': _mean(retrieval_rows, 'ndcg_at_k'),
+            'mean_relevant_item_density': _mean(retrieval_rows, 'relevant_item_density'),
+            'mean_pattern_yield_per_1k_tokens': _mean(retrieval_rows, 'matched_patterns_per_1k_tokens'),
             'sufficiency_rate': round(sum(bool(r['retrieval_sufficient']) for r in rows) / len(rows), 4) if rows else 0,
             'fallback_rate': round(sum(bool(r['fallbacks']) for r in rows) / len(rows), 4) if rows else 0,
         },
