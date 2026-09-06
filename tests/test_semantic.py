@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,11 @@ from ai_workflow.semantic import semantic_context, semantic_ready
 class SemanticProviderTests(unittest.TestCase):
     def test_not_ready_without_command(self):
         self.assertFalse(semantic_ready({"context": {"semantic": {"command": ""}}}))
+
+    def test_off_mode_disables_config_and_environment_command(self):
+        cfg = {"context": {"semantic": {"mode": "off", "command": "semantic-cmd", "timeout_seconds": 2}}}
+        with patch.dict(os.environ, {"AI_WORKFLOW_SEMANTIC_CMD": "env-semantic"}):
+            self.assertFalse(semantic_ready(cfg))
 
     def test_parses_json_candidates(self):
         cfg = {"context": {"semantic": {"command": "semantic-cmd", "timeout_seconds": 2}}}
