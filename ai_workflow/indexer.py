@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, json, re
+import ast, hashlib, json, re
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -37,35 +37,79 @@ def iter_source(root: Path):
             continue
         yield p, rel.as_posix()
 
-def build_indexes(root: Path) -> dict:
-    gen = root / "ai-workspace" / "generated"
-    gen.mkdir(parents=True, exist_ok=True)
-    symbols, endpoints, state = [], [], {}
-    for path, rel in iter_source(root):
-        digest = sha256(path)
-        state[rel] = {"sha256": digest}
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
+
+def _python_symbols(text: str, rel: str, digest: str) -> list[dict] | None:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    rows = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rows.append({
+                "symbol": node.name,
+                "file": rel,
+                "line": int(node.lineno),
+                "end_line": int(getattr(node, "end_lineno", node.lineno)),
+                "kind": "class" if isinstance(node, ast.ClassDef) else "function",
+                "parser": "python-ast",
+                "sha256": digest,
+            })
+    rows.sort(key=lambda row: (row["line"], row["symbol"]))
+    return rows
+
+
+def _parse_file(path: Path, rel: str, digest: str) -> tuple[list[dict], list[dict]]:
+    symbols: list[dict] = []
+    endpoints: list[dict] = []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+    except OSError:
+        return symbols, endpoints
+
+    ast_rows = _python_symbols(text, rel, digest) if path.suffix.lower() == ".py" else None
+    if ast_rows is not None:
+        symbols.extend(ast_rows)
+    else:
         for i, line in enumerate(lines, 1):
             for sr in SYMBOL_RES:
                 m = sr.search(line)
                 if m:
-                    symbols.append({"symbol": m.group(1), "file": rel, "line": i, "sha256": digest})
+                    symbols.append({"symbol": m.group(1), "file": rel, "line": i, "parser": "regex", "sha256": digest})
                     break
-            for rr in ROUTE_RES:
-                rm = rr.search(line)
-                if rm:
-                    endpoints.append({"method": rm.group(1).upper(), "path": rm.group(2), "file": rel, "line": i, "sha256": digest})
-                    break
-    def write_jsonl(path: Path, rows: list[dict]):
-        path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-    write_jsonl(gen / "symbol-index.jsonl", symbols)
-    write_jsonl(gen / "endpoint-index.jsonl", endpoints)
+
+    for i, line in enumerate(lines, 1):
+        for rr in ROUTE_RES:
+            rm = rr.search(line)
+            if rm:
+                endpoints.append({"method": rm.group(1).upper(), "path": rm.group(2), "file": rel, "line": i, "parser": "regex", "sha256": digest})
+                break
+    return symbols, endpoints
+
+
+def _write_jsonl(path: Path, rows: list[dict]):
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+
+def build_indexes(root: Path) -> dict:
+    gen = root / "ai-workspace" / "generated"
+    gen.mkdir(parents=True, exist_ok=True)
+    symbols, endpoints, state = [], [], {}
+    ast_files = 0
+    for path, rel in iter_source(root):
+        digest = sha256(path)
+        state[rel] = {"sha256": digest}
+        new_sym, new_ep = _parse_file(path, rel, digest)
+        if any(row.get("parser") == "python-ast" for row in new_sym):
+            ast_files += 1
+        symbols.extend(new_sym)
+        endpoints.extend(new_ep)
+    _write_jsonl(gen / "symbol-index.jsonl", symbols)
+    _write_jsonl(gen / "endpoint-index.jsonl", endpoints)
     index_state = {"version": 2, "generated_at": datetime.now(timezone.utc).isoformat(), "files": state}
     (gen / "index-state.json").write_text(json.dumps(index_state, indent=2) + "\n", encoding="utf-8")
-    return {"files": len(state), "symbols": len(symbols), "endpoints": len(endpoints)}
+    return {"files": len(state), "symbols": len(symbols), "endpoints": len(endpoints), "ast_files": ast_files}
 
 def load_state(root: Path) -> dict:
     path = root / "ai-workspace" / "generated" / "index-state.json"
@@ -92,35 +136,12 @@ def row_fresh(root: Path, row: dict, state: dict | None = None) -> bool:
         return False
 
 
-def _parse_file(path: Path, rel: str, digest: str) -> tuple[list[dict], list[dict]]:
-    symbols: list[dict] = []
-    endpoints: list[dict] = []
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return symbols, endpoints
-    for i, line in enumerate(lines, 1):
-        for sr in SYMBOL_RES:
-            m = sr.search(line)
-            if m:
-                symbols.append({"symbol": m.group(1), "file": rel, "line": i, "sha256": digest})
-                break
-        for rr in ROUTE_RES:
-            rm = rr.search(line)
-            if rm:
-                endpoints.append({"method": rm.group(1).upper(), "path": rm.group(2), "file": rel, "line": i, "sha256": digest})
-                break
-    return symbols, endpoints
-
-
 def incremental_indexes(root: Path) -> dict:
     gen = root / "ai-workspace" / "generated"
     gen.mkdir(parents=True, exist_ok=True)
-
     old_state = load_state(root)
     old_files = old_state.get("files", {})
 
-    # Load existing indexes
     def read_jsonl(p: Path) -> list[dict]:
         if not p.exists():
             return []
@@ -135,17 +156,10 @@ def incremental_indexes(root: Path) -> dict:
 
     old_symbols = read_jsonl(gen / "symbol-index.jsonl")
     old_endpoints = read_jsonl(gen / "endpoint-index.jsonl")
-
-    # Determine what exists now
-    current_files: dict[str, tuple[Path, str]] = {}
-    for path, rel in iter_source(root):
-        current_files[rel] = (path, "")
-
-    # Detect changed, new, removed
+    current_files: dict[str, tuple[Path, str]] = {rel: (path, "") for path, rel in iter_source(root)}
     changed: set[str] = set()
     new_state: dict[str, dict] = {}
     skipped = 0
-
     for rel, (path, _) in current_files.items():
         digest = sha256(path)
         new_state[rel] = {"sha256": digest}
@@ -154,30 +168,21 @@ def incremental_indexes(root: Path) -> dict:
             skipped += 1
         else:
             changed.add(rel)
-
     removed = set(old_files.keys()) - set(current_files.keys())
-
-    # Filter old index entries: keep entries from unchanged files
     keep_files = set(current_files.keys()) - changed - removed
     symbols = [r for r in old_symbols if r.get("file") in keep_files]
     endpoints = [r for r in old_endpoints if r.get("file") in keep_files]
-
-    # Parse changed/new files
+    ast_files = 0
     for rel in changed:
         path = current_files[rel][0]
         digest = new_state[rel]["sha256"]
         new_sym, new_ep = _parse_file(path, rel, digest)
+        if any(row.get("parser") == "python-ast" for row in new_sym):
+            ast_files += 1
         symbols.extend(new_sym)
         endpoints.extend(new_ep)
-
-    def write_jsonl(p: Path, rows: list[dict]):
-        p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-
-    write_jsonl(gen / "symbol-index.jsonl", symbols)
-    write_jsonl(gen / "endpoint-index.jsonl", endpoints)
+    _write_jsonl(gen / "symbol-index.jsonl", symbols)
+    _write_jsonl(gen / "endpoint-index.jsonl", endpoints)
     index_state = {"version": 2, "generated_at": datetime.now(timezone.utc).isoformat(), "files": new_state}
     (gen / "index-state.json").write_text(json.dumps(index_state, indent=2) + "\n", encoding="utf-8")
-    return {
-        "files": len(new_state), "symbols": len(symbols), "endpoints": len(endpoints),
-        "incremental": True, "changed": len(changed), "removed": len(removed), "skipped": skipped,
-    }
+    return {"files": len(new_state), "symbols": len(symbols), "endpoints": len(endpoints), "incremental": True, "changed": len(changed), "removed": len(removed), "skipped": skipped, "ast_files_changed": ast_files}
