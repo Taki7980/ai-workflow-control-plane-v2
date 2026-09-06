@@ -3,11 +3,13 @@ import os, shutil
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from .models import Lane, Risk, RouteDecision
+from .semantic import semantic_ready
 
 @dataclass
 class ProviderStatus:
     superpowers: bool
     code_review_graph: bool
+    semantic: bool
     rtk: bool
     ripgrep: bool
 
@@ -34,8 +36,6 @@ def _has_superpowers(root: Path) -> bool:
     ]
     if any(p.exists() for p in candidates):
         return True
-    # Marketplace/plugin installs do not have one stable path. Probe only known
-    # plugin roots and stop quickly; users can force detection with the env var.
     plugin_roots = [Path.home()/'.claude'/'plugins', Path.home()/'.codex'/'plugins', Path.home()/'.gemini'/'extensions']
     for base in plugin_roots:
         if not base.exists():
@@ -48,20 +48,21 @@ def _has_superpowers(root: Path) -> bool:
     return False
 
 def _has_crg(root: Path) -> bool:
-    return (
-        shutil.which("code-review-graph") is not None
-        and (root / ".code-review-graph" / "graph.db").is_file()
-    )
+    return shutil.which("code-review-graph") is not None and (root / ".code-review-graph" / "graph.db").is_file()
 
 
 def detect(root: Path, config: dict | None = None) -> ProviderStatus:
-    sp_mode = ((config or {}).get('execution', {}).get('superpowers', {}) or {}).get('mode','auto')
-    crg_mode = ((config or {}).get('context', {}).get('crg', {}) or {}).get('mode','auto')
+    cfg = config or {}
+    sp_mode = (cfg.get('execution', {}).get('superpowers', {}) or {}).get('mode','auto')
+    crg_mode = (cfg.get('context', {}).get('crg', {}) or {}).get('mode','auto')
     sp = _has_superpowers(root) if sp_mode == 'auto' else sp_mode == 'on'
     crg = _has_crg(root) if crg_mode == 'auto' else crg_mode == 'on'
     return ProviderStatus(
-        superpowers=sp, code_review_graph=crg,
-        rtk=shutil.which('rtk') is not None, ripgrep=shutil.which('rg') is not None,
+        superpowers=sp,
+        code_review_graph=crg,
+        semantic=semantic_ready(cfg),
+        rtk=shutil.which('rtk') is not None,
+        ripgrep=shutil.which('rg') is not None,
     )
 
 def execution_provider(lane: Lane, config: dict, status: ProviderStatus) -> str:
