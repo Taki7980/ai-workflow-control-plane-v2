@@ -11,6 +11,8 @@ from .models import ContextItem
 
 def configured_command(config: dict) -> str:
     semantic = ((config.get("context") or {}).get("semantic") or {})
+    if str(semantic.get("mode", "auto")).lower() == "off":
+        return ""
     return os.getenv("AI_WORKFLOW_SEMANTIC_CMD", "").strip() or str(semantic.get("command", "")).strip()
 
 
