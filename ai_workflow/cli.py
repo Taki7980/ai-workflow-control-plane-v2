@@ -1,19 +1,20 @@
 from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
+from .adaptive_broker import gather_detailed
 from .benchmark import load_tasks, run_benchmark
+from .bootstrap import bootstrap
 from .budget import budget_for
 from .classifier import classify
 from .compress import compress_text
 from .config import find_project_root, load_config, estimate_tokens
-from .adaptive_broker import gather_detailed
 from .context_broker import detect_changed_files
 from .doctor import run as doctor_run
 from .handoff import validate as validate_handoff, render as render_handoff
 from .indexer import build_indexes, incremental_indexes
 from .memory import add_memory, search_memory, list_memories, prune_stale
 from .providers import detect, execution_provider, model_tier
-from .telemetry import summarize_traces
+from .telemetry import policy_recommendations, summarize_traces
 from .verify import verify
 
 
@@ -23,6 +24,12 @@ def _root(args) -> Path:
 def _json(data):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
+def cmd_bootstrap(args):
+    try:
+        _json(bootstrap(_root(args), args.project_name))
+    except FileExistsError as exc:
+        raise SystemExit(str(exc)) from exc
+
 def cmd_init(args):
     root = _root(args)
     agents = root / "AGENTS.md"
@@ -30,7 +37,7 @@ def cmd_init(args):
         load_config(root)
         text = agents.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", args.project_name)
     except FileNotFoundError as exc:
-        raise SystemExit("Copy the workflow template into the project before running init; config and AGENTS.md are required.") from exc
+        raise SystemExit("Copy the workflow template into the project or run `ai-workflow bootstrap --project-name NAME`; config and AGENTS.md are required.") from exc
     (root / ".ai").mkdir(parents=True, exist_ok=True)
     project_file = root / ".ai" / "PROJECT"
     project_file.write_text(str(root) + "\n", encoding="utf-8")
@@ -177,12 +184,17 @@ def cmd_benchmark(args):
     _json(result)
 
 def cmd_stats(args):
-    _json(summarize_traces(_root(args), args.limit))
+    root = _root(args)
+    result = summarize_traces(root, args.limit)
+    if args.recommend:
+        result["policy_feedback"] = policy_recommendations(root, args.limit, args.minimum_runs)
+    _json(result)
 
 def build_parser():
     p = argparse.ArgumentParser(prog="ai-workflow", description="AI Workflow Efficiency Control Plane")
     p.add_argument("--root", help="project root; auto-detected by default")
     sp = p.add_subparsers(dest="command", required=True)
+    q = sp.add_parser("bootstrap"); q.add_argument("--project-name", required=True); q.set_defaults(func=cmd_bootstrap)
     q = sp.add_parser("init"); q.add_argument("--project-name", required=True); q.set_defaults(func=cmd_init)
     q = sp.add_parser("route"); q.add_argument("task"); q.set_defaults(func=cmd_route)
     for name, fn in (("brief", cmd_brief), ("context", cmd_context)):
@@ -195,7 +207,7 @@ def build_parser():
     q = sp.add_parser("doctor"); q.add_argument("--strict", action="store_true"); q.set_defaults(func=cmd_doctor)
     q = sp.add_parser("verify"); q.add_argument("--check", action="append", default=[]); q.add_argument("--strict", action="store_true"); q.set_defaults(func=cmd_verify)
     q = sp.add_parser("benchmark"); q.add_argument("--tasks", required=True); q.add_argument("--output"); q.set_defaults(func=cmd_benchmark)
-    q = sp.add_parser("stats"); q.add_argument("--limit", type=int, default=200); q.set_defaults(func=cmd_stats)
+    q = sp.add_parser("stats"); q.add_argument("--limit", type=int, default=200); q.add_argument("--recommend", action="store_true"); q.add_argument("--minimum-runs", type=int, default=20); q.set_defaults(func=cmd_stats)
     q = sp.add_parser("handoff"); q.add_argument("action", choices=["validate"]); q.set_defaults(func=cmd_handoff)
     q = sp.add_parser("memory"); msp = q.add_subparsers(dest="memory_command", required=True)
     m = msp.add_parser("add"); m.add_argument("--type", required=True); m.add_argument("--keywords", required=True); m.add_argument("--summary", required=True); m.add_argument("--evidence"); m.add_argument("--file", action="append"); m.add_argument("--confidence", type=float, default=0.8); m.set_defaults(func=cmd_memory_add)
