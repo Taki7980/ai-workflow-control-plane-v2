@@ -19,6 +19,7 @@ class RouteDecision:
     risk: Risk
     reasons: list[str] = field(default_factory=list)
     structural_context: bool = False
+    confidence: float = 0.5
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -33,10 +34,10 @@ class ContextItem:
     score: float = 0.0
     stale: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     @property
     def dedupe_key(self) -> str:
-        # Strip exact whitespace for deduplication
         return "".join(self.text.split())
 
     def to_dict(self) -> dict[str, Any]:
