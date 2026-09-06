@@ -30,8 +30,13 @@ jobs:
         import json
         from pathlib import Path
         data = json.loads(Path('benchmark-result.json').read_text())
-        assert data['summary']['cases'] >= 24, data['summary']
-        assert len(data.get('by_query_type', {})) >= 6, data.get('by_query_type')
-        assert data['summary']['lane_accuracy'] is not None
-        assert data['summary']['intent_accuracy'] is not None
+        summary = data['summary']
+        assert summary['cases'] >= 32, summary
+        assert len(data.get('by_query_type', {})) >= 7, data.get('by_query_type')
+        assert summary['lane_accuracy'] is not None
+        assert summary['intent_accuracy'] is not None
+        assert summary['evidence_state_accuracy'] is not None
+        assert summary['abstention_accuracy'] is not None
+        assert summary['mean_relevant_item_density'] is not None
+        assert summary['mean_pattern_yield_per_1k_tokens'] is not None
         PY
