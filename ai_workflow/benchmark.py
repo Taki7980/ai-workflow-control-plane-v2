@@ -1,15 +1,15 @@
 from __future__ import annotations
 import json, math, statistics, time
+from collections import defaultdict
 from pathlib import Path
+from .adaptive_broker import gather_detailed
 from .budget import budget_for
 from .classifier import classify
 from .config import estimate_tokens
-from .context_broker import gather
 from .providers import detect, execution_provider, model_tier
 
 
 def retrieval_metrics(items: list, relevant_patterns: list[str], k: int = 5) -> dict | None:
-    """Compute binary retrieval metrics from explicit gold text patterns."""
     patterns = [pattern.casefold() for pattern in relevant_patterns if pattern.strip()]
     if not patterns:
         return None
@@ -18,9 +18,6 @@ def retrieval_metrics(items: list, relevant_patterns: list[str], k: int = 5) -> 
     texts = [item.text.casefold() for item in ranked]
     relevance = [int(any(pattern in text for pattern in patterns)) for text in texts]
     first_relevant = next((rank for rank, value in enumerate(relevance, 1) if value), None)
-
-    # Gold patterns are relevance units. Count each once at its earliest supporting
-    # item; multiple patterns in one item occupy consecutive idealized positions.
     unmatched = set(range(len(patterns)))
     next_position = 1
     dcg = 0.0
@@ -32,10 +29,7 @@ def retrieval_metrics(items: list, relevant_patterns: list[str], k: int = 5) -> 
             next_position = position + 1
             unmatched.remove(index)
     covered = len(patterns) - len(unmatched)
-    ideal_dcg = sum(
-        1.0 / math.log2(rank + 1)
-        for rank in range(1, len(patterns) + 1)
-    )
+    ideal_dcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, len(patterns) + 1))
     return {
         "k": cutoff,
         "relevant_items": sum(relevance),
@@ -44,6 +38,11 @@ def retrieval_metrics(items: list, relevant_patterns: list[str], k: int = 5) -> 
         "mrr": 1.0 / first_relevant if first_relevant else 0.0,
         "ndcg_at_k": dcg / ideal_dcg if ideal_dcg else 0.0,
     }
+
+
+def _mean(rows: list[dict], key: str):
+    values = [r[key] for r in rows if r.get(key) is not None]
+    return round(statistics.mean(values), 4) if values else None
 
 
 def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
@@ -56,7 +55,7 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
         start = time.perf_counter()
         decision = classify(task, config)
         budget = budget_for(decision.lane, config)
-        items = gather(
+        items, retrieval = gather_detailed(
             root, task, decision, budget, config, providers,
             case.get('symbol'), case.get('endpoint'), case.get('changed_files') or [],
         )
@@ -64,10 +63,16 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
         used = estimate_tokens('\n'.join(i.text for i in items))
         row = {
             'task': task,
+            'query_type': case.get('query_type', 'unclassified'),
             'lane': decision.lane.value,
             'risk': decision.risk.value,
+            'routing_confidence': decision.confidence,
             'execution_provider': execution_provider(decision.lane, config, providers),
             'model_tier': model_tier(decision, config),
+            'retrieval_intent': retrieval['retrieval_intent'],
+            'retrieval_sufficient': retrieval['sufficiency']['sufficient'],
+            'retrieval_sufficiency_score': retrieval['sufficiency']['score'],
+            'fallbacks': retrieval['fallbacks'],
             'context_sources': list(dict.fromkeys(i.source for i in items)),
             'estimated_context_tokens': used,
             'budget_tokens': budget.estimated_tokens,
@@ -77,34 +82,49 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
         expected_lane = case.get('expected_lane')
         if expected_lane:
             row['lane_correct'] = decision.lane.value == expected_lane
-        metrics = retrieval_metrics(
-            items,
-            case.get('relevant_context') or [],
-            int(case.get('retrieval_k', 5)),
-        )
+        expected_intent = case.get('expected_intent')
+        if expected_intent:
+            row['intent_correct'] = retrieval['retrieval_intent'] == expected_intent
+        metrics = retrieval_metrics(items, case.get('relevant_context') or [], int(case.get('retrieval_k', 5)))
         if metrics:
             row['retrieval'] = metrics
         rows.append(row)
 
     lane_rows = [row for row in rows if 'lane_correct' in row]
+    intent_rows = [row for row in rows if 'intent_correct' in row]
     retrieval_rows = [row['retrieval'] for row in rows if 'retrieval' in row]
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        groups[row['query_type']].append(row)
+    by_query_type = {}
+    for name, group in sorted(groups.items()):
+        rr = [r['retrieval'] for r in group if 'retrieval' in r]
+        by_query_type[name] = {
+            'cases': len(group),
+            'lane_accuracy': round(sum(r.get('lane_correct', False) for r in group if 'lane_correct' in r) / max(1, sum('lane_correct' in r for r in group)), 4) if any('lane_correct' in r for r in group) else None,
+            'intent_accuracy': round(sum(r.get('intent_correct', False) for r in group if 'intent_correct' in r) / max(1, sum('intent_correct' in r for r in group)), 4) if any('intent_correct' in r for r in group) else None,
+            'mean_recall_at_k': _mean(rr, 'recall_at_k'),
+            'mean_mrr': _mean(rr, 'mrr'),
+        }
     return {
         'scope': 'routing-and-context-only',
-        'warning': 'Estimated context tokens are not provider-billed tokens and this benchmark does not measure task correctness.',
+        'warning': 'Estimated context tokens are not provider-billed tokens. Retrieval metrics measure supplied gold patterns and do not prove downstream task correctness.',
         'providers': providers.to_dict(),
         'cases': rows,
+        'by_query_type': by_query_type,
         'summary': {
             'cases': len(rows),
             'mean_estimated_context_tokens': round(statistics.mean([r['estimated_context_tokens'] for r in rows]), 2) if rows else 0,
             'mean_budget_utilization': round(statistics.mean([r['budget_utilization'] for r in rows]), 4) if rows else 0,
             'mean_elapsed_ms': round(statistics.mean([r['elapsed_ms'] for r in rows]), 2) if rows else 0,
-            'labeled_lane_cases': len(lane_rows),
             'lane_accuracy': round(sum(row['lane_correct'] for row in lane_rows) / len(lane_rows), 4) if lane_rows else None,
-            'labeled_retrieval_cases': len(retrieval_rows),
-            'mean_precision_at_k': round(statistics.mean(row['precision_at_k'] for row in retrieval_rows), 4) if retrieval_rows else None,
-            'mean_recall_at_k': round(statistics.mean(row['recall_at_k'] for row in retrieval_rows), 4) if retrieval_rows else None,
-            'mean_mrr': round(statistics.mean(row['mrr'] for row in retrieval_rows), 4) if retrieval_rows else None,
-            'mean_ndcg_at_k': round(statistics.mean(row['ndcg_at_k'] for row in retrieval_rows), 4) if retrieval_rows else None,
+            'intent_accuracy': round(sum(row['intent_correct'] for row in intent_rows) / len(intent_rows), 4) if intent_rows else None,
+            'mean_precision_at_k': _mean(retrieval_rows, 'precision_at_k'),
+            'mean_recall_at_k': _mean(retrieval_rows, 'recall_at_k'),
+            'mean_mrr': _mean(retrieval_rows, 'mrr'),
+            'mean_ndcg_at_k': _mean(retrieval_rows, 'ndcg_at_k'),
+            'sufficiency_rate': round(sum(bool(r['retrieval_sufficient']) for r in rows) / len(rows), 4) if rows else 0,
+            'fallback_rate': round(sum(bool(r['fallbacks']) for r in rows) / len(rows), 4) if rows else 0,
         },
     }
 
