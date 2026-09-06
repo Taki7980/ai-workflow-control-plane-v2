@@ -1,30 +1,30 @@
 [
-  {
-    "task": "Explain how BM25Scorer ranks documents",
-    "symbol": "BM25Scorer",
-    "expected_lane": "answer",
-    "relevant_context": ["BM25Scorer"],
-    "retrieval_k": 5
-  },
-  {
-    "task": "Fix tokenization in ai_workflow/math_retrieval.py",
-    "symbol": "tokenize",
-    "expected_lane": "small",
-    "relevant_context": ["tokenize"],
-    "retrieval_k": 5
-  },
-  {
-    "task": "What tests for memory hash invalidation exist?",
-    "symbol": "test_hash_invalidation",
-    "expected_lane": "full",
-    "relevant_context": ["test_hash_invalidation"],
-    "retrieval_k": 5
-  },
-  {
-    "task": "Refactor context retrieval architecture across providers",
-    "symbol": "gather",
-    "expected_lane": "full",
-    "relevant_context": ["gather"],
-    "retrieval_k": 5
-  }
+  {"task":"Explain how BM25Scorer ranks documents","symbol":"BM25Scorer","expected_lane":"answer","expected_intent":"exact","query_type":"exact","relevant_context":["BM25Scorer"],"retrieval_k":5},
+  {"task":"Where is tokenize defined?","symbol":"tokenize","expected_lane":"answer","expected_intent":"exact","query_type":"exact","relevant_context":["tokenize"],"retrieval_k":5},
+  {"task":"Show me ContextItem","symbol":"ContextItem","expected_lane":"answer","expected_intent":"exact","query_type":"exact","relevant_context":["ContextItem"],"retrieval_k":5},
+  {"task":"Where is the /api route index generated?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["endpoint"],"retrieval_k":5},
+  {"task":"How does the workflow decide whether a task is cheap or expensive?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["classif"],"retrieval_k":5},
+  {"task":"Where do we reject remembered information after its source file changes?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["stale","hash"],"retrieval_k":5},
+  {"task":"How do we keep noisy command output from flooding model context?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["compress"],"retrieval_k":5},
+  {"task":"What callers depend on ProcessPayment?","symbol":"ProcessPayment","expected_lane":"full","expected_intent":"structural","query_type":"structural","relevant_context":["ProcessPayment"],"retrieval_k":5},
+  {"task":"What breaks if gather changes?","symbol":"gather","expected_lane":"full","expected_intent":"structural","query_type":"structural","relevant_context":["gather"],"retrieval_k":5},
+  {"task":"Show the blast radius of classifier changes","symbol":"classify","expected_lane":"full","expected_intent":"structural","query_type":"structural","relevant_context":["classify"],"retrieval_k":5},
+  {"task":"Which tests cover memory hash invalidation?","symbol":"test_hash_invalidation","expected_lane":"full","expected_intent":"structural","query_type":"structural","relevant_context":["test_hash_invalidation"],"retrieval_k":5},
+  {"task":"Fix tokenization in ai_workflow/math_retrieval.py","symbol":"tokenize","expected_lane":"small","expected_intent":"exact","query_type":"mutation","relevant_context":["tokenize"],"retrieval_k":5},
+  {"task":"Rename a typo in README.md","expected_lane":"small","expected_intent":"exact","query_type":"mutation","relevant_context":["README"],"retrieval_k":5},
+  {"task":"Update text in ARCHITECTURE.md","expected_lane":"small","expected_intent":"exact","query_type":"mutation","relevant_context":["Architecture"],"retrieval_k":5},
+  {"task":"Refactor context retrieval architecture across providers","symbol":"gather","expected_lane":"full","expected_intent":"structural","query_type":"structural","relevant_context":["gather"],"retrieval_k":5},
+  {"task":"Change authentication token validation","expected_lane":"full","expected_intent":"exact","query_type":"high-risk","relevant_context":["auth"],"retrieval_k":5},
+  {"task":"Modify payment schema migration","expected_lane":"full","expected_intent":"exact","query_type":"high-risk","relevant_context":["payment"],"retrieval_k":5},
+  {"task":"Deploy a public API contract change","expected_lane":"full","expected_intent":"exact","query_type":"high-risk","relevant_context":["contract"],"retrieval_k":5},
+  {"task":"Where do we decide whether CRG should be attempted for a large repository?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["crg"],"retrieval_k":5},
+  {"task":"How does incremental indexing avoid reparsing unchanged files?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["incremental"],"retrieval_k":5},
+  {"task":"Where do we enforce hard context limits after retrieval?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["budget"],"retrieval_k":5},
+  {"task":"What dependencies does reciprocal_rank_fusion have?","symbol":"reciprocal_rank_fusion","expected_lane":"full","expected_intent":"structural","query_type":"structural","relevant_context":["reciprocal_rank_fusion"],"retrieval_k":5},
+  {"task":"Explain ai_workflow/providers.py","expected_lane":"answer","expected_intent":"exact","query_type":"path","relevant_context":["provider"],"retrieval_k":5},
+  {"task":"Explain ai_workflow/context_broker.py","expected_lane":"answer","expected_intent":"exact","query_type":"path","relevant_context":["context"],"retrieval_k":5},
+  {"task":"Find where execution provider selection happens","expected_lane":"answer","expected_intent":"mixed","query_type":"mixed","relevant_context":["execution_provider"],"retrieval_k":5},
+  {"task":"How does the system locate tests for files I changed?","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["test"],"retrieval_k":5},
+  {"task":"List the logic responsible for stale index rejection","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["fresh"],"retrieval_k":5},
+  {"task":"Understand how model tiers and provider selection interact","expected_lane":"answer","expected_intent":"semantic","query_type":"semantic","relevant_context":["model_tier","execution_provider"],"retrieval_k":5}
 ]
