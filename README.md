@@ -1,168 +1,120 @@
 # AI Workflow — Efficiency Control Plane
 
-A thin, agent-agnostic control plane for AI-assisted software development.
+A dependency-free, agent-agnostic control plane for AI-assisted software development. It coordinates **Superpowers** for execution methodology and **Code Review Graph (CRG)** for structural code intelligence without reimplementing either system.
 
-It does **not** try to replace execution methodologies such as Superpowers or structural code-intelligence engines such as Code Review Graph (CRG). It decides **how much machinery a task deserves**, chooses retrieval based on query intent, enforces a hard context budget, coordinates execution, compresses output, verifies completion, and stores reusable knowledge.
-
-## V2.1: adaptive retrieval
-
-V2.1 separates **execution routing** from **retrieval routing**.
+## V2.2
 
 ```text
 Task
- → lane + risk + confidence
- → execution provider + model tier
- → retrieval intent
-      ├─ exact      → local index + BM25
-      ├─ semantic   → lexical + optional semantic provider
-      ├─ structural → CRG
-      └─ mixed      → lexical + semantic + RRF/MMR
- → evidence sufficiency
- → optional external retrievers / workspace roots
- → adaptive context cap
- → targeted source fallback if needed
- → agent/harness → verification → durable memory
+ → deterministic lane + risk + diagnostic confidence
+ → retrieval intent: exact | semantic | structural | mixed
+ → workspace-state fingerprint
+ → local index / semantic providers / external retrievers / CRG
+ → RRF fusion + MMR candidate diversification
+ → evidence state: sufficient | requires_exploration | abstain
+ → budgeted context assembly
+      tight budget → relevance-first
+      normal budget → facility-location greedy coverage
+ → structural-complexity vector
+ → conserved CRG / agent / review / verification budget
+ → Superpowers execution contract
+ → verification → durable memory → telemetry
 ```
 
-The core invariant remains:
+Core invariant: **escalate capability, not context volume.**
 
-> **Escalate capability, not context volume.**
+## What V2.2 owns
 
-## What this project owns
+- deterministic Answer / Small / Full routing and high-risk escalation;
+- exact / semantic / structural / mixed retrieval routing;
+- BM25, RRF and MMR candidate ranking;
+- budget-constrained facility-location context assembly;
+- explicit `sufficient`, `requires_exploration`, and `abstain` evidence states;
+- optional semantic and generic command retrievers;
+- optional bounded multi-root workspace retrieval;
+- Python AST-aware indexing with regex fallback for other languages;
+- SHA-256 stale-index and durable-memory rejection;
+- workspace-state fingerprints tied to Git/index/changed-file state;
+- provenance and trust metadata on selected context;
+- CRG → Superpowers orchestration contracts with component-wise resource caps;
+- local retrieval telemetry and advisory-only policy feedback;
+- benchmark metrics for ranking quality, context density/yield, evidence state, and abstention.
 
-- **Task + risk routing** — Answer / Small / Full lanes with deterministic safety escalation and diagnostic confidence.
-- **Retrieval-intent routing** — exact / semantic / structural / mixed.
-- **Context brokering** — cache, local indexes, optional semantic/provider plugins, CRG, then bounded source fallback.
-- **Retrieval ranking** — code-aware tokenization, Okapi BM25, reciprocal-rank fusion, and MMR diversification.
-- **Evidence sufficiency** — deterministic heuristic deciding whether another retrieval stage is justified.
-- **Adaptive budgeting** — hard lane ceilings remain fixed while high-sufficiency results can stop below the maximum.
-- **AST-aware indexing** — Python uses stdlib AST metadata with regex fallback for unsupported/syntax-failing files and other languages.
-- **Multi-root workspaces** — optional bounded retrieval across frontend/backend/service repositories.
-- **Retriever plugin contract** — optional command retrievers can register for exact, semantic, structural, mixed, or all intents.
-- **Context provenance** — retriever, workspace root, freshness, trust class, and available path/line/hash metadata travel with selected context.
-- **Cross-agent handoff** — compact, validated `.ai/HANDOFF.md`.
-- **Output compression** — RTK when available, deterministic line/character caps otherwise.
-- **Durable memory** — evidence-aware JSONL memories with source hashes and stale detection.
-- **Retrieval telemetry + advisory feedback** — local traces, stats, and reviewable policy recommendations that never mutate safety rules.
-- **Verification + benchmarks** — doctor, handoff validation, index freshness, unit tests, and a multi-category retrieval benchmark corpus.
+It does **not** self-modify safety routing, require embeddings, or claim that a retrieval score is a calibrated probability of correctness.
 
-## What it deliberately delegates
+## Superpowers + Code Review Graph
 
-### Superpowers
-Use Superpowers for high-rigor Full-lane execution when installed: planning, decomposition, subagent execution, TDD/review loops, and internal model selection. AI Workflow supplies the bounded execution contract instead of duplicating that methodology.
+The roles are deliberately separate.
 
-### Code Review Graph
-Use CRG for callers/callees, tests-for, blast radius, execution flow, architecture, and multi-hop dependency questions. Simple symbol/route lookup stays local.
+**CRG = structural intelligence.** For structural or mutation work, the emitted contract can request current MCP capabilities such as:
 
-### Semantic retrieval provider
-Semantic retrieval is optional. Configure a command with `context.semantic.command` or `AI_WORKFLOW_SEMANTIC_CMD`. The command receives one JSON request on stdin:
-
-```json
-{"query":"where do we prevent duplicate charges?","root":"/repo","limit":6}
+```text
+get_minimal_context_tool
+get_impact_radius_tool
+query_graph_tool
+get_review_context_tool
 ```
 
-It can return a JSON array, `{ "items": [...] }`, or JSONL records such as:
+The exact plan is bounded by `execution.orchestration_budget.max_crg_calls` and graph depth. If CRG is unavailable, the workflow falls back to bounded source/semantic retrieval.
 
-```json
-{"text":"...", "score":0.91, "path":"src/payments.py", "line":42, "sha256":"..."}
+**Superpowers = software-engineering process.** When detected, V2.2 emits an ordered skill contract rather than duplicating Superpowers internals:
+
+| Task | Superpowers contract |
+|---|---|
+| Answer | direct response |
+| Small mutation | `test-driven-development` → `verification-before-completion` |
+| Full mutation | `writing-plans` → `subagent-driven-development` → `requesting-code-review` → `verification-before-completion` |
+
+If Superpowers is unavailable, native execution remains available.
+
+`ai-workflow brief --format prompt` now emits the contract directly:
+
+```text
+[EVIDENCE_STATE] requires_exploration
+[WORKSPACE_FINGERPRINT] ...
+[SUPERPOWERS_SKILLS] writing-plans, subagent-driven-development, ...
+[CRG_PLAN] get_minimal_context_tool, get_impact_radius_tool, ...
+[AGENT_SLOTS] 3
 ```
 
-No semantic provider is required for the core workflow. Missing, failed, malformed, or timed-out providers degrade safely.
+A caller should not begin mutation while `EVIDENCE_STATE=requires_exploration`.
 
-### Generic retriever plugins
-Additional command retrievers can be configured without changing Python code:
+## Budgeted context selection
 
-```json
-{
-  "name": "my-code-search",
-  "command": "my-code-search --json",
-  "intents": ["semantic", "mixed"],
-  "timeout_seconds": 8
-}
+V2.2 treats context assembly as a budgeted coverage problem rather than blindly truncating the top-ranked list.
+
+For candidate relevance `r_i` and code-aware token sets `T_i`:
+
+```text
+sim(i,j) = |T_i ∩ T_j| / |T_i ∪ T_j|
+w_ij     = r_i · sim(i,j)
+F(S)     = Σ_i max_{j∈S} w_ij
 ```
 
-The command receives `{query, root, limit, intent}` on stdin and returns the same JSON/JSONL candidate shape as the semantic provider. Plugins are optional and are only attempted when the current evidence is insufficient.
+The normal-budget selector greedily maximizes marginal `F(S)` gain per character while respecting the hard context ceiling. Under very tight budgets it uses relevance-first selection. Mandatory CRG structural evidence is inserted first when available.
 
-## Quick start
+This is a deterministic lexical approximation inspired by submodular prompt-assembly research. It is not presented as embedding-equivalent semantic similarity.
 
-Requires Python 3.10+.
+## Evidence state
 
-For a fresh repository:
+- `sufficient` — current evidence meets the retrieval-control threshold.
+- `requires_exploration` — a mutation/structural task lacks enough evidence; investigate before editing.
+- `abstain` — a read-only repository question lacks trustworthy supporting context; do not fabricate a repo-grounded answer.
 
-```bash
-ai-workflow bootstrap --project-name MyProject
-ai-workflow doctor --strict
-```
+The sufficiency score remains a heuristic. High-risk mutation rules are deterministic and cannot be downgraded by it.
 
-`bootstrap` creates only missing control-plane files and refuses to overwrite existing `AGENTS.md`, config, or `.ai/PROJECT` state.
+## Workspace state
 
-For an existing copy of the template:
+Each retrieval packet contains a stable fingerprint derived from:
 
-```bash
-python -m ai_workflow init --project-name MyProject
-python -m ai_workflow doctor
-python -m ai_workflow route "add rate limiting to auth"
-python -m ai_workflow brief "add rate limiting to auth"
-```
+- resolved project root;
+- Git HEAD when available;
+- index-state digest;
+- changed-file identities and content hashes/states.
 
-Optional editable install:
+This lets downstream agents reject context that was built against a different workspace state.
 
-```bash
-python -m pip install -e .
-ai-workflow doctor
-```
-
-## Main commands
-
-```bash
-ai-workflow bootstrap --project-name MyProject
-ai-workflow init --project-name MyProject
-ai-workflow route "task text"
-ai-workflow brief "task text"
-ai-workflow context "task text" --symbol Foo --endpoint /api/v1/foo
-ai-workflow context "where do we prevent duplicate charges?" --trace
-ai-workflow index --incremental
-ai-workflow stats
-ai-workflow stats --recommend --minimum-runs 20
-ai-workflow doctor --strict
-ai-workflow verify --check "python -m unittest discover -s tests -v" --strict
-ai-workflow handoff validate
-ai-workflow memory add --type decision --keywords "auth rate-limit" --summary "..."
-ai-workflow memory search "auth rate-limit"
-ai-workflow compress --file build.log --max-lines 80
-ai-workflow benchmark --tasks benchmarks/sample-tasks.json
-```
-
-## Lane policy
-
-| Lane | Typical use | Execution | Hard default context ceiling |
-|---|---|---|---:|
-| Answer | explanation, lookup, read-only question | direct | 1,200 est. tokens |
-| Small | known low-risk edit, usually 1–2 files | native | 2,500 est. tokens |
-| Full | multi-file, ambiguous, structural, or high-risk work | Superpowers when available, otherwise native | 6,000 est. tokens |
-
-Security/payment/auth/schema/migration/concurrency/deploy/public-contract mutations deterministically escalate to Full/High. Routing confidence is diagnostic and cannot downgrade these rules.
-
-## Retrieval policy
-
-Retrieval intent is independent from lane:
-
-- **exact** — explicit symbol, endpoint, path, identifier.
-- **semantic** — paraphrased natural-language intent.
-- **structural** — callers/callees/dependencies/impact/tests/blast-radius.
-- **mixed** — lexical and semantic evidence are both useful.
-
-This prevents wasteful sequences such as running embeddings before a call-graph query or graph traversal before a simple symbol lookup.
-
-## Context budgets and sufficiency
-
-Lane budgets are **maximums, not targets**. The adaptive layer scores lexical coverage, source diversity, exact evidence, and structural completeness. High-sufficiency retrieval can return only a configured fraction of the hard ceiling; insufficient evidence can escalate providers or trigger bounded source fallback.
-
-The sufficiency score is a retrieval-control heuristic, not a calibrated probability that the answer or code change is correct. Calibrated/conformal filtering can be added later only after the project has enough representative labeled retrieval data.
-
-## Multi-repo / workspace retrieval
-
-Configure related repositories under `workspace.roots`:
+Multi-root workspaces can be configured with:
 
 ```json
 "workspace": {
@@ -171,59 +123,77 @@ Configure related repositories under `workspace.roots`:
 }
 ```
 
-The primary project remains first. Existing roots are deduplicated, missing roots are ignored, and final context is still constrained by the primary lane's hard budget. Selected items record their `workspace_root` in provenance.
+## Quick start
 
-## Indexing and staleness
+Requires Python 3.10+.
 
-Indexes remain rebuildable accelerators; source code is truth. Python symbols use standard-library AST metadata (`kind`, `line`, `end_line`) where parsing succeeds. Other languages and syntax-failing Python files use regex fallback. Per-file SHA-256 state rejects stale index hits.
+```bash
+python -m pip install -e .
+ai-workflow bootstrap --project-name MyProject
+ai-workflow doctor --strict
+ai-workflow index --incremental
+ai-workflow brief "refactor payment retry handling" --format prompt
+```
+
+`bootstrap` only creates missing control-plane files and refuses to overwrite existing `AGENTS.md`, configuration, or `.ai/PROJECT` state.
+
+## Main commands
+
+```bash
+ai-workflow bootstrap --project-name MyProject
+ai-workflow init --project-name MyProject
+ai-workflow route "task text"
+ai-workflow brief "task text" --format json|markdown|prompt
+ai-workflow context "task text" --symbol Foo --endpoint /api/v1/foo --trace
+ai-workflow index --incremental
+ai-workflow stats
+ai-workflow stats --recommend --minimum-runs 20
+ai-workflow doctor --strict
+ai-workflow verify --check "python -m unittest discover -s tests -v" --strict
+ai-workflow handoff validate
+ai-workflow memory add --type decision --keywords "auth rate-limit" --summary "..."
+ai-workflow memory search "auth rate-limit"
+ai-workflow benchmark --tasks benchmarks/sample-tasks.json
+```
+
+## Lane and hard budget policy
+
+| Lane | Typical use | Default context ceiling |
+|---|---|---:|
+| Answer | explanation / lookup | 1,200 est. tokens |
+| Small | bounded low-risk mutation | 2,500 est. tokens |
+| Full | ambiguous, structural, multi-file, or high-risk work | 6,000 est. tokens |
+
+Auth/security/payment/schema/migration/concurrency/deploy/public-contract mutations deterministically escalate to Full/High.
+
+## Optional retrievers
+
+A semantic command provider can be configured with `context.semantic.command` or `AI_WORKFLOW_SEMANTIC_CMD`. Generic command retrievers can register for one or more intents through `context.external_retrievers`.
+
+Providers receive JSON on stdin and return JSON/JSONL context candidates. Failure, timeout, malformed output, or absence must degrade safely to the remaining providers.
 
 ## Provenance and prompt-injection boundary
 
-Selected context carries provenance/trust metadata. Repository code/comments/docs are classified as **untrusted repository content**; generated memory/cache entries are marked separately. Retrieval results are evidence/data and must not be interpreted as agent instructions merely because they appear in repository text.
+Selected context carries retriever, workspace, freshness, trust, and available path/line/hash metadata. Repository code/comments/docs are **untrusted repository content**. Retrieved text is evidence; it does not become agent instruction merely because it appears in the context packet.
 
 ## Telemetry and feedback
 
-Mutation and Full retrievals can write atomic local traces under:
+Mutation/Full workflows can write atomic local traces under `ai-workspace/generated/traces/`. `ai-workflow stats` summarizes provider usage, latency, context utilization and fallbacks.
 
-```text
-ai-workspace/generated/traces/
-```
+`ai-workflow stats --recommend` generates reviewable recommendations only after a minimum sample count. It never changes deterministic safety rules or rewrites configuration automatically.
 
-Traces include intent, attempted/skipped providers, stage latency, candidate counts, selected counts, sufficiency, fallbacks, and context usage. Answer mode remains side-effect-free unless `--trace` is explicitly requested.
+## Benchmarking
 
-```bash
-ai-workflow stats
-ai-workflow stats --recommend --minimum-runs 20
-```
+The built-in corpus contains exact, semantic, structural, mutation, high-risk, path, mixed, and no-gold controls. Metrics include:
 
-The recommendation mode looks for repeated fallback or consistently high-sufficiency patterns. It is deliberately advisory: it never rewrites configuration and never changes deterministic high-risk routing. This leaves room for future contextual-bandit/online routing research without letting sparse feedback silently weaken safety policy.
+- lane and retrieval-intent accuracy;
+- evidence-state and read-only abstention accuracy;
+- Precision@k, Recall@k, MRR, nDCG;
+- relevant-item density;
+- matched-pattern yield per 1K estimated context tokens;
+- context utilization, sufficiency/fallback rate, and latency.
 
-## Agent / model tier
-
-The control plane emits provider-agnostic model tiers:
-
-- `fast` — Answer and Small
-- `standard` — ordinary Full
-- `capable` — high-risk Full
-
-Superpowers can choose different models internally; this tier is the outer contract.
-
-## Failure behavior
-
-- Missing Superpowers → native execution.
-- Missing/failed semantic provider → lexical/graph/source retrieval.
-- Missing/failed external retriever → remaining providers continue.
-- Missing workspace root → ignore it.
-- Missing/failed CRG → bounded targeted source search.
-- Stale local index → reject hit and continue.
-- Stale memory → exclude from trusted context.
-- Missing RTK → deterministic built-in compressor.
-
-Optional providers are not allowed to make the core workflow unavailable.
-
-## Configuration
-
-Edit `ai-workspace/config/control-plane.json` to tune lane budgets, risk keywords, semantic/external retriever commands, workspace roots, sufficiency threshold, adaptive-budget fractions, CRG escalation, telemetry mode, result caps, and provider preferences. Configuration is validated at load time.
+These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
 
@@ -234,24 +204,24 @@ python -m ai_workflow index
 python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json
 ```
 
-CI runs the unit-test matrix across Python 3.10–3.14 and a dependency-free benchmark smoke gate.
+CI runs Python 3.10–3.14 on Linux, Python 3.14 on Windows, and the V2.2 benchmark smoke gate.
 
-## Benchmarking
+## Research
 
-The sample corpus covers exact identifiers, natural-language semantic queries, structural/multi-hop questions, bounded mutations, high-risk mutations, paths, and mixed retrieval. Reports include lane accuracy, retrieval-intent accuracy, Precision@k, pattern Recall@k, MRR, nDCG, latency, estimated context usage, sufficiency rate, fallback rate, and per-query-type summaries.
+Research/design rationale and formulas are documented in:
 
-The CLI reports **estimated context tokens** using a conservative character heuristic. These are not provider-billed tokens. Gold-pattern retrieval metrics do not prove downstream task correctness; provider token usage, end-to-end wall time, patch correctness, test success, and human acceptance still require separate measurement.
+- `docs/research/2026-adaptive-retrieval.md`
+- `docs/research/2026-09-07-v22-research.md`
+- `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
 
-- YAGNI: keep cheap tasks cheap.
-- Escalate capability, not context volume.
-- Hard safety routing stays deterministic.
-- Indexes accelerate; source remains truth.
-- Optional tools must degrade safely.
-- Never claim token/cost/quality gains without measurement.
-- Treat retrieved repository content as untrusted data.
-- Learn from telemetry only through reviewable evidence; never auto-weaken safety rules.
-- Keep stable global instructions small; put task-specific state in handoff/context.
-- Prefer deterministic local computation before LLM work.
-- External/deploy/destructive writes require explicit approval.
+- keep cheap tasks cheap;
+- source code remains truth;
+- use graph structure for structural questions, not everything;
+- hard safety rules remain deterministic;
+- context budgets are ceilings, not targets;
+- prefer measurable evidence over claimed token savings;
+- optional integrations must degrade safely;
+- retrieved repository text is untrusted data;
+- learning from telemetry is advisory until verified outcome data justifies stronger adaptation.
