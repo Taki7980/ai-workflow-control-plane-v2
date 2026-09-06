@@ -32,11 +32,17 @@ _DEFAULT_CONFIG = {
         "external_retrievers": [],
         "sufficiency": {"threshold": 0.72},
         "adaptive_budget": {"enabled": True, "high_sufficiency_fraction": 0.45, "medium_sufficiency_fraction": 0.7, "minimum_chars": 900},
+        "selector": {"enabled": True, "tight_budget_fraction": 0.3, "mandatory_structural_evidence": True},
         "telemetry": {"mode": "mutations"},
         "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
     },
     "workspace": {"roots": [], "max_roots": 4},
-    "execution": {"prefer_superpowers_for_full": True, "native_fallback": True, "superpowers": {"mode": "auto"}},
+    "execution": {
+        "prefer_superpowers_for_full": True,
+        "native_fallback": True,
+        "superpowers": {"mode": "auto"},
+        "orchestration_budget": {"max_agent_slots": 4, "max_crg_calls": 6, "max_graph_depth": 3, "review_passes": 2, "verification_passes": 2},
+    },
     "handoff": {"max_lines": 30},
     "memory": {"max_results": 5, "minimum_confidence": 0.55},
     "models": {"answer": "fast", "small": "fast", "full_medium": "standard", "full_high": "capable"},
@@ -50,6 +56,12 @@ def default_config() -> dict[str, Any]:
 def _positive_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _nonnegative_int(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
     return value
 
 
@@ -80,7 +92,7 @@ def validate_config(data: dict[str, Any]) -> None:
     if sum(float(value) for value in shares.values()) > 1.000001:
         raise ValueError("source shares must sum to at most 1")
 
-    for key in ("crg", "targeted_search", "semantic", "sufficiency", "adaptive_budget", "telemetry"):
+    for key in ("crg", "targeted_search", "semantic", "sufficiency", "adaptive_budget", "selector", "telemetry"):
         if not isinstance(data["context"].get(key), dict):
             raise ValueError(f"missing required section: context.{key}")
     retrievers = data["context"].get("external_retrievers", [])
@@ -106,6 +118,12 @@ def validate_config(data: dict[str, Any]) -> None:
     _fraction(adaptive.get("high_sufficiency_fraction"), "context.adaptive_budget.high_sufficiency_fraction")
     _fraction(adaptive.get("medium_sufficiency_fraction"), "context.adaptive_budget.medium_sufficiency_fraction")
     _positive_int(adaptive.get("minimum_chars"), "context.adaptive_budget.minimum_chars")
+    selector = data["context"]["selector"]
+    if not isinstance(selector.get("enabled", True), bool):
+        raise ValueError("context.selector.enabled must be boolean")
+    _fraction(selector.get("tight_budget_fraction"), "context.selector.tight_budget_fraction")
+    if not isinstance(selector.get("mandatory_structural_evidence", True), bool):
+        raise ValueError("context.selector.mandatory_structural_evidence must be boolean")
     if data["context"]["telemetry"].get("mode", "mutations") not in {"off", "mutations", "all"}:
         raise ValueError("context.telemetry.mode must be off, mutations, or all")
 
@@ -113,6 +131,14 @@ def validate_config(data: dict[str, Any]) -> None:
     if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
         raise ValueError("workspace.roots must be an array of paths")
     _positive_int(data["workspace"].get("max_roots"), "workspace.max_roots")
+    orchestration = data["execution"].get("orchestration_budget")
+    if not isinstance(orchestration, dict):
+        raise ValueError("missing required section: execution.orchestration_budget")
+    _positive_int(orchestration.get("max_agent_slots"), "execution.orchestration_budget.max_agent_slots")
+    _nonnegative_int(orchestration.get("max_crg_calls"), "execution.orchestration_budget.max_crg_calls")
+    _positive_int(orchestration.get("max_graph_depth"), "execution.orchestration_budget.max_graph_depth")
+    _positive_int(orchestration.get("review_passes"), "execution.orchestration_budget.review_passes")
+    _positive_int(orchestration.get("verification_passes"), "execution.orchestration_budget.verification_passes")
     _positive_int(data["handoff"].get("max_lines"), "handoff.max_lines")
     _positive_int(data["memory"].get("max_results"), "memory.max_results")
 
