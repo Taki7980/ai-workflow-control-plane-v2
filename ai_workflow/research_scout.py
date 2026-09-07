@@ -8,7 +8,6 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, asdict
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable
 
@@ -90,8 +89,17 @@ def _clean(text: str | None) -> str:
 
 
 def title_similarity(a: str, b: str) -> float:
-    normalize = lambda value: re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
-    return SequenceMatcher(None, normalize(a), normalize(b)).ratio()
+    """Dice overlap over normalized title tokens.
+
+    Crossref title matching needs to ignore punctuation/hyphenation while not
+    rewarding unrelated titles merely because their character sequences happen
+    to align. Token overlap is deterministic and conservative for corroboration.
+    """
+    tokens = lambda value: set(re.findall(r"[a-z0-9]+", value.lower()))
+    left, right = tokens(a), tokens(b)
+    if not left or not right:
+        return 0.0
+    return (2.0 * len(left & right)) / (len(left) + len(right))
 
 
 def score_paper(paper: Paper) -> int:
