@@ -1,0 +1,79 @@
+name: Daily Research Scout
+
+on:
+  schedule:
+    - cron: "30 2 * * *" # 08:00 Asia/Kolkata
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: daily-research-scout
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch and verify research
+        id: scout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m ai_workflow.research_scout \
+            --days 4 \
+            --max-results 100 \
+            --minimum-score 6 \
+            --limit 12 > research-result.json
+          cat research-result.json
+          echo "papers=$(python -c 'import json; print(json.load(open("research-result.json"))["papers"])')" >> "$GITHUB_OUTPUT"
+
+      - name: Stop when there are no qualified candidates
+        if: steps.scout.outputs.papers == '0'
+        run: echo "No research candidate crossed the promotion threshold."
+
+      - name: Create or refresh research PR
+        if: steps.scout.outputs.papers != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/daily-research
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$BRANCH"
+          git add docs/research/daily/latest.md docs/research/daily/archive/
+          if git diff --cached --quiet; then
+            echo "Research output is unchanged; nothing to propose."
+            exit 0
+          fi
+
+          git commit -m "research: refresh daily evidence scout"
+          git push --force-with-lease origin "$BRANCH" || git push --force origin "$BRANCH"
+
+          existing="$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" \
+              --title "research: daily evidence-backed improvement candidates" \
+              --body-file docs/research/daily/latest.md
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "research: daily evidence-backed improvement candidates" \
+              --body-file docs/research/daily/latest.md
+          fi
