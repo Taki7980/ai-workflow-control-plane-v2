@@ -1,0 +1,71 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from ai_workflow.bootstrap import setup
+from ai_workflow.research_scout import Paper, score_paper, title_similarity
+
+
+class SetupTests(unittest.TestCase):
+    def test_setup_is_one_command_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first = setup(root)
+            self.assertEqual(first["status"], "ready")
+            self.assertEqual(first["project"], root.name)
+            self.assertTrue((root / "AGENTS.md").is_file())
+            self.assertTrue((root / "ai-workspace/config/control-plane.json").is_file())
+            self.assertTrue((root / ".ai/PROJECT").is_file())
+            self.assertTrue((root / "ai-workspace/generated/index-state.json").is_file())
+
+            second = setup(root)
+            self.assertEqual(second["status"], "ready")
+            self.assertIn("AGENTS.md", second["preserved"])
+            self.assertIn("ai-workspace/config/control-plane.json", second["preserved"])
+
+    def test_setup_preserves_existing_agents_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            agents = root / "AGENTS.md"
+            agents.write_text("# Existing project rules\n", encoding="utf-8")
+            result = setup(root, "Demo")
+            self.assertEqual(agents.read_text(encoding="utf-8"), "# Existing project rules\n")
+            self.assertIn("AGENTS.md", result["preserved"])
+
+
+class ResearchScoutTests(unittest.TestCase):
+    def test_relevance_scoring_prefers_control_plane_research(self):
+        relevant = Paper(
+            arxiv_id="2609.99999",
+            title="Token-Efficient Repository Retrieval for Autonomous Coding Agents",
+            summary="We study context selection, retrieval, code agents, and token budgets.",
+            authors=("A. Researcher",),
+            categories=("cs.AI", "cs.SE"),
+            published="2026-09-07T00:00:00Z",
+            updated="2026-09-07T00:00:00Z",
+            doi=None,
+            url="https://arxiv.org/abs/2609.99999",
+        )
+        unrelated = Paper(
+            arxiv_id="2609.88888",
+            title="A Survey of Marine Algae Pigments",
+            summary="Biological observations of algae pigments in coastal water.",
+            authors=("B. Researcher",),
+            categories=("q-bio.OT",),
+            published="2026-09-07T00:00:00Z",
+            updated="2026-09-07T00:00:00Z",
+            doi=None,
+            url="https://arxiv.org/abs/2609.88888",
+        )
+        self.assertGreater(score_paper(relevant), score_paper(unrelated))
+        self.assertGreaterEqual(score_paper(relevant), 6)
+
+    def test_title_similarity_supports_crossref_corroboration(self):
+        a = "Retrieval-Conditioned Topology Selection for Multi-Agent Code Generation"
+        b = "Retrieval Conditioned Topology Selection for Multi Agent Code Generation"
+        self.assertGreaterEqual(title_similarity(a, b), 0.9)
+        self.assertLess(title_similarity(a, "Quantum transport in graphene"), 0.2)
+
+
+if __name__ == "__main__":
+    unittest.main()
