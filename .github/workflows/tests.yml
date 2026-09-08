@@ -20,15 +20,21 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Run unit tests
       run: python -m unittest discover -s tests -v
+    - name: Build index
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+      run: python -m ai_workflow index
+    - name: Strict doctor gate
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+      run: python -m ai_workflow doctor --strict
     - name: Benchmark smoke gate
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
       shell: bash
       run: |
-        python -m ai_workflow index
         python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json --output benchmark-result.json > /dev/null
         python - <<'PY'
         import json
         from pathlib import Path
+
         data = json.loads(Path('benchmark-result.json').read_text())
         summary = data['summary']
         assert summary['cases'] >= 32, summary
@@ -39,4 +45,13 @@ jobs:
         assert summary['abstention_accuracy'] is not None
         assert summary['mean_relevant_item_density'] is not None
         assert summary['mean_pattern_yield_per_1k_tokens'] is not None
+
+        print('BENCHMARK_SUMMARY=' + json.dumps({
+            'lane_accuracy': summary['lane_accuracy'],
+            'intent_accuracy': summary['intent_accuracy'],
+            'evidence_state_accuracy': summary['evidence_state_accuracy'],
+            'abstention_accuracy': summary['abstention_accuracy'],
+            'mean_relevant_item_density': summary['mean_relevant_item_density'],
+            'mean_pattern_yield_per_1k_tokens': summary['mean_pattern_yield_per_1k_tokens'],
+        }, sort_keys=True))
         PY
