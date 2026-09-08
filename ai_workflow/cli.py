@@ -3,7 +3,7 @@ import argparse, json, sys
 from pathlib import Path
 from .adaptive_broker import gather_detailed
 from .benchmark import load_tasks, run_benchmark
-from .bootstrap import bootstrap
+from .bootstrap import bootstrap, setup
 from .budget import budget_for
 from .classifier import classify
 from .compress import compress_text
@@ -20,9 +20,21 @@ from .verify import verify
 
 def _root(args) -> Path:
     return Path(args.root).resolve() if getattr(args, "root", None) else find_project_root()
-
 def _json(data):
     print(json.dumps(data, indent=2, ensure_ascii=False))
+
+def cmd_setup(args):
+    result = setup(_root(args), args.project_name)
+    if args.json:
+        _json(result)
+        return
+    print(f"AI Workflow ready: {result['project']}")
+    print(f"Root: {result['root']}")
+    if result["created"]:
+        print("Created: " + ", ".join(result["created"]))
+    if result["preserved"]:
+        print("Preserved: " + ", ".join(result["preserved"]))
+    print("Next: " + result["next"])
 
 def cmd_bootstrap(args):
     try: _json(bootstrap(_root(args), args.project_name))
@@ -140,6 +152,7 @@ def cmd_stats(args):
 
 def build_parser():
     p=argparse.ArgumentParser(prog="ai-workflow",description="AI Workflow Efficiency Control Plane"); p.add_argument("--root",help="project root; auto-detected by default"); sp=p.add_subparsers(dest="command",required=True)
+    q=sp.add_parser("setup",help="connect AI Workflow to the current project; safe to rerun"); q.add_argument("--project-name"); q.add_argument("--json",action="store_true",help="print machine-readable setup result"); q.set_defaults(func=cmd_setup)
     q=sp.add_parser("bootstrap"); q.add_argument("--project-name",required=True); q.set_defaults(func=cmd_bootstrap)
     q=sp.add_parser("init"); q.add_argument("--project-name",required=True); q.set_defaults(func=cmd_init)
     q=sp.add_parser("route"); q.add_argument("task"); q.set_defaults(func=cmd_route)
