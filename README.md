@@ -123,23 +123,55 @@ Multi-root workspaces can be configured with:
 }
 ```
 
-## Quick start
+## Install
 
 Requires Python 3.10+.
 
+For normal use, install AI Workflow as an isolated command-line tool instead of adding it to your project's Python environment.
+
+**Recommended — pipx:**
+
+```bash
+pipx install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
+```
+
+**Alternative — uv:**
+
+```bash
+uv tool install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
+```
+
+For local development of AI Workflow itself, an editable install remains appropriate:
+
 ```bash
 python -m pip install -e .
-ai-workflow bootstrap --project-name MyProject
+```
+
+## Quick start
+
+From the project you want AI Workflow to manage:
+
+```bash
+cd path/to/your-project
+ai-workflow setup
 ai-workflow doctor --strict
-ai-workflow index --incremental
 ai-workflow brief "refactor payment retry handling" --format prompt
 ```
 
-`bootstrap` only creates missing control-plane files and refuses to overwrite existing `AGENTS.md`, configuration, or `.ai/PROJECT` state.
+`setup` is safe to rerun. It creates only missing control-plane files, preserves an existing `AGENTS.md` and configuration, refreshes `.ai/PROJECT`, and builds the local index automatically. The project name defaults to the current directory name; use `--project-name NAME` only when you want a different display name.
+
+For scripts or automation, request JSON explicitly:
+
+```bash
+ai-workflow setup --json
+```
 
 ## Main commands
 
 ```bash
+ai-workflow setup
+ai-workflow setup --project-name MyProject
+ai-workflow setup --json
 ai-workflow bootstrap --project-name MyProject
 ai-workflow init --project-name MyProject
 ai-workflow route "task text"
@@ -155,6 +187,8 @@ ai-workflow memory add --type decision --keywords "auth rate-limit" --summary ".
 ai-workflow memory search "auth rate-limit"
 ai-workflow benchmark --tasks benchmarks/sample-tasks.json
 ```
+
+`bootstrap` remains available as the strict compatibility command: unlike `setup`, it refuses to continue when control-plane files already exist.
 
 ## Lane and hard budget policy
 
