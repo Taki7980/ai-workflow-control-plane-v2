@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeVar
 
@@ -32,10 +33,11 @@ class SchedulerOutcome(Generic[T]):
 class BoundedRetrievalScheduler:
     """Runs blocking retrieval adapters concurrently with one global deadline.
 
-    Blocking callables execute through ``asyncio.to_thread``. Cancelling the
-    asyncio wrapper cannot forcibly stop arbitrary Python blocking code already
-    executing in a worker thread; command providers therefore retain their own
-    process-level timeouts as the hard resource boundary.
+    A private bounded executor is used instead of asyncio's default executor so
+    returning from a timed-out scheduler call does not wait for unrelated worker
+    shutdown. Python cannot forcibly terminate arbitrary code already running in
+    a thread; command providers therefore retain their process-level timeout as
+    the hard stop for resource cleanup.
     """
 
     def __init__(self, max_concurrency: int = 4):
@@ -49,9 +51,9 @@ class BoundedRetrievalScheduler:
         if not calls:
             return []
 
-        semaphore = asyncio.Semaphore(self.max_concurrency)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + float(deadline_seconds)
+        executor = ThreadPoolExecutor(max_workers=self.max_concurrency, thread_name_prefix="ai-workflow-retrieval")
 
         async def execute(call: ScheduledCall[T]) -> SchedulerOutcome[T]:
             started = time.perf_counter()
@@ -59,11 +61,8 @@ class BoundedRetrievalScheduler:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise asyncio.TimeoutError
-                async with semaphore:
-                    remaining = deadline - loop.time()
-                    if remaining <= 0:
-                        raise asyncio.TimeoutError
-                    value = await asyncio.wait_for(asyncio.to_thread(call.fn), timeout=remaining)
+                future = loop.run_in_executor(executor, call.fn)
+                value = await asyncio.wait_for(future, timeout=remaining)
                 return SchedulerOutcome(
                     label=call.label,
                     value=value,
@@ -86,5 +85,8 @@ class BoundedRetrievalScheduler:
                 )
 
         tasks = [asyncio.create_task(execute(call)) for call in calls]
-        # asyncio.gather preserves input ordering even when calls complete out of order.
-        return list(await asyncio.gather(*tasks))
+        try:
+            # asyncio.gather preserves input order even when calls finish out of order.
+            return list(await asyncio.gather(*tasks))
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
