@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_RELATIVE = Path("ai-workspace/config/control-plane.json")
+CURRENT_CONFIG_VERSION = 2
 REQUIRED_SECTIONS = ("budgets", "classifier", "context", "workspace", "execution", "handoff", "memory", "models")
 
 _DEFAULT_CONFIG = {
@@ -56,6 +57,40 @@ def default_config() -> dict[str, Any]:
     return copy.deepcopy(_DEFAULT_CONFIG)
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    out = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
+def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Return a migrated detached config without mutating caller input.
+
+    Current v2 inputs are not default-filled: they retain the existing strict
+    validation boundary. Legacy missing-version/v1 inputs are upgraded by
+    overlaying their values onto v2 defaults, preserving unknown extension keys.
+    """
+
+    if not isinstance(data, dict):
+        raise ValueError("control-plane config must be a JSON object")
+    raw = copy.deepcopy(data)
+    version = raw.get("version")
+    if version in (None, 1):
+        raw.pop("version", None)
+        migrated = _deep_merge(default_config(), raw)
+        migrated["version"] = CURRENT_CONFIG_VERSION
+        return migrated
+    if version == CURRENT_CONFIG_VERSION:
+        return raw
+    if isinstance(version, int) and version > CURRENT_CONFIG_VERSION:
+        raise ValueError(f"config version {version} is newer than supported version {CURRENT_CONFIG_VERSION}")
+    raise ValueError(f"unsupported control-plane config version: {version}")
+
+
 def _positive_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")
@@ -91,7 +126,7 @@ def _provider_command(value: Any, name: str) -> None:
 
 
 def validate_config(data: dict[str, Any]) -> None:
-    if data.get("version") != 2:
+    if data.get("version") != CURRENT_CONFIG_VERSION:
         raise ValueError("unsupported control-plane config version")
     for section in REQUIRED_SECTIONS:
         if not isinstance(data.get(section), dict):
@@ -168,6 +203,14 @@ def validate_config(data: dict[str, Any]) -> None:
     _positive_int(data["memory"].get("max_results"), "memory.max_results")
 
 
+def parse_typed_config(data: dict[str, Any]):
+    from .typed_config import ControlPlaneConfig
+
+    migrated = migrate_config(data)
+    validate_config(migrated)
+    return ControlPlaneConfig.from_dict(migrated)
+
+
 def find_project_root(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
     for candidate in [current, *current.parents]:
@@ -176,13 +219,16 @@ def find_project_root(start: Path | None = None) -> Path:
     return current
 
 
-def load_config(root: Path) -> dict[str, Any]:
+def load_typed_config(root: Path):
     path = root / DEFAULT_RELATIVE
     if not path.exists():
         raise FileNotFoundError(f"control-plane config missing: {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
-    validate_config(data)
-    return data
+    return parse_typed_config(data)
+
+
+def load_config(root: Path) -> dict[str, Any]:
+    return load_typed_config(root).to_dict()
 
 
 def estimate_tokens(text: str) -> int:
