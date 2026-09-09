@@ -10,6 +10,18 @@ from .path_policy import PathOutsideWorkspace, resolve_within_root
 MEMORY_TYPES = {"decision", "incident", "verified-fix", "architecture", "pattern", "optimization", "constraint"}
 
 
+def _db_path(root: Path) -> Path:
+    return root / "ai-workspace" / "memory" / "memory.sqlite3"
+
+
+def _legacy_path(root: Path) -> Path:
+    return root / "ai-workspace" / "memory" / "memory.jsonl"
+
+
+def _has_store(root: Path) -> bool:
+    return _db_path(root).exists() or _legacy_path(root).exists()
+
+
 def _store(root: Path) -> SQLiteMemoryStore:
     return SQLiteMemoryStore(root)
 
@@ -64,6 +76,8 @@ def _stale(root: Path, record: dict) -> bool:
 
 
 def search_memory(root: Path, query: str, limit: int = 5, minimum_confidence: float = 0.0, exclude_stale: bool = False) -> list[dict]:
+    if not _has_store(root):
+        return []
     records: list[dict] = []
     texts: list[str] = []
     for record in _store(root).list_records():
@@ -88,6 +102,8 @@ def search_memory(root: Path, query: str, limit: int = 5, minimum_confidence: fl
 
 
 def list_memories(root: Path) -> list[dict]:
+    if not _has_store(root):
+        return []
     rows = []
     for record in _store(root).list_records():
         row = dict(record)
@@ -98,6 +114,8 @@ def list_memories(root: Path) -> list[dict]:
 
 
 def prune_stale(root: Path) -> dict:
+    if not _has_store(root):
+        return {"kept": 0, "pruned": 0}
     store = _store(root)
     records = store.list_records()
     kept = [record for record in records if not _stale(root, record)]
@@ -107,4 +125,8 @@ def prune_stale(root: Path) -> dict:
 
 
 def export_memory_jsonl(root: Path, destination: Path) -> int:
+    if not _has_store(root):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("", encoding="utf-8")
+        return 0
     return _store(root).export_jsonl(destination)
