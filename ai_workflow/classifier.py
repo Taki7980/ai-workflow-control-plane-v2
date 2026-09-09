@@ -37,7 +37,7 @@ def classify(task: str, config: dict) -> RouteDecision:
         return RouteDecision(Lane.ANSWER, Risk.LOW, reasons, structural_context=False, confidence=0.96 if answer else 0.88)
     if high:
         reasons.append("high-risk change keyword: " + ", ".join(high[:3]))
-        return RouteDecision(Lane.FULL, Risk.HIGH, reasons, structural_context=True, confidence=0.99)
+        return RouteDecision(Lane.FULL, Risk.HIGH, reasons, structural_context=structural, confidence=0.99)
     if full or structural:
         if full:
             reasons.append("full-lane signal: " + ", ".join(full[:3]))
