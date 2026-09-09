@@ -179,6 +179,69 @@ class ProviderBoundaryContractTests(unittest.TestCase):
         self.assertEqual(spec.command[0], sys.executable)
         self.assertEqual(spec.intents, ("exact", "semantic"))
 
+    def test_malformed_provider_score_is_coerced_instead_of_crashing(self):
+        runner = self._module("ai_workflow.provider_runner")
+        contracts = self._module("ai_workflow.retrieval_contracts")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            script = self._provider_script(
+                root,
+                "import json,sys\nsys.stdin.read()\n"
+                "print(json.dumps({'items':[{'text':'still usable','score':'not-a-number'}]}))\n",
+            )
+            result = runner.run_command_provider(
+                runner.CommandProviderSpec("score", (sys.executable, str(script)), 1, 4096),
+                contracts.RetrievalRequest("q", root, 1, "semantic", 1),
+                source="external:score",
+            )
+            self.assertIsNone(result.error)
+            self.assertEqual(result.items[0].score, 0.0)
+
+    def test_memory_rejects_file_references_outside_workspace(self):
+        from ai_workflow.memory import add_memory
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            root = base / "repo"
+            root.mkdir()
+            (base / "secret.txt").write_text("secret", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                add_memory(root, "decision", "security", "safe", files=["../secret.txt"])
+            self.assertFalse((root / "ai-workspace" / "memory" / "memory.jsonl").exists())
+
+    def test_workspace_fingerprint_marks_escaped_changed_file_as_rejected(self):
+        from ai_workflow.workspace_state import workspace_fingerprint
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            root = base / "repo"
+            root.mkdir()
+            (base / "outside.py").write_text("secret = True\n", encoding="utf-8")
+            snapshot = workspace_fingerprint(root, ["../outside.py"])
+            self.assertEqual(snapshot["changed_files"], [{"path": "../outside.py", "state": "rejected", "sha256": None}])
+
+    def test_provider_config_defaults_and_safety_fields_validate(self):
+        from ai_workflow.config import default_config, validate_config
+
+        cfg = default_config()
+        validate_config(cfg)
+        self.assertEqual(cfg["context"]["semantic"]["max_output_bytes"], 8 * 1024 * 1024)
+        self.assertEqual(cfg["context"]["semantic"]["env_allowlist"], [])
+
+        cfg["context"]["external_retrievers"] = [{
+            "name": "docs",
+            "command": [sys.executable, "provider.py"],
+            "intents": ["all"],
+            "timeout_seconds": 2,
+            "max_output_bytes": 4096,
+            "env_allowlist": ["DOCS_TOKEN"],
+        }]
+        validate_config(cfg)
+
+        cfg["context"]["external_retrievers"][0]["max_output_bytes"] = 0
+        with self.assertRaises(ValueError):
+            validate_config(cfg)
+
 
 if __name__ == "__main__":
     unittest.main()
