@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ast, hashlib, json, re
+import ast, hashlib, json, re, tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -15,11 +15,28 @@ SYMBOL_RES = [
     re.compile(r"^\s*func\s+(?:\([^)]+\)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\("),
 ]
 SYMBOL_RE = SYMBOL_RES[0]
-ROUTE_RES = [
+CALL_ROUTE_RES = [
     re.compile(r"(?:@(?:app|router|bp|api_router)\.(get|post|put|delete|patch))\s*\(\s*['\"]([^'\"]+)['\"]", re.I),
     re.compile(r"\b(?:router|app|r|e)\.(get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]", re.I),
-    re.compile(r"@(?:Get|Post|Put|Delete|Patch|RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\s*\(\s*['\"]([^'\"]+)['\"]", re.I),
 ]
+SPRING_ROUTE_RE = re.compile(
+    r"@(?P<annotation>Get|Post|Put|Delete|Patch|RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\s*\((?P<args>[^)]*)\)",
+    re.I,
+)
+SPRING_PATH_RE = re.compile(r"(?:\b(?:value|path)\s*=\s*)?['\"](?P<path>/[^'\"]*)['\"]")
+SPRING_METHODS = {
+    "get": "GET",
+    "post": "POST",
+    "put": "PUT",
+    "delete": "DELETE",
+    "patch": "PATCH",
+    "getmapping": "GET",
+    "postmapping": "POST",
+    "putmapping": "PUT",
+    "deletemapping": "DELETE",
+    "patchmapping": "PATCH",
+    "requestmapping": "REQUEST",
+}
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -59,6 +76,21 @@ def _python_symbols(text: str, rel: str, digest: str) -> list[dict] | None:
     return rows
 
 
+def _route_from_line(line: str) -> tuple[str, str] | None:
+    for route_re in CALL_ROUTE_RES:
+        match = route_re.search(line)
+        if match:
+            return match.group(1).upper(), match.group(2)
+    match = SPRING_ROUTE_RE.search(line)
+    if not match:
+        return None
+    path_match = SPRING_PATH_RE.search(match.group("args"))
+    if not path_match:
+        return None
+    method = SPRING_METHODS.get(match.group("annotation").lower(), "REQUEST")
+    return method, path_match.group("path")
+
+
 def _parse_file(path: Path, rel: str, digest: str) -> tuple[list[dict], list[dict]]:
     symbols: list[dict] = []
     endpoints: list[dict] = []
@@ -80,16 +112,40 @@ def _parse_file(path: Path, rel: str, digest: str) -> tuple[list[dict], list[dic
                     break
 
     for i, line in enumerate(lines, 1):
-        for rr in ROUTE_RES:
-            rm = rr.search(line)
-            if rm:
-                endpoints.append({"method": rm.group(1).upper(), "path": rm.group(2), "file": rel, "line": i, "parser": "regex", "sha256": digest})
-                break
+        route = _route_from_line(line)
+        if route:
+            method, route_path = route
+            endpoints.append({"method": method, "path": route_path, "file": rel, "line": i, "parser": "regex", "sha256": digest})
     return symbols, endpoints
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+        ) as temp:
+            temp.write(text)
+            temp_name = temp.name
+        Path(temp_name).replace(path)
+    finally:
+        if temp_name:
+            temp_path = Path(temp_name)
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+
+
 def _write_jsonl(path: Path, rows: list[dict]):
-    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    _atomic_write_text(path, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+
+
+def _write_index_state(path: Path, files: dict[str, dict]) -> None:
+    index_state = {"version": 2, "generated_at": datetime.now(timezone.utc).isoformat(), "files": files}
+    _atomic_write_text(path, json.dumps(index_state, indent=2, sort_keys=True) + "\n")
 
 
 def build_indexes(root: Path) -> dict:
@@ -107,8 +163,7 @@ def build_indexes(root: Path) -> dict:
         endpoints.extend(new_ep)
     _write_jsonl(gen / "symbol-index.jsonl", symbols)
     _write_jsonl(gen / "endpoint-index.jsonl", endpoints)
-    index_state = {"version": 2, "generated_at": datetime.now(timezone.utc).isoformat(), "files": state}
-    (gen / "index-state.json").write_text(json.dumps(index_state, indent=2) + "\n", encoding="utf-8")
+    _write_index_state(gen / "index-state.json", state)
     return {"files": len(state), "symbols": len(symbols), "endpoints": len(endpoints), "ast_files": ast_files}
 
 def load_state(root: Path) -> dict:
@@ -183,6 +238,5 @@ def incremental_indexes(root: Path) -> dict:
         endpoints.extend(new_ep)
     _write_jsonl(gen / "symbol-index.jsonl", symbols)
     _write_jsonl(gen / "endpoint-index.jsonl", endpoints)
-    index_state = {"version": 2, "generated_at": datetime.now(timezone.utc).isoformat(), "files": new_state}
-    (gen / "index-state.json").write_text(json.dumps(index_state, indent=2) + "\n", encoding="utf-8")
+    _write_index_state(gen / "index-state.json", new_state)
     return {"files": len(new_state), "symbols": len(symbols), "endpoints": len(endpoints), "incremental": True, "changed": len(changed), "removed": len(removed), "skipped": skipped, "ast_files_changed": ast_files}
