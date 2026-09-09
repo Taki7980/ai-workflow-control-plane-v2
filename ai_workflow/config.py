@@ -28,7 +28,10 @@ _DEFAULT_CONFIG = {
             "structural_keywords": ["caller", "callee", "dependency", "dependents", "impact", "blast radius", "flow", "architecture", "tests for", "refactor", "what breaks", "affected"],
             "min_source_files": 250, "changed_files_threshold": 3,
         },
-        "semantic": {"mode": "auto", "command": "", "timeout_seconds": 8, "max_results": 6},
+        "semantic": {
+            "mode": "auto", "command": "", "timeout_seconds": 8, "max_results": 6,
+            "max_output_bytes": 8388608, "env_allowlist": [],
+        },
         "external_retrievers": [],
         "sufficiency": {"threshold": 0.72},
         "adaptive_budget": {"enabled": True, "high_sufficiency_fraction": 0.45, "medium_sufficiency_fraction": 0.7, "minimum_chars": 900},
@@ -71,6 +74,22 @@ def _fraction(value: Any, name: str) -> float:
     return float(value)
 
 
+def _string_list(value: Any, name: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ValueError(f"{name} must be an array of non-empty strings")
+    return value
+
+
+def _provider_command(value: Any, name: str) -> None:
+    if isinstance(value, str):
+        if not value.strip():
+            raise ValueError(f"{name} must not be blank")
+        return
+    if isinstance(value, list) and value and all(isinstance(part, str) and part for part in value):
+        return
+    raise ValueError(f"{name} must be a non-empty string or argv array")
+
+
 def validate_config(data: dict[str, Any]) -> None:
     if data.get("version") != 2:
         raise ValueError("unsupported control-plane config version")
@@ -99,20 +118,26 @@ def validate_config(data: dict[str, Any]) -> None:
     if not isinstance(retrievers, list):
         raise ValueError("context.external_retrievers must be an array")
     for index, spec in enumerate(retrievers):
-        if not isinstance(spec, dict) or not str(spec.get("name", "")).strip() or not str(spec.get("command", "")).strip():
-            raise ValueError(f"context.external_retrievers[{index}] requires name and command")
-        intents = spec.get("intents", ["all"])
-        if not isinstance(intents, list) or not intents:
-            raise ValueError(f"context.external_retrievers[{index}].intents must be a non-empty array")
+        prefix = f"context.external_retrievers[{index}]"
+        if not isinstance(spec, dict) or not str(spec.get("name", "")).strip():
+            raise ValueError(f"{prefix} requires name and command")
+        _provider_command(spec.get("command"), f"{prefix}.command")
+        intents = _string_list(spec.get("intents", ["all"]), f"{prefix}.intents")
         if not {str(x).lower() for x in intents}.issubset({"exact", "semantic", "structural", "mixed", "all"}):
-            raise ValueError(f"context.external_retrievers[{index}].intents contains unsupported values")
-        _positive_int(int(spec.get("timeout_seconds", 8)), f"context.external_retrievers[{index}].timeout_seconds")
+            raise ValueError(f"{prefix}.intents contains unsupported values")
+        _positive_int(int(spec.get("timeout_seconds", 8)), f"{prefix}.timeout_seconds")
+        _positive_int(int(spec.get("max_output_bytes", 8388608)), f"{prefix}.max_output_bytes")
+        _string_list(spec.get("env_allowlist", []), f"{prefix}.env_allowlist")
 
     semantic = data["context"]["semantic"]
     if semantic.get("mode", "auto") not in {"auto", "on", "off"}:
         raise ValueError("context.semantic.mode must be auto, on, or off")
+    if semantic.get("command") not in (None, ""):
+        _provider_command(semantic.get("command"), "context.semantic.command")
     _positive_int(int(semantic.get("timeout_seconds", 0)), "context.semantic.timeout_seconds")
     _positive_int(int(semantic.get("max_results", 0)), "context.semantic.max_results")
+    _positive_int(int(semantic.get("max_output_bytes", 8388608)), "context.semantic.max_output_bytes")
+    _string_list(semantic.get("env_allowlist", []), "context.semantic.env_allowlist")
     _fraction(data["context"]["sufficiency"].get("threshold"), "context.sufficiency.threshold")
     adaptive = data["context"]["adaptive_budget"]
     _fraction(adaptive.get("high_sufficiency_fraction"), "context.adaptive_budget.high_sufficiency_fraction")
