@@ -157,6 +157,13 @@ def _parse_records(raw: str) -> list[dict[str, Any]]:
     return [row for row in payload if isinstance(row, dict)]
 
 
+def _score(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
 def _context_items(
     root: Path,
     records: list[dict[str, Any]],
@@ -187,7 +194,7 @@ def _context_items(
             ContextItem(
                 source=source,
                 text=text,
-                score=float(record.get("score", 0.0) or 0.0),
+                score=_score(record.get("score", 0.0)),
                 stale=bool(record.get("stale", False)),
                 metadata=metadata,
                 provenance=provenance,
