@@ -1,15 +1,18 @@
 from __future__ import annotations
-import json, uuid
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from .indexer import sha256
 from .math_retrieval import BM25Scorer, tokenize
+from .memory_store import SQLiteMemoryStore
 from .path_policy import PathOutsideWorkspace, resolve_within_root
 
 MEMORY_TYPES = {"decision", "incident", "verified-fix", "architecture", "pattern", "optimization", "constraint"}
 
-def _path(root: Path) -> Path:
-    return root / "ai-workspace" / "memory" / "memory.jsonl"
+
+def _store(root: Path) -> SQLiteMemoryStore:
+    return SQLiteMemoryStore(root)
+
 
 def _memory_file(root: Path, raw: str) -> tuple[str, Path]:
     try:
@@ -18,6 +21,7 @@ def _memory_file(root: Path, raw: str) -> tuple[str, Path]:
         raise ValueError(f"memory file path must stay within workspace: {raw}") from exc
     rel = resolved.relative_to(root.resolve()).as_posix()
     return rel, resolved
+
 
 def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: str = "", files: list[str] | None = None, confidence: float = 0.8) -> dict:
     if type_ not in MEMORY_TYPES:
@@ -36,11 +40,9 @@ def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: st
         "summary": summary.strip(), "evidence": evidence.strip(), "files": related,
         "source_hashes": source_hashes, "confidence": max(0.0, min(1.0, float(confidence)))
     }
-    p = _path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _store(root).insert(record)
     return record
+
 
 def _stale(root: Path, record: dict) -> bool:
     source_hashes = record.get("source_hashes", {})
@@ -60,20 +62,11 @@ def _stale(root: Path, record: dict) -> bool:
             return True
     return False
 
+
 def search_memory(root: Path, query: str, limit: int = 5, minimum_confidence: float = 0.0, exclude_stale: bool = False) -> list[dict]:
     records: list[dict] = []
     texts: list[str] = []
-    try:
-        lines = _path(root).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for record in _store(root).list_records():
         if float(record.get("confidence", 0)) < minimum_confidence:
             continue
         stale = _stale(root, record)
@@ -96,33 +89,22 @@ def search_memory(root: Path, query: str, limit: int = 5, minimum_confidence: fl
 
 def list_memories(root: Path) -> list[dict]:
     rows = []
-    try:
-        for line in _path(root).read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                r = json.loads(line)
-                r["stale"] = _stale(root, r)
-                rows.append(r)
-    except (OSError, json.JSONDecodeError):
-        pass
+    for record in _store(root).list_records():
+        row = dict(record)
+        row["stale"] = _stale(root, row)
+        rows.append(row)
     rows.sort(key=lambda x: (x.get("stale", False), -float(x.get("confidence", 0))))
     return rows
 
 
 def prune_stale(root: Path) -> dict:
-    p = _path(root)
-    if not p.exists():
-        return {"kept": 0, "pruned": 0}
-    kept, pruned = [], 0
-    for line in p.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            r = json.loads(line)
-            if _stale(root, r):
-                pruned += 1
-            else:
-                kept.append(r)
-        except json.JSONDecodeError:
-            pass
-    p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in kept), encoding="utf-8")
+    store = _store(root)
+    records = store.list_records()
+    kept = [record for record in records if not _stale(root, record)]
+    pruned = len(records) - len(kept)
+    store.replace_all(kept)
     return {"kept": len(kept), "pruned": pruned}
+
+
+def export_memory_jsonl(root: Path, destination: Path) -> int:
+    return _store(root).export_jsonl(destination)
