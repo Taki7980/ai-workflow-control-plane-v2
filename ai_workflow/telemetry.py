@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+from urllib.request import Request, urlopen
 
 
 @dataclass
@@ -31,6 +34,51 @@ class RetrievalTrace:
         return asdict(self)
 
 
+class TelemetrySink(Protocol):
+    def emit(self, payload: dict[str, Any]) -> None: ...
+
+
+class LocalJsonSink:
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+        self.directory = self.root / "ai-workspace" / "generated" / "traces"
+
+    def emit(self, payload: dict[str, Any]) -> None:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        filename = f"{stamp}-{os.getpid()}.json"
+        target = self.directory / filename
+        raw = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        fd, temp_name = tempfile.mkstemp(prefix=".trace-", suffix=".json", dir=self.directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(raw)
+            os.replace(temp_name, target)
+        finally:
+            try:
+                if os.path.exists(temp_name):
+                    os.unlink(temp_name)
+            except OSError:
+                pass
+        payload["_local_path"] = target.relative_to(self.root).as_posix()
+
+
+class OtlpHttpSink:
+    """Best-effort JSON HTTP exporter without adding a runtime dependency."""
+
+    def __init__(self, endpoint: str, timeout_seconds: float = 2.0, headers: dict[str, str] | None = None):
+        self.endpoint = endpoint.strip()
+        self.timeout_seconds = max(0.05, float(timeout_seconds))
+        self.headers = dict(headers or {})
+
+    def emit(self, payload: dict[str, Any]) -> None:
+        body = json.dumps({"resourceLogs": [{"scopeLogs": [{"logRecords": [{"body": payload}]}]}]}, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json", **self.headers}
+        request = Request(self.endpoint, data=body, headers=headers, method="POST")
+        with urlopen(request, timeout=self.timeout_seconds) as response:
+            response.read(1)
+
+
 def trace_enabled(config: dict, lane: str, explicit: bool = False) -> bool:
     cfg = ((config.get("context") or {}).get("telemetry") or {})
     mode = str(cfg.get("mode", "mutations")).lower()
@@ -43,25 +91,85 @@ def trace_enabled(config: dict, lane: str, explicit: bool = False) -> bool:
     return lane != "answer"
 
 
-def write_trace(root: Path, trace: RetrievalTrace) -> str:
-    directory = root / "ai-workspace" / "generated" / "traces"
-    directory.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    filename = f"{stamp}-{os.getpid()}.json"
-    target = directory / filename
-    payload = json.dumps(trace.to_dict(), indent=2, ensure_ascii=False) + "\n"
-    fd, temp_name = tempfile.mkstemp(prefix=".trace-", suffix=".json", dir=directory)
+def _telemetry_config(config: dict | None) -> dict[str, Any]:
+    return dict((((config or {}).get("context") or {}).get("telemetry") or {}))
+
+
+def _headers_from_env(name: str) -> dict[str, str]:
+    if not name:
+        return {}
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-        os.replace(temp_name, target)
-    finally:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(key): str(value) for key, value in parsed.items() if str(key).strip()}
+
+
+def _privacy_payload(trace: RetrievalTrace, config: dict | None) -> dict[str, Any]:
+    cfg = _telemetry_config(config)
+    payload = trace.to_dict()
+    task = str(payload.pop("task", ""))
+    payload["task_fingerprint"] = hashlib.sha256(task.encode("utf-8")).hexdigest()
+    if bool(cfg.get("include_task_text", False)):
+        payload["task"] = task
+    return payload
+
+
+def _prune_traces(root: Path, config: dict | None) -> None:
+    cfg = _telemetry_config(config)
+    directory = root / "ai-workspace" / "generated" / "traces"
+    if not directory.exists():
+        return
+    try:
+        retention_days = max(0, int(cfg.get("retention_days", 30)))
+    except (TypeError, ValueError):
+        retention_days = 30
+    try:
+        max_files = max(1, int(cfg.get("max_trace_files", 200)))
+    except (TypeError, ValueError):
+        max_files = 200
+
+    files = sorted(directory.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    if retention_days > 0:
+        cutoff = time.time() - retention_days * 86400
+        for path in list(files):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    files.remove(path)
+            except OSError:
+                pass
+    for path in files[max_files:]:
         try:
-            if os.path.exists(temp_name):
-                os.unlink(temp_name)
+            path.unlink()
         except OSError:
             pass
-    return target.relative_to(root).as_posix()
+
+
+def write_trace(root: Path, trace: RetrievalTrace, config: dict | None = None) -> str:
+    payload = _privacy_payload(trace, config)
+    local = LocalJsonSink(root)
+    local.emit(payload)
+    _prune_traces(root, config)
+
+    cfg = _telemetry_config(config)
+    endpoint = str(cfg.get("otlp_endpoint", "")).strip()
+    if endpoint:
+        try:
+            OtlpHttpSink(
+                endpoint,
+                timeout_seconds=float(cfg.get("export_timeout_seconds", 2.0)),
+                headers=_headers_from_env(str(cfg.get("otlp_headers_env", ""))),
+            ).emit(payload)
+        except Exception:
+            # External observability must never make retrieval fail.
+            pass
+    return str(payload["_local_path"])
 
 
 def _read_traces(root: Path, limit: int) -> list[dict[str, Any]]:
@@ -102,7 +210,6 @@ def summarize_traces(root: Path, limit: int = 200) -> dict[str, Any]:
 
 
 def policy_recommendations(root: Path, limit: int = 200, minimum_runs: int = 20) -> dict[str, Any]:
-    """Recommend reviewable policy changes from traces; never mutates config."""
     records = _read_traces(root, limit)
     recommendations: list[dict[str, Any]] = []
     if len(records) < minimum_runs:
