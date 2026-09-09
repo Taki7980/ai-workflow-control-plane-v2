@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
-import shlex
-import subprocess
 from pathlib import Path
 
 from .models import ContextItem
+from .provider_runner import command_provider_spec, run_command_provider
+from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 
 VALID_INTENTS = {"exact", "semantic", "structural", "mixed", "all"}
@@ -18,61 +17,39 @@ def configured_retrievers(config: dict, intent: str) -> list[dict]:
         if not isinstance(item, dict) or item.get("enabled", True) is False:
             continue
         name = str(item.get("name", "")).strip()
-        command = str(item.get("command", "")).strip()
+        command = item.get("command", "")
+        has_command = bool(command) if isinstance(command, (list, tuple)) else bool(str(command).strip())
         intents = {str(x).strip().lower() for x in (item.get("intents") or ["all"])}
-        if not name or not command or not intents.issubset(VALID_INTENTS):
+        if not name or not has_command or not intents.issubset(VALID_INTENTS):
             continue
         if "all" in intents or intent in intents:
             out.append(item)
     return out
 
 
-def run_retriever(root: Path, query: str, intent: str, spec: dict, limit: int) -> list[ContextItem]:
-    name = str(spec.get("name", "external")).strip()
-    command = str(spec.get("command", "")).strip()
-    timeout = max(1, int(spec.get("timeout_seconds", 8)))
-    request = json.dumps({"query": query, "root": str(root), "limit": int(limit), "intent": intent}) + "\n"
+def run_retriever_result(root: Path, query: str, intent: str, spec: dict, limit: int) -> ProviderResult:
+    name = str(spec.get("name", "external")).strip() or "external"
     try:
-        proc = subprocess.run(
-            shlex.split(command), cwd=root, input=request, text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            timeout=timeout, check=False,
+        provider = command_provider_spec(spec, default_name=name)
+        request = RetrievalRequest(
+            query=query,
+            root=root,
+            limit=max(1, int(limit)),
+            intent=intent,
+            timeout_seconds=provider.timeout_seconds,
         )
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return []
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return []
-    try:
-        payload = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        payload = []
-        for line in proc.stdout.splitlines():
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                payload.append(record)
-    if isinstance(payload, dict):
-        payload = payload.get("items", [])
-    if not isinstance(payload, list):
-        return []
-    items = []
-    for record in payload[: max(1, limit)]:
-        if not isinstance(record, dict):
-            continue
-        text = str(record.get("text", "")).strip()
-        if not text:
-            continue
-        try:
-            score = float(record.get("score", 0.0))
-        except (TypeError, ValueError):
-            score = 0.0
-        metadata = dict(record.get("metadata") or {})
-        for key in ("path", "file", "line", "start_line", "end_line", "sha256"):
-            if key in record and key not in metadata:
-                metadata[key] = record[key]
-        metadata.update({"retriever": name, "plugin": True})
-        items.append(ContextItem(f"external:{name}", text, score, False, metadata))
-    items.sort(key=lambda item: -item.score)
-    return items
+    except (TypeError, ValueError) as exc:
+        return ProviderResult(name, error=f"invalid provider configuration: {type(exc).__name__}", error_kind="configuration")
+
+    return run_command_provider(
+        provider,
+        request,
+        source=f"external:{name}",
+        metadata_defaults={"retriever": name, "plugin": True},
+    )
+
+
+def run_retriever(root: Path, query: str, intent: str, spec: dict, limit: int) -> list[ContextItem]:
+    """Backward-compatible list API over the typed provider result boundary."""
+
+    return list(run_retriever_result(root, query, intent, spec, limit).items)
