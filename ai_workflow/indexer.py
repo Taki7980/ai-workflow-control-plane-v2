@@ -45,6 +45,22 @@ def sha256(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+
+def _state_entry(path: Path, digest: str) -> dict:
+    stat = path.stat()
+    return {"sha256": digest, "size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)}
+
+
+def _stat_matches(path: Path, entry: dict) -> bool:
+    if "size" not in entry or "mtime_ns" not in entry or not entry.get("sha256"):
+        return False
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return int(entry.get("size", -1)) == int(stat.st_size) and int(entry.get("mtime_ns", -1)) == int(stat.st_mtime_ns)
+
+
 def iter_source(root: Path):
     for p in root.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in SOURCE_EXTS:
@@ -155,7 +171,10 @@ def build_indexes(root: Path) -> dict:
     ast_files = 0
     for path, rel in iter_source(root):
         digest = sha256(path)
-        state[rel] = {"sha256": digest}
+        try:
+            state[rel] = _state_entry(path, digest)
+        except OSError:
+            continue
         new_sym, new_ep = _parse_file(path, rel, digest)
         if any(row.get("parser") == "python-ast" for row in new_sym):
             ast_files += 1
@@ -166,6 +185,7 @@ def build_indexes(root: Path) -> dict:
     _write_index_state(gen / "index-state.json", state)
     return {"files": len(state), "symbols": len(symbols), "endpoints": len(endpoints), "ast_files": ast_files}
 
+
 def load_state(root: Path) -> dict:
     path = root / "ai-workspace" / "generated" / "index-state.json"
     try:
@@ -173,6 +193,7 @@ def load_state(root: Path) -> dict:
         return data if data.get("version") == 2 else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
 
 def row_fresh(root: Path, row: dict, state: dict | None = None) -> bool:
     rel = row.get("file")
@@ -191,7 +212,7 @@ def row_fresh(root: Path, row: dict, state: dict | None = None) -> bool:
         return False
 
 
-def incremental_indexes(root: Path) -> dict:
+def incremental_indexes(root: Path, strict_hash: bool = False) -> dict:
     gen = root / "ai-workspace" / "generated"
     gen.mkdir(parents=True, exist_ok=True)
     old_state = load_state(root)
@@ -211,26 +232,48 @@ def incremental_indexes(root: Path) -> dict:
 
     old_symbols = read_jsonl(gen / "symbol-index.jsonl")
     old_endpoints = read_jsonl(gen / "endpoint-index.jsonl")
-    current_files: dict[str, tuple[Path, str]] = {rel: (path, "") for path, rel in iter_source(root)}
+    current_files: dict[str, Path] = {rel: path for path, rel in iter_source(root)}
     changed: set[str] = set()
     new_state: dict[str, dict] = {}
     skipped = 0
-    for rel, (path, _) in current_files.items():
-        digest = sha256(path)
-        new_state[rel] = {"sha256": digest}
-        old_entry = old_files.get(rel)
+    stat_reused = 0
+    hashed = 0
+
+    for rel, path in current_files.items():
+        old_entry = old_files.get(rel) or {}
+        if not strict_hash and _stat_matches(path, old_entry):
+            try:
+                new_state[rel] = _state_entry(path, str(old_entry["sha256"]))
+            except OSError:
+                changed.add(rel)
+                continue
+            skipped += 1
+            stat_reused += 1
+            continue
+
+        try:
+            digest = sha256(path)
+            hashed += 1
+            new_state[rel] = _state_entry(path, digest)
+        except OSError:
+            changed.add(rel)
+            continue
         if old_entry and old_entry.get("sha256") == digest:
             skipped += 1
         else:
             changed.add(rel)
+
     removed = set(old_files.keys()) - set(current_files.keys())
-    keep_files = set(current_files.keys()) - changed - removed
+    keep_files = set(current_files.keys()) - changed
     symbols = [r for r in old_symbols if r.get("file") in keep_files]
     endpoints = [r for r in old_endpoints if r.get("file") in keep_files]
     ast_files = 0
-    for rel in changed:
-        path = current_files[rel][0]
-        digest = new_state[rel]["sha256"]
+    for rel in sorted(changed):
+        path = current_files.get(rel)
+        entry = new_state.get(rel)
+        if path is None or entry is None:
+            continue
+        digest = entry["sha256"]
         new_sym, new_ep = _parse_file(path, rel, digest)
         if any(row.get("parser") == "python-ast" for row in new_sym):
             ast_files += 1
@@ -239,4 +282,16 @@ def incremental_indexes(root: Path) -> dict:
     _write_jsonl(gen / "symbol-index.jsonl", symbols)
     _write_jsonl(gen / "endpoint-index.jsonl", endpoints)
     _write_index_state(gen / "index-state.json", new_state)
-    return {"files": len(new_state), "symbols": len(symbols), "endpoints": len(endpoints), "incremental": True, "changed": len(changed), "removed": len(removed), "skipped": skipped, "ast_files_changed": ast_files}
+    return {
+        "files": len(new_state),
+        "symbols": len(symbols),
+        "endpoints": len(endpoints),
+        "incremental": True,
+        "strict_hash": bool(strict_hash),
+        "changed": len(changed),
+        "removed": len(removed),
+        "skipped": skipped,
+        "stat_reused": stat_reused,
+        "hashed": hashed,
+        "ast_files_changed": ast_files,
+    }
