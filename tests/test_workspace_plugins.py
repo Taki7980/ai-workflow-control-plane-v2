@@ -1,9 +1,10 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ai_workflow.models import ContextItem
+from ai_workflow.retrieval_contracts import ProviderResult
 from ai_workflow.retriever_plugins import configured_retrievers, run_retriever
 from ai_workflow.workspace import workspace_roots
 
@@ -26,14 +27,29 @@ class RetrieverPluginTests(unittest.TestCase):
         ]}}
         self.assertEqual([x["name"] for x in configured_retrievers(cfg, "semantic")], ["semantic-extra"])
 
-    def test_command_plugin_parses_json_results(self):
+    def test_typed_provider_candidates_preserve_legacy_list_api(self):
         spec = {"name": "custom", "command": "custom-retriever", "intents": ["all"], "timeout_seconds": 2}
-        fake = type("P", (), {"returncode": 0, "stdout": json.dumps([{"text": "payment dependency", "score": 0.8, "path": "service.py"}])})()
-        with tempfile.TemporaryDirectory() as td, patch("ai_workflow.retriever_plugins.subprocess.run", return_value=fake):
+        fake = ProviderResult(
+            "custom",
+            (ContextItem(
+                "external:custom",
+                "payment dependency",
+                0.8,
+                metadata={"path": "service.py", "plugin": True, "retriever": "custom"},
+            ),),
+            1.5,
+        )
+        with tempfile.TemporaryDirectory() as td, patch("ai_workflow.retriever_plugins.run_command_provider", return_value=fake):
             items = run_retriever(Path(td), "payment", "semantic", spec, 5)
         self.assertEqual(items[0].source, "external:custom")
         self.assertEqual(items[0].metadata["path"], "service.py")
         self.assertTrue(items[0].metadata["plugin"])
+
+    def test_argv_commands_are_accepted(self):
+        cfg = {"context": {"external_retrievers": [
+            {"name": "argv", "command": ["python", "provider.py"], "intents": ["all"]},
+        ]}}
+        self.assertEqual([x["name"] for x in configured_retrievers(cfg, "mixed")], ["argv"])
 
 
 if __name__ == "__main__":
