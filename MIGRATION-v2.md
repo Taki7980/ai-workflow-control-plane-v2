@@ -17,6 +17,12 @@ The old PowerShell command names remain under `ai-workspace/scripts/`, but most 
 
 `generate-diff-brief.ps1` had bootstrap behavior despite its name in v1. In v2 it is an explicit deprecated alias to `setup.ps1`.
 
+## Index and fingerprint compatibility
+
+Workspace fingerprints now use schema `2` identity semantics. The resolved `root` still appears in diagnostics, but it is excluded from the fingerprint payload. `index_state_sha256` is derived from the stable index manifest (`version` and `files`) instead of volatile metadata such as `generated_at`.
+
+The fingerprint value intentionally changes once after this correction. Consumers should keep treating it as an opaque content identity, not as a parsed or user-visible version string.
+
 ## First run
 
 ```bash
