@@ -107,7 +107,7 @@ class TelemetryPrivacyTests(unittest.TestCase):
             cfg = {"context": {"telemetry": {"max_trace_files": 2, "retention_days": 3650}}}
             for index in range(4):
                 write_trace(root, RetrievalTrace(f"task {index}", "small", "low", "exact"), cfg)
-            files = list((root / "ai-workspace/telemetry/retrieval").glob("*.json"))
+            files = list((root / "ai-workspace/generated/traces").glob("*.json"))
             self.assertLessEqual(len(files), 2)
 
     def test_exporter_failure_never_breaks_local_trace(self):
