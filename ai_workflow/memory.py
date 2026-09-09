@@ -4,11 +4,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from .indexer import sha256
 from .math_retrieval import BM25Scorer, tokenize
+from .path_policy import PathOutsideWorkspace, resolve_within_root
 
 MEMORY_TYPES = {"decision", "incident", "verified-fix", "architecture", "pattern", "optimization", "constraint"}
 
 def _path(root: Path) -> Path:
     return root / "ai-workspace" / "memory" / "memory.jsonl"
+
+def _memory_file(root: Path, raw: str) -> tuple[str, Path]:
+    try:
+        resolved = resolve_within_root(root, raw)
+    except (PathOutsideWorkspace, OSError) as exc:
+        raise ValueError(f"memory file path must stay within workspace: {raw}") from exc
+    rel = resolved.relative_to(root.resolve()).as_posix()
+    return rel, resolved
 
 def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: str = "", files: list[str] | None = None, confidence: float = 0.8) -> dict:
     if type_ not in MEMORY_TYPES:
@@ -17,8 +26,7 @@ def add_memory(root: Path, type_: str, keywords: str, summary: str, evidence: st
     related = []
     source_hashes = {}
     for raw in files or []:
-        rel = Path(raw).as_posix()
-        p = root / rel
+        rel, p = _memory_file(root, raw)
         related.append(rel)
         if p.exists() and p.is_file():
             source_hashes[rel] = sha256(p)
@@ -39,7 +47,10 @@ def _stale(root: Path, record: dict) -> bool:
     if any(rel not in source_hashes for rel in record.get("files", [])):
         return True
     for rel, expected in source_hashes.items():
-        p = root / rel
+        try:
+            p = resolve_within_root(root, rel)
+        except (PathOutsideWorkspace, OSError):
+            return True
         if not p.exists():
             return True
         try:
