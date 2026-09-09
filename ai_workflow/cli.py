@@ -124,7 +124,12 @@ def cmd_context(args):
     items, retrieval = gather_detailed(root, args.task, decision, budget, config, providers, args.symbol, args.endpoint, changed, write_telemetry=args.trace)
     _json({"lane": decision.lane.value, "risk": decision.risk.value, "confidence": decision.confidence, "budget": budget.estimated_tokens, "retrieval": retrieval, "items": [i.to_dict() for i in items], "estimated_tokens": estimate_tokens("\n".join(i.text for i in items))})
 
-def cmd_index(args): _json(incremental_indexes(_root(args)) if getattr(args, "incremental", False) else build_indexes(_root(args)))
+def cmd_index(args):
+    root = _root(args)
+    if getattr(args, "incremental", False):
+        _json(incremental_indexes(root, strict_hash=bool(getattr(args, "strict_hash", False))))
+    else:
+        _json(build_indexes(root))
 def cmd_doctor(args):
     root=_root(args); result,ok=doctor_run(root,load_config(root)); _json(result)
     if args.strict and not ok: raise SystemExit(1)
@@ -160,7 +165,7 @@ def build_parser():
         q=sp.add_parser(name); q.add_argument("task"); q.add_argument("--symbol"); q.add_argument("--endpoint"); q.add_argument("--changed-file",action="append",default=[]); q.add_argument("--trace",action="store_true")
         if name=="brief": q.add_argument("--write-handoff",action="store_true"); q.add_argument("--format",choices=["json","markdown","prompt"],default="json")
         q.set_defaults(func=fn)
-    q=sp.add_parser("index"); q.add_argument("--incremental",action="store_true"); q.set_defaults(func=cmd_index)
+    q=sp.add_parser("index"); q.add_argument("--incremental",action="store_true"); q.add_argument("--strict-hash",action="store_true",help="hash all source files when verifying an incremental index"); q.set_defaults(func=cmd_index)
     q=sp.add_parser("doctor"); q.add_argument("--strict",action="store_true"); q.set_defaults(func=cmd_doctor)
     q=sp.add_parser("verify"); q.add_argument("--check",action="append",default=[]); q.add_argument("--strict",action="store_true"); q.set_defaults(func=cmd_verify)
     q=sp.add_parser("benchmark"); q.add_argument("--tasks",required=True); q.add_argument("--output"); q.set_defaults(func=cmd_benchmark)
