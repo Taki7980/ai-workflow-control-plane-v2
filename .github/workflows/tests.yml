@@ -45,13 +45,21 @@ jobs:
         assert summary['abstention_accuracy'] is not None
         assert summary['mean_relevant_item_density'] is not None
         assert summary['mean_pattern_yield_per_1k_tokens'] is not None
+        assert summary['mean_estimated_context_tokens'] is not None
+        assert summary['mean_budget_utilization'] is not None
+        assert summary['mean_elapsed_ms'] is not None
 
         print('BENCHMARK_SUMMARY=' + json.dumps({
             'lane_accuracy': summary['lane_accuracy'],
             'intent_accuracy': summary['intent_accuracy'],
             'evidence_state_accuracy': summary['evidence_state_accuracy'],
             'abstention_accuracy': summary['abstention_accuracy'],
+            'mean_estimated_context_tokens': summary['mean_estimated_context_tokens'],
+            'mean_budget_utilization': summary['mean_budget_utilization'],
             'mean_relevant_item_density': summary['mean_relevant_item_density'],
             'mean_pattern_yield_per_1k_tokens': summary['mean_pattern_yield_per_1k_tokens'],
+            'sufficiency_rate': summary['sufficiency_rate'],
+            'fallback_rate': summary['fallback_rate'],
+            'mean_elapsed_ms': summary['mean_elapsed_ms'],
         }, sort_keys=True))
         PY
