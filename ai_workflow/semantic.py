@@ -8,11 +8,17 @@ from .provider_runner import command_provider_spec, run_command_provider
 from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 
-def configured_command(config: dict) -> str:
+def configured_command(config: dict) -> str | list[str]:
     semantic = ((config.get("context") or {}).get("semantic") or {})
     if str(semantic.get("mode", "auto")).lower() == "off":
         return ""
-    return os.getenv("AI_WORKFLOW_SEMANTIC_CMD", "").strip() or str(semantic.get("command", "")).strip()
+    environment_command = os.getenv("AI_WORKFLOW_SEMANTIC_CMD", "").strip()
+    if environment_command:
+        return environment_command
+    configured = semantic.get("command", "")
+    if isinstance(configured, list):
+        return [str(part) for part in configured]
+    return str(configured).strip()
 
 
 def semantic_ready(config: dict) -> bool:
