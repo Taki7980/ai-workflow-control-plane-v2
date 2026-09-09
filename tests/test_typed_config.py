@@ -13,6 +13,7 @@ class TypedConfigTests(unittest.TestCase):
         from ai_workflow.typed_config import ControlPlaneConfig
 
         raw = default_config()
+        raw["workspace"]["roots"] = ["repo"]
         typed = ControlPlaneConfig.from_dict(raw)
         self.assertEqual(typed["version"], 2)
         self.assertEqual(typed.get("workspace")["max_roots"], 4)
@@ -38,16 +39,25 @@ class TypedConfigTests(unittest.TestCase):
         mutable["workspace"]["roots"].append("other")
         self.assertEqual(tuple(typed.workspace["roots"]), ())
 
-    def test_missing_version_and_v1_migrate_to_v2_preserving_unknown_keys(self):
+    def test_v1_migrates_to_v2_preserving_unknown_keys(self):
         from ai_workflow.config import migrate_config
 
-        for source in ({"workspace": {"roots": ["backend"]}, "custom": 7}, {"version": 1, "workspace": {"roots": ["backend"]}, "custom": 7}):
-            migrated = migrate_config(source)
-            self.assertEqual(migrated["version"], 2)
-            self.assertEqual(migrated["workspace"]["roots"], ["backend"])
-            self.assertEqual(migrated["workspace"]["max_roots"], 4)
-            self.assertEqual(migrated["custom"], 7)
-            self.assertIn("budgets", migrated)
+        source = {"version": 1, "workspace": {"roots": ["backend"]}, "custom": 7}
+        migrated = migrate_config(source)
+        self.assertEqual(migrated["version"], 2)
+        self.assertEqual(migrated["workspace"]["roots"], ["backend"])
+        self.assertEqual(migrated["workspace"]["max_roots"], 4)
+        self.assertEqual(migrated["custom"], 7)
+        self.assertIn("budgets", migrated)
+
+    def test_missing_version_remains_invalid_to_preserve_fail_closed_setup(self):
+        from ai_workflow.config import migrate_config, validate_config
+
+        source = {"workspace": {"roots": ["backend"]}, "custom": 7}
+        migrated = migrate_config(source)
+        self.assertNotIn("version", migrated)
+        with self.assertRaises(ValueError):
+            validate_config(migrated)
 
     def test_future_version_is_refused(self):
         from ai_workflow.config import migrate_config
