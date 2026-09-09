@@ -11,8 +11,8 @@ from .models import ContextItem, Lane, RouteDecision
 from .orchestration import build_orchestration_contract
 from .providers import ProviderStatus
 from .retrieval_policy import classify_retrieval_intent, evaluate_sufficiency
-from .retriever_plugins import configured_retrievers, run_retriever
-from .semantic import semantic_context
+from .retriever_plugins import configured_retrievers, run_retriever_result
+from .semantic import semantic_result
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
 from .workspace_state import workspace_fingerprint
@@ -145,15 +145,18 @@ def gather_detailed(
     threshold = float((((config.get("context") or {}).get("sufficiency") or {}).get("threshold", 0.72)))
     suff = evaluate_sufficiency(query, base_items, structural_required=plan.use_structural, threshold=threshold)
     specialist_items: list[ContextItem] = []
+    provider_errors: dict[str, dict] = {}
 
     should_semantic = plan.use_semantic and not suff.sufficient
     if should_semantic and providers.semantic:
         trace.providers_attempted.append("semantic")
-        start = time.perf_counter()
-        semantic_items = semantic_context(root, query, config, int(config["context"].get("max_results_per_source", 6)))
-        trace.stage_latency_ms["semantic"] = round((time.perf_counter() - start) * 1000, 2)
-        trace.candidates["semantic"] = len(semantic_items)
-        specialist_items.extend(_provenance(item, root) for item in semantic_items)
+        result = semantic_result(root, query, config, int(config["context"].get("max_results_per_source", 6)))
+        trace.stage_latency_ms["semantic"] = round(result.latency_ms, 2)
+        trace.candidates["semantic"] = len(result.items)
+        if result.error:
+            provider_errors["semantic"] = result.error_dict() or {"kind": "provider_error", "message": result.error}
+            trace.fallbacks.append(f"semantic provider failed: {result.error_kind or 'provider_error'}")
+        specialist_items.extend(_provenance(item, root) for item in result.items)
     elif plan.use_semantic:
         trace.providers_skipped["semantic"] = "provider not configured" if not providers.semantic else "base evidence sufficient"
 
@@ -162,11 +165,13 @@ def gather_detailed(
             name = str(spec.get("name", "external"))
             label = f"external:{name}"
             trace.providers_attempted.append(label)
-            start = time.perf_counter()
-            plugin_items = run_retriever(root, query, plan.intent.value, spec, int(config["context"].get("max_results_per_source", 6)))
-            trace.stage_latency_ms[label] = round((time.perf_counter() - start) * 1000, 2)
-            trace.candidates[label] = len(plugin_items)
-            specialist_items.extend(_provenance(item, root) for item in plugin_items)
+            result = run_retriever_result(root, query, plan.intent.value, spec, int(config["context"].get("max_results_per_source", 6)))
+            trace.stage_latency_ms[label] = round(result.latency_ms, 2)
+            trace.candidates[label] = len(result.items)
+            if result.error:
+                provider_errors[label] = result.error_dict() or {"kind": "provider_error", "message": result.error}
+                trace.fallbacks.append(f"{label} failed: {result.error_kind or 'provider_error'}")
+            specialist_items.extend(_provenance(item, root) for item in result.items)
 
     limit = int(config["context"].get("max_results_per_source", 6)) * 3
     candidates = _hybrid_rank(query, base_items, specialist_items, limit) if specialist_items else base_items
@@ -206,7 +211,7 @@ def gather_detailed(
         "exact_match": final_suff.exact_match,
         "structural_complete": final_suff.structural_complete,
     }
-    if plan.use_semantic and not any(item.source == "semantic" for item in specialist_items) and not final_suff.sufficient:
+    if plan.use_semantic and not any(item.source == "semantic" for item in specialist_items) and not final_suff.sufficient and "semantic" not in provider_errors:
         trace.fallbacks.append("semantic unavailable or returned no candidates")
     if plan.use_structural and not any(item.source == "code_review_graph" for item in selected):
         trace.fallbacks.append("structural provider unavailable; base broker source fallback used")
@@ -224,6 +229,7 @@ def gather_detailed(
         "hard_context_chars": budget.context_chars,
         "providers_attempted": trace.providers_attempted,
         "providers_skipped": trace.providers_skipped,
+        "provider_errors": provider_errors,
         "fallbacks": trace.fallbacks,
         "stage_latency_ms": trace.stage_latency_ms,
     }
