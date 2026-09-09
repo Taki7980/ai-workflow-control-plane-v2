@@ -114,6 +114,12 @@ def _scheduler_error(outcome: SchedulerOutcome) -> dict:
     }
 
 
+def _fallback_label(label: str, kind: str) -> str:
+    if label == "semantic":
+        return f"semantic provider failed: {kind}"
+    return f"{label} failed: {kind}"
+
+
 class WorkflowEngine:
     """Application-level retrieval sequencer with bounded concurrent adapters."""
 
@@ -179,7 +185,8 @@ class WorkflowEngine:
             else:
                 trace.candidates[outcome.label] = 0
                 provider_errors[outcome.label] = _scheduler_error(outcome)
-                trace.fallbacks.append(f"{outcome.label} failed: {outcome.error_kind or 'scheduler_error'}")
+                kind = outcome.error_kind or "scheduler_error"
+                trace.fallbacks.append(_fallback_label(outcome.label, kind))
                 if outcome.timed_out:
                     deadline_labels.append(outcome.label)
 
@@ -233,7 +240,8 @@ class WorkflowEngine:
                 trace.stage_latency_ms[outcome.label] = round(outcome.latency_ms, 2)
                 trace.candidates[outcome.label] = 0
                 provider_errors[outcome.label] = _scheduler_error(outcome)
-                trace.fallbacks.append(f"{outcome.label} failed: {outcome.error_kind or 'scheduler_error'}")
+                error_kind = outcome.error_kind or "scheduler_error"
+                trace.fallbacks.append(_fallback_label(outcome.label, error_kind))
                 if outcome.timed_out:
                     deadline_labels.append(outcome.label)
                 continue
@@ -243,7 +251,8 @@ class WorkflowEngine:
             trace.candidates[outcome.label] = len(result.items)
             if result.error:
                 provider_errors[outcome.label] = result.error_dict() or {"kind": "provider_error", "message": result.error}
-                trace.fallbacks.append(f"{outcome.label} failed: {result.error_kind or 'provider_error'}")
+                error_kind = result.error_kind or "provider_error"
+                trace.fallbacks.append(_fallback_label(outcome.label, error_kind))
             specialist_items.extend(_provenance(item, root) for item in result.items)
 
         limit = provider_limit * 3
