@@ -71,15 +71,18 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
     """Return a migrated detached config without mutating caller input.
 
     Current v2 inputs are not default-filled: they retain the existing strict
-    validation boundary. Legacy missing-version/v1 inputs are upgraded by
-    overlaying their values onto v2 defaults, preserving unknown extension keys.
+    validation boundary. Explicit v1 inputs are upgraded by overlaying their
+    values onto v2 defaults. Unversioned inputs remain unversioned so the
+    existing fail-closed validation behavior is preserved.
     """
 
     if not isinstance(data, dict):
         raise ValueError("control-plane config must be a JSON object")
     raw = copy.deepcopy(data)
     version = raw.get("version")
-    if version in (None, 1):
+    if version is None:
+        return raw
+    if version == 1:
         raw.pop("version", None)
         migrated = _deep_merge(default_config(), raw)
         migrated["version"] = CURRENT_CONFIG_VERSION
