@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .path_policy import PathOutsideWorkspace, resolve_within_root
+
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -50,7 +52,11 @@ def workspace_fingerprint(root: Path, changed_files: list[str] | None = None) ->
     root = root.resolve()
     changed = []
     for rel in sorted(set(changed_files or [])):
-        path = root / rel
+        try:
+            path = resolve_within_root(root, rel)
+        except (PathOutsideWorkspace, OSError):
+            changed.append({'path': rel, 'state': 'rejected', 'sha256': None})
+            continue
         if not path.exists() or not path.is_file():
             changed.append({'path': rel, 'state': 'missing', 'sha256': None})
             continue
