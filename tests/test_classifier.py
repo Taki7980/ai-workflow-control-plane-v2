@@ -23,6 +23,18 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(decision.lane, Lane.FULL)
         self.assertEqual(decision.risk, Risk.HIGH)
 
+    def test_high_risk_does_not_imply_structural_context(self):
+        for task in (
+            "Change authentication token validation",
+            "Modify payment schema migration",
+            "Deploy a public API contract change",
+        ):
+            with self.subTest(task=task):
+                decision = classify(task, CFG)
+                self.assertEqual(decision.lane, Lane.FULL)
+                self.assertEqual(decision.risk, Risk.HIGH)
+                self.assertFalse(decision.structural_context)
+
     def test_small_known_file(self):
         self.assertEqual(classify("rename typo in src/ui.ts", CFG).lane, Lane.SMALL)
 
