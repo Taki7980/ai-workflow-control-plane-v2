@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
-import shlex
-import subprocess
 from pathlib import Path
 
 from .models import ContextItem
+from .provider_runner import command_provider_spec, run_command_provider
+from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 
 def configured_command(config: dict) -> str:
@@ -20,61 +19,42 @@ def semantic_ready(config: dict) -> bool:
     return bool(configured_command(config))
 
 
-def semantic_context(root: Path, query: str, config: dict, limit: int) -> list[ContextItem]:
+def semantic_result(root: Path, query: str, config: dict, limit: int) -> ProviderResult:
     command = configured_command(config)
     if not command:
-        return []
+        return ProviderResult("semantic", error="semantic provider is not configured", error_kind="not_configured")
 
-    semantic = ((config.get("context") or {}).get("semantic") or {})
-    timeout = max(1, int(semantic.get("timeout_seconds", 8)))
-    request = json.dumps({"query": query, "root": str(root), "limit": int(limit)}) + "\n"
+    semantic = dict(((config.get("context") or {}).get("semantic") or {}))
+    semantic["name"] = "semantic"
+    semantic["command"] = command
     try:
-        proc = subprocess.run(
-            shlex.split(command),
-            cwd=root,
-            input=request,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
+        provider = command_provider_spec(semantic, default_name="semantic")
+        request = RetrievalRequest(
+            query=query,
+            root=root,
+            limit=max(1, int(limit)),
+            intent="semantic",
+            timeout_seconds=provider.timeout_seconds,
         )
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return []
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return []
+    except (TypeError, ValueError) as exc:
+        return ProviderResult(
+            "semantic",
+            error=f"invalid semantic provider configuration: {type(exc).__name__}",
+            error_kind="configuration",
+        )
 
-    raw = proc.stdout.strip()
-    records: list[dict] = []
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            parsed = parsed.get("items", [])
-        if isinstance(parsed, list):
-            records = [x for x in parsed if isinstance(x, dict)]
-    except json.JSONDecodeError:
-        for line in raw.splitlines():
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(item, dict):
-                records.append(item)
+    return run_command_provider(
+        provider,
+        request,
+        source="semantic",
+        metadata_defaults={"retriever": "semantic"},
+    )
 
-    out: list[ContextItem] = []
-    for record in records[: max(1, int(limit))]:
-        text = str(record.get("text", "")).strip()
-        if not text:
-            continue
-        try:
-            score = float(record.get("score", 0.0))
-        except (TypeError, ValueError):
-            score = 0.0
-        metadata = dict(record.get("metadata") or {})
-        for key in ("path", "line", "start_line", "end_line", "sha256"):
-            if key in record and key not in metadata:
-                metadata[key] = record[key]
-        metadata.update({"retriever": "semantic", "trust": metadata.get("trust", "untrusted_repository_content")})
-        out.append(ContextItem("semantic", text, score, False, metadata))
-    out.sort(key=lambda item: -item.score)
-    return out
+
+def semantic_context(root: Path, query: str, config: dict, limit: int) -> list[ContextItem]:
+    """Backward-compatible list API over the typed provider result boundary."""
+
+    result = semantic_result(root, query, config, limit)
+    if result.error_kind == "not_configured":
+        return []
+    return list(result.items)
