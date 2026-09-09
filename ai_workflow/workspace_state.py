@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -23,6 +24,28 @@ def _git_head(root: Path) -> str | None:
     return value if proc.returncode == 0 and value else None
 
 
+def _stable_index_identity(root: Path) -> dict[str, Any] | None:
+    index_path = root / 'ai-workspace' / 'generated' / 'index-state.json'
+    if not index_path.exists():
+        return None
+    try:
+        data = json.loads(index_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    files = data.get('files')
+    if not isinstance(files, dict):
+        return None
+    return {
+        'version': data.get('version'),
+        'files': files,
+    }
+
+
+def _stable_json_digest(payload: object) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    return _sha256_bytes(encoded)
+
+
 def workspace_fingerprint(root: Path, changed_files: list[str] | None = None) -> dict:
     root = root.resolve()
     changed = []
@@ -38,17 +61,17 @@ def workspace_fingerprint(root: Path, changed_files: list[str] | None = None) ->
             continue
         changed.append({'path': rel, 'state': 'present', 'sha256': digest})
 
-    index_path = root / 'ai-workspace' / 'generated' / 'index-state.json'
-    try:
-        index_digest = _sha256_bytes(index_path.read_bytes()) if index_path.exists() else None
-    except OSError:
-        index_digest = None
+    index_identity = _stable_index_identity(root)
+    index_digest = _stable_json_digest(index_identity) if index_identity is not None else None
 
-    payload = {
-        'root': str(root),
+    identity_payload = {
+        'schema': 2,
         'git_head': _git_head(root),
         'index_state_sha256': index_digest,
         'changed_files': changed,
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
-    return {**payload, 'fingerprint': _sha256_bytes(encoded)}
+    return {
+        'root': str(root),
+        **identity_payload,
+        'fingerprint': _stable_json_digest(identity_payload),
+    }
