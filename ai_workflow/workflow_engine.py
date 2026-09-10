@@ -228,13 +228,21 @@ class WorkflowEngine:
         write_telemetry: bool = False,
     ) -> tuple[list[ContextItem], dict]:
         changed = changed_files or []
-        plan = classify_retrieval_intent(query, decision, symbol=symbol, endpoint=endpoint)
+        plan = classify_retrieval_intent(
+            query,
+            decision,
+            symbol=symbol,
+            endpoint=endpoint,
+        )
+        roots = workspace_roots(root, config)
         learning_decision, learning_path = prepare_learning_decision(
             root,
             query,
             decision,
             plan.intent.value,
             config,
+            changed_files_count=len(changed),
+            workspace_roots_count=len(roots),
         )
         effective_config = apply_learning_arm(
             config,
@@ -248,8 +256,10 @@ class WorkflowEngine:
         def remaining() -> float:
             return global_deadline - (time.perf_counter() - started)
 
-        roots = workspace_roots(root, config)
-        max_roots = max(1, int(((config.get("workspace") or {}).get("max_roots", 4))))
+        max_roots = max(
+            1,
+            int(((config.get("workspace") or {}).get("max_roots", 4))),
+        )
         selected_roots = roots[:max_roots]
         base_calls: list[ScheduledCall] = []
         for index, candidate_root in enumerate(selected_roots):
