@@ -155,6 +155,9 @@ class RetrievalLearningTests(unittest.TestCase):
         self.assertEqual(rows[0]["decision_id"], decision.decision_id)
         self.assertTrue(rows[0]["outcome"]["verified"])
         self.assertEqual(rows[0]["outcome"]["reward"], 0.9)
+        self.assertIsNotNone(
+            rows[0]["outcome"]["verification_delay_seconds"]
+        )
 
     def test_unknown_outcome_decision_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
