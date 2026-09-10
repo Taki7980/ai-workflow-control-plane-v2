@@ -10,7 +10,7 @@ from .adaptive_broker import gather_detailed_async
 from .budget import ContextBudget, truncate
 from .models import ContextItem, RouteDecision
 from .providers import ProviderStatus
-from .workspace_budget import RepositoryBudget, allocate_repository_budgets
+from .workspace_budget import allocate_repository_budgets
 from .workspace_selector import (
     RepositoryCandidate,
     RepositorySelection,
@@ -30,7 +30,11 @@ def _portable_changed_path(candidate: RepositoryCandidate, local_path: str) -> s
     local = str(local_path).replace("\\", "/").lstrip("/")
     if candidate.repository_path == ".":
         return local
-    return f"{candidate.repository_path.rstrip('/')}/{local}" if local else candidate.repository_path
+    return (
+        f"{candidate.repository_path.rstrip('/')}/{local}"
+        if local
+        else candidate.repository_path
+    )
 
 
 def _portable_item(item: ContextItem, candidate: RepositoryCandidate) -> ContextItem:
@@ -42,7 +46,9 @@ def _portable_item(item: ContextItem, candidate: RepositoryCandidate) -> Context
         container["repository_id"] = candidate.repository_id
         container["repository_path"] = candidate.repository_path
         container["repository_fingerprint"] = candidate.fingerprint
-    return ContextItem(item.source, item.text, item.score, item.stale, metadata, provenance)
+    return ContextItem(
+        item.source, item.text, item.score, item.stale, metadata, provenance
+    )
 
 
 def _source_path(item: ContextItem) -> str:
@@ -54,7 +60,9 @@ def _source_path(item: ContextItem) -> str:
     return ""
 
 
-def _cap_workspace_items(entries: list[tuple[Any, ...]], context_chars: int) -> tuple[ContextItem, ...]:
+def _cap_workspace_items(
+    entries: list[tuple[Any, ...]], context_chars: int
+) -> tuple[ContextItem, ...]:
     out: list[ContextItem] = []
     seen: set[tuple[str, str]] = set()
     used = 0
@@ -70,7 +78,16 @@ def _cap_workspace_items(entries: list[tuple[Any, ...]], context_chars: int) -> 
         metadata = dict(item.metadata)
         if cut:
             metadata["truncated"] = True
-        out.append(ContextItem(item.source, text, item.score, item.stale, metadata, dict(item.provenance)))
+        out.append(
+            ContextItem(
+                item.source,
+                text,
+                item.score,
+                item.stale,
+                metadata,
+                dict(item.provenance),
+            )
+        )
         used += len(text)
     return tuple(out)
 
@@ -90,8 +107,8 @@ async def gather_workspace_detailed_async(
 ) -> WorkspaceRetrievalResult:
     workspace_root = Path(workspace_root).resolve()
     candidates = build_repository_candidates(workspace_root, config, changed_files)
-    retrieval_cfg = ((config.get("workspace") or {}).get("retrieval") or {})
-    selector_cfg = ((config.get("context") or {}).get("selector") or {})
+    retrieval_cfg = (config.get("workspace") or {}).get("retrieval") or {}
+    selector_cfg = (config.get("context") or {}).get("selector") or {}
     selections = select_repositories(
         workspace_root,
         candidates,
@@ -99,9 +116,14 @@ async def gather_workspace_detailed_async(
         symbol=symbol,
         endpoint=endpoint,
         max_selected=max(1, int(retrieval_cfg.get("max_selected_repositories", 3))),
-        max_index_candidates=max(1, int(selector_cfg.get("max_selector_candidates", 200))),
+        max_index_candidates=max(
+            1, int(selector_cfg.get("max_selector_candidates", 200))
+        ),
     )
-    selected = sorted((row for row in selections if row.selected), key=lambda row: (row.rank, row.candidate.repository_id))
+    selected = sorted(
+        (row for row in selections if row.selected),
+        key=lambda row: (row.rank, row.candidate.repository_id),
+    )
     repo_budgets = allocate_repository_budgets(budget, selections)
     budget_by_id = {row.repository_id: row for row in repo_budgets}
     max_workers = max(1, int(retrieval_cfg.get("max_workers", 3)))
@@ -118,7 +140,14 @@ async def gather_workspace_detailed_async(
         async with semaphore:
             remaining = deadline_at - time.monotonic()
             if remaining <= 0:
-                return selection, allocation, (), {}, "deadline", (time.perf_counter() - started) * 1000
+                return (
+                    selection,
+                    allocation,
+                    (),
+                    {},
+                    "deadline",
+                    (time.perf_counter() - started) * 1000,
+                )
             try:
                 items, repo_diagnostics = await asyncio.wait_for(
                     gather_detailed_async(
@@ -138,13 +167,36 @@ async def gather_workspace_detailed_async(
                     timeout=remaining,
                 )
             except asyncio.TimeoutError:
-                return selection, allocation, (), {}, "deadline", (time.perf_counter() - started) * 1000
-            except Exception as exc:
-                return selection, allocation, (), {"error": f"{type(exc).__name__}: {exc}"}, "error", (time.perf_counter() - started) * 1000
+                return (
+                    selection,
+                    allocation,
+                    (),
+                    {},
+                    "deadline",
+                    (time.perf_counter() - started) * 1000,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate repository failures
+                return (
+                    selection,
+                    allocation,
+                    (),
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                    "error",
+                    (time.perf_counter() - started) * 1000,
+                )
         portable = tuple(_portable_item(item, candidate) for item in items)
-        return selection, allocation, portable, repo_diagnostics, "ok", (time.perf_counter() - started) * 1000
+        return (
+            selection,
+            allocation,
+            portable,
+            repo_diagnostics,
+            "ok",
+            (time.perf_counter() - started) * 1000,
+        )
 
-    results = await asyncio.gather(*(run_one(row) for row in selected)) if selected else []
+    results = (
+        await asyncio.gather(*(run_one(row) for row in selected)) if selected else []
+    )
     entries: list[tuple[Any, ...]] = []
     repository_results: dict[str, dict[str, Any]] = {}
     primary_retrieval: dict[str, Any] = {}
@@ -183,16 +235,18 @@ async def gather_workspace_detailed_async(
         for local_rank, item in enumerate(items):
             source_path = _source_path(item)
             changed_boost = 1 if source_path and source_path in changed else 0
-            entries.append((
-                local_rank,
-                -float(selection.score),
-                -changed_boost,
-                candidate.repository_id,
-                item.source,
-                source_path,
-                item.dedupe_key,
-                item,
-            ))
+            entries.append(
+                (
+                    local_rank,
+                    -float(selection.score),
+                    -changed_boost,
+                    candidate.repository_id,
+                    item.source,
+                    source_path,
+                    item.dedupe_key,
+                    item,
+                )
+            )
 
     final_items = _cap_workspace_items(entries, budget.context_chars)
     final_used = sum(len(item.text) for item in final_items)
@@ -200,14 +254,18 @@ async def gather_workspace_detailed_async(
     selected_ids = {row.candidate.repository_id for row in selected}
     skipped = [
         row.candidate.repository_id
-        for row in sorted(selections, key=lambda row: (row.rank, row.candidate.repository_id))
+        for row in sorted(
+            selections, key=lambda row: (row.rank, row.candidate.repository_id)
+        )
         if row.candidate.repository_id not in selected_ids
     ]
-    changed_detected = sorted({
-        _portable_changed_path(row.candidate, path)
-        for row in selections
-        for path in row.candidate.changed_files
-    })
+    changed_detected = sorted(
+        {
+            _portable_changed_path(row.candidate, path)
+            for row in selections
+            for path in row.candidate.changed_files
+        }
+    )
     diagnostics: dict[str, Any] = {
         "workspace_fingerprint": aggregate.get("fingerprint", ""),
         "repository_count": len(candidates),
@@ -223,7 +281,9 @@ async def gather_workspace_detailed_async(
                 "selected": row.selected,
                 "reasons": list(row.reasons),
             }
-            for row in sorted(selections, key=lambda row: (row.rank, row.candidate.repository_id))
+            for row in sorted(
+                selections, key=lambda row: (row.rank, row.candidate.repository_id)
+            )
         ],
         "repository_results": repository_results,
         "budget": {
@@ -247,4 +307,7 @@ def gather_workspace_detailed(*args, **kwargs) -> WorkspaceRetrievalResult:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(gather_workspace_detailed_async(*args, **kwargs))
-    raise RuntimeError("gather_workspace_detailed() cannot run inside an event loop; use gather_workspace_detailed_async()")
+    raise RuntimeError(
+        "gather_workspace_detailed() cannot run inside an event loop; "
+        "use gather_workspace_detailed_async()"
+    )

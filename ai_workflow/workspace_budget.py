@@ -31,8 +31,12 @@ def _allocate_integers(total: int, weighted: list[tuple[str, float]]) -> dict[st
 
 
 def _ratios(selections: list[RepositorySelection]) -> list[tuple[str, float]]:
-    ordered = sorted(selections, key=lambda row: (row.rank, row.candidate.repository_id))
-    positive = [(row.candidate.repository_id, max(0.0, float(row.score))) for row in ordered]
+    ordered = sorted(
+        selections, key=lambda row: (row.rank, row.candidate.repository_id)
+    )
+    positive = [
+        (row.candidate.repository_id, max(0.0, float(row.score))) for row in ordered
+    ]
     total = sum(weight for _, weight in positive)
     if total <= 0:
         return []
@@ -71,7 +75,10 @@ def allocate_repository_budgets(
         equal = 1.0 / len(selected)
         ratio_pairs = [(row.candidate.repository_id, equal) for row in selected]
     ratio_map = dict(ratio_pairs)
-    weighted = [(row.candidate.repository_id, ratio_map[row.candidate.repository_id]) for row in selected]
+    weighted = [
+        (row.candidate.repository_id, ratio_map[row.candidate.repository_id])
+        for row in selected
+    ]
     context_alloc = _allocate_integers(parent.context_chars, weighted)
     token_alloc = _allocate_integers(parent.estimated_tokens, weighted)
     source_alloc = {
@@ -82,12 +89,16 @@ def allocate_repository_budgets(
     budgets: list[RepositoryBudget] = []
     for row in selected:
         repo_id = row.candidate.repository_id
-        source_chars = {source: allocations[repo_id] for source, allocations in source_alloc.items()}
+        source_chars = {
+            source: allocations[repo_id] for source, allocations in source_alloc.items()
+        }
         budgets.append(
             RepositoryBudget(
                 repository_id=repo_id,
                 rank=row.rank,
-                ratio=context_alloc[repo_id] / parent.context_chars if parent.context_chars else 0.0,
+                ratio=context_alloc[repo_id] / parent.context_chars
+                if parent.context_chars
+                else 0.0,
                 context=ContextBudget(
                     estimated_tokens=token_alloc[repo_id],
                     output_tokens=0,
