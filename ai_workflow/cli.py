@@ -12,6 +12,7 @@ from .context_broker import detect_changed_files
 from .doctor import run as doctor_run
 from .handoff import validate as validate_handoff, render as render_handoff
 from .indexer import build_indexes, incremental_indexes
+from .io_utils import atomic_write_json, atomic_write_text
 from .memory import add_memory, search_memory, list_memories, prune_stale
 from .providers import detect, execution_provider, model_tier
 from .telemetry import policy_recommendations, summarize_traces
@@ -24,7 +25,11 @@ def _json(data):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 def cmd_setup(args):
-    result = setup(_root(args), args.project_name)
+    index_mode = "none" if getattr(args, "no_index", False) else "auto"
+    try:
+        result = setup(_root(args), args.project_name, create=bool(getattr(args, "create", False)), index_mode=index_mode)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise SystemExit(str(exc)) from exc
     if args.json:
         _json(result)
         return
@@ -34,6 +39,7 @@ def cmd_setup(args):
         print("Created: " + ", ".join(result["created"]))
     if result["preserved"]:
         print("Preserved: " + ", ".join(result["preserved"]))
+    print("Index: " + str((result.get("index") or {}).get("mode", "unknown")))
     print("Next: " + result["next"])
 
 def cmd_bootstrap(args):
@@ -46,9 +52,8 @@ def cmd_init(args):
         load_config(root); text = agents.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", args.project_name)
     except FileNotFoundError as exc:
         raise SystemExit("Copy the workflow template into the project or run `ai-workflow bootstrap --project-name NAME`; config and AGENTS.md are required.") from exc
-    (root / ".ai").mkdir(parents=True, exist_ok=True)
-    (root / ".ai" / "PROJECT").write_text(str(root) + "\n", encoding="utf-8")
-    agents.write_text(text, encoding="utf-8")
+    atomic_write_text(root / ".ai" / "PROJECT", ".\n")
+    atomic_write_text(agents, text)
     _json({"status": "initialized", "project": args.project_name, "root": str(root), "index": build_indexes(root)})
 
 def _decision(root: Path, task: str):
@@ -112,11 +117,10 @@ def cmd_brief(args):
         "context": [i.to_dict() for i in items], "estimated_context_tokens_used": estimate_tokens("\n".join(i.text for i in items)),
         "output_compression": "rtk" if providers.rtk else "builtin", "changed_files_detected": changed}
     if args.write_handoff and decision.lane.value != "answer":
-        text = render_handoff(decision, provider, [i.source for i in items], args.task); (root / ".ai").mkdir(parents=True, exist_ok=True)
-        (root / ".ai" / "HANDOFF.md").write_text(text, encoding="utf-8"); packet["handoff_written"] = ".ai/HANDOFF.md"
+        text = render_handoff(decision, provider, [i.source for i in items], args.task)
+        atomic_write_text(root / ".ai" / "HANDOFF.md", text); packet["handoff_written"] = ".ai/HANDOFF.md"
     if decision.lane.value != "answer":
-        out = root / "ai-workspace" / "generated" / "last-brief.json"; out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(packet, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        atomic_write_json(root / "ai-workspace" / "generated" / "last-brief.json", packet)
     print(_format_brief(packet, getattr(args, "format", "json")))
 
 def cmd_context(args):
@@ -148,7 +152,7 @@ def cmd_verify(args):
     if args.strict and not result["ok"]: raise SystemExit(1)
 def cmd_benchmark(args):
     root=_root(args); result=run_benchmark(root,load_config(root),load_tasks(Path(args.tasks)))
-    if args.output: Path(args.output).write_text(json.dumps(result,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
+    if args.output: atomic_write_json(Path(args.output), result)
     _json(result)
 def cmd_stats(args):
     root=_root(args); result=summarize_traces(root,args.limit)
@@ -157,7 +161,7 @@ def cmd_stats(args):
 
 def build_parser():
     p=argparse.ArgumentParser(prog="ai-workflow",description="AI Workflow Efficiency Control Plane"); p.add_argument("--root",help="project root; auto-detected by default"); sp=p.add_subparsers(dest="command",required=True)
-    q=sp.add_parser("setup",help="connect AI Workflow to the current project; safe to rerun"); q.add_argument("--project-name"); q.add_argument("--json",action="store_true",help="print machine-readable setup result"); q.set_defaults(func=cmd_setup)
+    q=sp.add_parser("setup",help="connect AI Workflow to the current project; safe to rerun"); q.add_argument("--project-name"); q.add_argument("--create",action="store_true",help="explicitly create a missing project root"); q.add_argument("--no-index",action="store_true",help="skip initial/incremental index work"); q.add_argument("--json",action="store_true",help="print machine-readable setup result"); q.set_defaults(func=cmd_setup)
     q=sp.add_parser("bootstrap"); q.add_argument("--project-name",required=True); q.set_defaults(func=cmd_bootstrap)
     q=sp.add_parser("init"); q.add_argument("--project-name",required=True); q.set_defaults(func=cmd_init)
     q=sp.add_parser("route"); q.add_argument("task"); q.set_defaults(func=cmd_route)
@@ -165,7 +169,7 @@ def build_parser():
         q=sp.add_parser(name); q.add_argument("task"); q.add_argument("--symbol"); q.add_argument("--endpoint"); q.add_argument("--changed-file",action="append",default=[]); q.add_argument("--trace",action="store_true")
         if name=="brief": q.add_argument("--write-handoff",action="store_true"); q.add_argument("--format",choices=["json","markdown","prompt"],default="json")
         q.set_defaults(func=fn)
-    q=sp.add_parser("index"); q.add_argument("--incremental",action="store_true"); q.add_argument("--strict-hash",action="store_true",help="hash all source files when verifying an incremental index"); q.set_defaults(func=cmd_index)
+    q=sp.add_parser("index"); q.add_argument("--incremental",action="store_true"); q.add_argument("--strict-hash","--verify-hashes",dest="strict_hash",action="store_true",help="hash all source files when verifying an incremental index"); q.set_defaults(func=cmd_index)
     q=sp.add_parser("doctor"); q.add_argument("--strict",action="store_true"); q.set_defaults(func=cmd_doctor)
     q=sp.add_parser("verify"); q.add_argument("--check",action="append",default=[]); q.add_argument("--strict",action="store_true"); q.set_defaults(func=cmd_verify)
     q=sp.add_parser("benchmark"); q.add_argument("--tasks",required=True); q.add_argument("--output"); q.set_defaults(func=cmd_benchmark)
