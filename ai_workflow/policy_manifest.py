@@ -224,8 +224,16 @@ def verify_policy_manifest(
         if signature.get("key_id") != _key_id(signing_key):
             errors.append("key_id_mismatch")
 
+    if manifest.get("status") != "shadow_only":
+        errors.append("status_mismatch")
     if manifest.get("fallback_arm") != BASELINE_ARM:
         errors.append("fallback_arm_mismatch")
+    rollback = manifest.get("rollback")
+    if (
+        not isinstance(rollback, dict)
+        or rollback.get("target_arm") != BASELINE_ARM
+    ):
+        errors.append("rollback_target_mismatch")
     locked = manifest.get("locked_risks")
     if locked != ["medium", "high"]:
         errors.append("locked_risks_mismatch")
