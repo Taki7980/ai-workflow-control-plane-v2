@@ -240,7 +240,11 @@ class WorkspaceRetrievalTests(unittest.TestCase):
             repo = workspace / "backend"
             repo.mkdir()
             candidate = RepositoryCandidate(repo, "repo-a", "backend", None, "fp-a", (), False)
+            other_root = workspace / "frontend"
+            other_root.mkdir()
+            other = RepositoryCandidate(other_root, "repo-b", "frontend", None, "fp-b", (), False)
             selection = RepositorySelection(candidate, 10.0, 1, True, ("identity_match",))
+            skipped_selection = RepositorySelection(other, 0.0, 2, False, ("no_relevant_signal",))
             parent = ContextBudget(
                 50,
                 10,
@@ -298,8 +302,8 @@ class WorkspaceRetrievalTests(unittest.TestCase):
                     },
                 )
 
-            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate]), \
-                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection]), \
+            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate, other]), \
+                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection, skipped_selection]), \
                  patch("ai_workflow.workspace_retrieval.allocate_repository_budgets", return_value=[repo_budget]), \
                  patch("ai_workflow.workspace_retrieval.aggregate_workspace_fingerprint", return_value={"fingerprint": "workspace-fp"}), \
                  patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather), \
@@ -372,6 +376,44 @@ class WorkspaceRetrievalTests(unittest.TestCase):
 
             build_graph.assert_not_called()
             self.assertEqual(result.diagnostics["workspace_graph"]["status"], "disabled")
+
+
+    def test_stage4_graph_skips_single_repository_augmentation(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            repo = workspace / "backend"
+            repo.mkdir()
+            candidate = RepositoryCandidate(repo, "repo-a", "backend", None, "fp-a", (), False)
+            selection = RepositorySelection(candidate, 10.0, 1, True, ("identity_match",))
+            parent = ContextBudget(
+                100,
+                20,
+                300,
+                {"hot_cache": 30, "lightweight": 90, "crg": 120, "source_fallback": 60},
+            )
+            repo_budget = RepositoryBudget("repo-a", 1, 1.0, parent)
+            config = default_config()
+            providers = ProviderStatus(False, False, False, False, False)
+            decision = RouteDecision(Lane.FULL, Risk.MEDIUM, ["test"], True, 0.9)
+
+            async def fake_gather(*args, **kwargs):
+                return [ContextItem("targeted_source", "base evidence", 1.0, False, {"file": "api.py"})], {}
+
+            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate]), \
+                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection]), \
+                 patch("ai_workflow.workspace_retrieval.allocate_repository_budgets", return_value=[repo_budget]), \
+                 patch("ai_workflow.workspace_retrieval.aggregate_workspace_fingerprint", return_value={"fingerprint": "workspace-fp"}), \
+                 patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather), \
+                 patch("ai_workflow.workspace_retrieval.build_workspace_graph") as build_graph:
+                result = asyncio.run(
+                    gather_workspace_detailed_async(
+                        workspace, "task", decision, parent, config, providers
+                    )
+                )
+
+            build_graph.assert_not_called()
+            self.assertEqual(result.diagnostics["workspace_graph"]["status"], "single_repository")
+            self.assertEqual([item.text for item in result.items], ["base evidence"])
 
 
 if __name__ == "__main__":
