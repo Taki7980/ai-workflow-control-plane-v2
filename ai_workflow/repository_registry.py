@@ -3,6 +3,8 @@ from __future__ import annotations
 import configparser
 import hashlib
 import json
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,38 @@ def registry_path(root: Path, config: dict | None = None) -> Path:
     configured = workspace.get("registry") or _DEFAULT_REGISTRY.as_posix()
     path = Path(str(configured))
     return path if path.is_absolute() else Path(root).resolve() / path
+
+
+@contextmanager
+def _registry_lock(path: Path):
+    """Serialize registry writers across processes with a persistent sidecar lock."""
+
+    lock_path = Path(f"{path}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _relative_or_none(path: Path, root: Path) -> str | None:
@@ -192,7 +226,7 @@ def remote_identity(remote_url: str | None) -> str | None:
 
     if "@" in raw and ":" in raw and "://" not in raw:
         host_part, path_part = raw.split(":", 1)
-        host = host_part.rsplit("@", 1)[-1].lower()
+        host = host_part.rsplit("@", 1)[-1]
         path = path_part.strip("/")
     else:
         parsed = urlparse(raw)
@@ -202,12 +236,12 @@ def remote_identity(remote_url: str | None) -> str | None:
         else:
             digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
             return f"opaque:{digest}"
-    if path.endswith(".git"):
+    if path.lower().endswith(".git"):
         path = path[:-4]
     if not host or not path:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
         return f"opaque:{digest}"
-    return f"{host.lower()}/{path.lower()}"
+    return f"{host.lower()}/{path}"
 
 
 def _spec_for_directory(
@@ -382,7 +416,11 @@ def load_registry(root: Path, config: dict | None = None) -> list[RepositorySpec
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return []
-    if not isinstance(data, dict) or data.get("version") != _REGISTRY_VERSION:
+    if (
+        not isinstance(data, dict)
+        or data.get("version") != _REGISTRY_VERSION
+        or data.get("review_required") is not True
+    ):
         return []
     repositories = data.get("repositories")
     if not isinstance(repositories, list):
@@ -451,23 +489,25 @@ def refresh_registry(
 ) -> dict[str, Any]:
     """Rediscover repositories while preserving only unchanged explicit decisions."""
 
-    existing = {
-        (repo.relative_path, repo.remote_identity): repo
-        for repo in load_registry(root, config)
-    }
-    discovered = discover_repositories(root, max_depth=max_depth)
-    merged: list[RepositorySpec] = []
-    for repo in discovered:
-        previous = existing.get((repo.relative_path, repo.remote_identity))
-        merged.append(
-            replace(
-                repo,
-                included=bool(previous.included) if previous is not None else False,
-                reason=previous.reason if previous is not None else repo.reason,
+    path = registry_path(root, config)
+    with _registry_lock(path):
+        existing = {
+            (repo.relative_path, repo.remote_identity): repo
+            for repo in load_registry(root, config)
+        }
+        discovered = discover_repositories(root, max_depth=max_depth)
+        merged: list[RepositorySpec] = []
+        for repo in discovered:
+            previous = existing.get((repo.relative_path, repo.remote_identity))
+            merged.append(
+                replace(
+                    repo,
+                    included=bool(previous.included) if previous is not None else False,
+                    reason=previous.reason if previous is not None else repo.reason,
+                )
             )
-        )
-    atomic_write_json(registry_path(root, config), registry_payload(merged))
-    return registry_summary(root, config)
+        atomic_write_json(path, registry_payload(merged))
+        return registry_summary(root, config)
 
 
 def _matches_selector(repo: RepositorySpec, selector: str) -> bool:
@@ -490,22 +530,25 @@ def set_repository_included(
     value = str(selector or "").strip()
     if not value:
         raise ValueError("repository selector must not be blank")
-    repositories = load_registry(root, config)
-    matches = [repo for repo in repositories if _matches_selector(repo, value)]
-    if not matches:
-        raise ValueError(f"repository not found: {value}")
-    if len(matches) != 1:
-        raise ValueError(f"repository selector is ambiguous: {value}")
 
-    target = matches[0]
-    updated = [
-        replace(repo, included=bool(included)) if repo == target else repo
-        for repo in repositories
-    ]
-    atomic_write_json(registry_path(root, config), registry_payload(updated))
-    result = registry_summary(root, config)
-    result["changed"] = {
-        **_entry(replace(target, included=bool(included))),
-        "action": "included" if included else "excluded",
-    }
-    return result
+    path = registry_path(root, config)
+    with _registry_lock(path):
+        repositories = load_registry(root, config)
+        matches = [repo for repo in repositories if _matches_selector(repo, value)]
+        if not matches:
+            raise ValueError(f"repository not found: {value}")
+        if len(matches) != 1:
+            raise ValueError(f"repository selector is ambiguous: {value}")
+
+        target = matches[0]
+        updated = [
+            replace(repo, included=bool(included)) if repo == target else repo
+            for repo in repositories
+        ]
+        atomic_write_json(path, registry_payload(updated))
+        result = registry_summary(root, config)
+        result["changed"] = {
+            **_entry(replace(target, included=bool(included))),
+            "action": "included" if included else "excluded",
+        }
+        return result
