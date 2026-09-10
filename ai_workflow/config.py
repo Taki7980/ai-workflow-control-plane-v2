@@ -253,3 +253,7 @@ def load_typed_config(root: Path):
 
 def load_config(root: Path) -> dict[str, Any]:
     return load_typed_config(root).to_dict()
+
+
+def estimate_tokens(text: str, estimator: TokenEstimator | None = None) -> int:
+    return (estimator or _DEFAULT_TOKEN_ESTIMATOR).estimate(text)
