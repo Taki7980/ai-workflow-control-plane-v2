@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .adaptive_broker import gather_detailed
 from .benchmark import load_tasks, run_benchmark
+from .benchmark_ablation import PROFILE_ORDER, run_ablation_suite
 from .bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
 from .budget import budget_for
 from .classifier import classify
@@ -405,6 +406,25 @@ def cmd_benchmark(args):
     _json(result)
 
 
+def cmd_benchmark_ablate(args):
+    root = _root(args)
+    tasks = load_tasks(
+        Path(args.tasks),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    result = run_ablation_suite(
+        root,
+        load_config(root),
+        tasks,
+        args.profile or list(PROFILE_ORDER),
+        require_frozen_snapshot=bool(args.require_frozen_snapshot),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
 def cmd_stats(args):
     root = _root(args)
     result = summarize_traces(root, args.limit)
@@ -551,6 +571,22 @@ def build_parser():
         help="fail if any declared benchmark base_commit differs from the local checkout",
     )
     q.set_defaults(func=cmd_benchmark)
+
+    q = sp.add_parser(
+        "benchmark-ablate",
+        help="compare retrieval provider families on the same frozen benchmark cases",
+    )
+    q.add_argument("--tasks", required=True)
+    q.add_argument("--output")
+    q.add_argument(
+        "--profile",
+        action="append",
+        choices=list(PROFILE_ORDER),
+        help="profile to run; repeat to compare a subset (defaults to all)",
+    )
+    q.add_argument("--research-protocol", action="store_true")
+    q.add_argument("--require-frozen-snapshot", action="store_true")
+    q.set_defaults(func=cmd_benchmark_ablate)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
