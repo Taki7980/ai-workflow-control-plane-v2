@@ -519,7 +519,9 @@ def build_workspace_graph(
                 evidence=local,
             )
             nodes[endpoint_node.node_id] = endpoint_node
-            endpoint_nodes_by_route.setdefault(route, []).append((method, endpoint_node))
+            endpoint_nodes_by_route.setdefault(route, []).append(
+                (method, endpoint_node)
+            )
             source = file_nodes.get((candidate.repository_id, local))
             if source is not None:
                 implements = _edge(
