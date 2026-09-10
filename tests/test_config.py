@@ -30,3 +30,44 @@ class ConfigValidationTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "source share"):
                 load_config(root)
+
+
+    def test_stage4_graph_defaults(self):
+        from ai_workflow.config import default_config
+
+        self.assertEqual(
+            default_config()["workspace"]["graph"],
+            {
+                "enabled": True,
+                "max_hops": 2,
+                "max_nodes": 24,
+                "max_edges": 40,
+                "max_context_chars": 3000,
+                "min_edge_confidence": 0.8,
+                "build_on_demand": True,
+            },
+        )
+
+    def test_stage4_graph_config_rejects_invalid_values(self):
+        from ai_workflow.config import default_config, validate_config
+
+        invalid = (
+            ("max_hops", 0),
+            ("max_hops", 4),
+            ("max_nodes", 0),
+            ("max_nodes", 101),
+            ("max_edges", 0),
+            ("max_edges", 201),
+            ("max_context_chars", 255),
+            ("max_context_chars", 12001),
+            ("min_edge_confidence", -0.01),
+            ("min_edge_confidence", 1.01),
+            ("enabled", "yes"),
+            ("build_on_demand", "yes"),
+        )
+        for key, value in invalid:
+            with self.subTest(key=key, value=value):
+                config = default_config()
+                config["workspace"]["graph"][key] = value
+                with self.assertRaises(ValueError):
+                    validate_config(config)
