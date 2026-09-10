@@ -12,6 +12,7 @@ ALGORITHM_PROFILE_ORDER = (
     "bm25_rank",
     "rrf_only",
     "rrf_mmr_050",
+    "rrf_mmr_075",
     "rrf_mmr_090",
     "selector_off",
     "fixed_budget",
@@ -47,6 +48,9 @@ def algorithm_profile_config(
     elif name == "rrf_mmr_050":
         experiments["hybrid_ranker"] = "rrf_mmr"
         experiments["mmr_lambda"] = 0.50
+    elif name == "rrf_mmr_075":
+        experiments["hybrid_ranker"] = "rrf_mmr"
+        experiments["mmr_lambda"] = 0.75
     elif name == "rrf_mmr_090":
         experiments["hybrid_ranker"] = "rrf_mmr"
         experiments["mmr_lambda"] = 0.90
