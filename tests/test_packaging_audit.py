@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-import tomllib
 import unittest
 from pathlib import Path
 
@@ -12,17 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PackageMetadataTests(unittest.TestCase):
     def test_modern_pep639_metadata_and_dev_tools_are_declared(self):
-        data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn("setuptools>=77", data["build-system"]["requires"])
-        project = data["project"]
-        self.assertEqual(project["license"], "MIT")
-        self.assertEqual(project["license-files"], ["LICENSE*"])
-        self.assertIn("urls", project)
-        dev = project["optional-dependencies"]["dev"]
-        self.assertTrue(any(x.startswith("build") for x in dev))
-        self.assertTrue(any(x.startswith("ruff") for x in dev))
-        self.assertTrue(any(x.startswith("mypy") for x in dev))
-        self.assertIn("version", project.get("dynamic", []))
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('requires = ["setuptools>=77"]', pyproject)
+        self.assertIn('license = "MIT"', pyproject)
+        self.assertIn('license-files = ["LICENSE*"]', pyproject)
+        self.assertIn("[project.urls]", pyproject)
+        self.assertIn("[project.optional-dependencies]", pyproject)
+        self.assertIn('"build>=1.3"', pyproject)
+        self.assertIn('"ruff>=0.12"', pyproject)
+        self.assertIn('"mypy>=1.17"', pyproject)
+        self.assertIn('dynamic = ["version"]', pyproject)
+        self.assertIn('[tool.setuptools.dynamic]', pyproject)
 
     def test_cli_version_uses_same_source_as_package(self):
         from ai_workflow import __version__
