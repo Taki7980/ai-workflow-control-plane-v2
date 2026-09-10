@@ -194,5 +194,27 @@ class CliStateTests(unittest.TestCase):
         self.assertNotIn(str(self.root.resolve()), prompt)
 
 
+    def test_stage4_graph_status_cli(self):
+        self.template()
+        packet = self.run_cli("graph", "status")
+        self.assertEqual(packet["status"], "missing")
+        self.assertFalse(packet["reusable"])
+        self.assertIn("graph_fingerprint", packet)
+        self.assertIn("node_count", packet)
+        self.assertIn("edge_count", packet)
+
+    def test_stage4_graph_build_cli(self):
+        self.template()
+        packet = self.run_cli("graph", "build")
+        self.assertEqual(packet["status"], "built")
+        self.assertIn("graph_fingerprint", packet)
+        self.assertIn("node_count", packet)
+        self.assertIn("edge_count", packet)
+
+        status = self.run_cli("graph", "status")
+        self.assertEqual(status["status"], "ready")
+        self.assertTrue(status["reusable"])
+
+
 if __name__ == "__main__":
     unittest.main()
