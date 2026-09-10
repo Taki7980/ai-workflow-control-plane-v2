@@ -8,6 +8,15 @@ from pathlib import Path
 from .adaptive_broker import gather_detailed
 from .benchmark import load_tasks, run_benchmark
 from .benchmark_ablation import PROFILE_ORDER, run_ablation_suite
+from .benchmark_algorithm_ablation import (
+    ALGORITHM_PROFILE_ORDER,
+    run_algorithm_ablation_suite,
+)
+from .benchmark_intervention import (
+    SEED_MODES,
+    build_seed_intervention_manifest,
+    run_seed_interventions,
+)
 from .bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
 from .budget import budget_for
 from .classifier import classify
@@ -425,6 +434,57 @@ def cmd_benchmark_ablate(args):
     _json(result)
 
 
+def cmd_benchmark_algorithms(args):
+    root = _root(args)
+    tasks = load_tasks(
+        Path(args.tasks),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    result = run_algorithm_ablation_suite(
+        root,
+        load_config(root),
+        tasks,
+        args.profile or list(ALGORITHM_PROFILE_ORDER),
+        require_frozen_snapshot=bool(args.require_frozen_snapshot),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
+def cmd_benchmark_intervene(args):
+    root = _root(args)
+    tasks = load_tasks(
+        Path(args.tasks),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    manifest = build_seed_intervention_manifest(
+        root,
+        load_config(root),
+        tasks,
+        args.mode or list(SEED_MODES),
+        seed_k=args.seed_k,
+        require_frozen_snapshot=bool(args.require_frozen_snapshot),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    if args.runner_command:
+        command = [args.runner_command, *(args.runner_arg or [])]
+        result = run_seed_interventions(
+            root,
+            manifest,
+            command,
+            timeout_seconds=args.runner_timeout,
+            max_output_bytes=args.runner_max_output_bytes,
+            env_allowlist=args.runner_env or [],
+        )
+    else:
+        result = manifest
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
 def cmd_stats(args):
     root = _root(args)
     result = summarize_traces(root, args.limit)
@@ -587,6 +647,67 @@ def build_parser():
     q.add_argument("--research-protocol", action="store_true")
     q.add_argument("--require-frozen-snapshot", action="store_true")
     q.set_defaults(func=cmd_benchmark_ablate)
+
+    q = sp.add_parser(
+        "benchmark-algorithms",
+        help="compare retrieval ranking, selection, budget, and sufficiency algorithms",
+    )
+    q.add_argument("--tasks", required=True)
+    q.add_argument("--output")
+    q.add_argument(
+        "--profile",
+        action="append",
+        choices=list(ALGORITHM_PROFILE_ORDER),
+        help="profile to run; repeat to compare a subset (defaults to all)",
+    )
+    q.add_argument("--research-protocol", action="store_true")
+    q.add_argument("--require-frozen-snapshot", action="store_true")
+    q.set_defaults(func=cmd_benchmark_algorithms)
+
+    q = sp.add_parser(
+        "benchmark-intervene",
+        help="build or execute retrieval/random/oracle seed interventions",
+    )
+    q.add_argument("--tasks", required=True)
+    q.add_argument("--output")
+    q.add_argument(
+        "--mode",
+        action="append",
+        choices=list(SEED_MODES),
+        help="seed mode; repeat to compare a subset (defaults to all)",
+    )
+    q.add_argument("--seed-k", type=int, default=5)
+    q.add_argument("--research-protocol", action="store_true")
+    q.add_argument("--require-frozen-snapshot", action="store_true")
+    q.add_argument(
+        "--runner-command",
+        help="optional executable implementing the JSON intervention runner protocol",
+    )
+    q.add_argument(
+        "--runner-arg",
+        action="append",
+        default=[],
+        help="argument passed to the runner executable; repeat as needed",
+    )
+    q.add_argument(
+        "--runner-timeout",
+        type=float,
+        default=120.0,
+        help="per-intervention runner timeout in seconds",
+    )
+    q.add_argument(
+        "--runner-max-output-bytes",
+        type=int,
+        default=4 * 1024 * 1024,
+        help="maximum accepted stdout bytes per runner invocation",
+    )
+    q.add_argument(
+        "--runner-env",
+        action="append",
+        default=[],
+        help="environment variable name explicitly exposed to the runner",
+    )
+    q.set_defaults(func=cmd_benchmark_intervene)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
