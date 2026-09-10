@@ -1,0 +1,31 @@
+class AiWorkflow < Formula
+  desc "Agent-agnostic adaptive control plane for AI-assisted software development"
+  homepage "https://github.com/Taki7980/ai-workflow-control-plane-v2"
+  version "@VERSION@"
+  license "MIT"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/Taki7980/ai-workflow-control-plane-v2/releases/download/v@VERSION@/@MACOS_ARM_ASSET@"
+      sha256 "@MACOS_ARM_SHA256@"
+    else
+      url "https://github.com/Taki7980/ai-workflow-control-plane-v2/releases/download/v@VERSION@/@MACOS_X64_ASSET@"
+      sha256 "@MACOS_X64_SHA256@"
+    end
+  end
+
+  on_linux do
+    url "https://github.com/Taki7980/ai-workflow-control-plane-v2/releases/download/v@VERSION@/@LINUX_X64_ASSET@"
+    sha256 "@LINUX_X64_SHA256@"
+  end
+
+  def install
+    artifact = Dir["ai-workflow-v*"].first
+    odie "release artifact not found" unless artifact
+    bin.install artifact => "ai-workflow"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/ai-workflow --version")
+  end
+end

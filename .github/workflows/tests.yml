@@ -50,9 +50,33 @@ jobs:
       - name: Compile package
         run: python -m compileall -q ai_workflow
       - name: Ruff focused quality gate
-        run: ruff check --select E,F,UP,BLE,EXE ai_workflow/retrieval_contracts.py ai_workflow/retrieval_scheduler.py ai_workflow/path_policy.py ai_workflow/typed_config.py ai_workflow/benchmark_regression.py scripts/check_benchmark_regression.py
+        run: >-
+          ruff check --select E,F,UP,BLE,EXE
+          ai_workflow/retrieval_contracts.py
+          ai_workflow/retrieval_scheduler.py
+          ai_workflow/path_policy.py
+          ai_workflow/typed_config.py
+          ai_workflow/benchmark_regression.py
+          ai_workflow/execution_semantics.py
+          ai_workflow/provenance.py
+          ai_workflow/retrieval_cache.py
+          ai_workflow/retrieval_adapters.py
+          ai_workflow/api.py
+          ai_workflow/provider_runner.py
+          scripts/check_benchmark_regression.py
       - name: Mypy typed-boundary gate
-        run: mypy ai_workflow/retrieval_contracts.py ai_workflow/path_policy.py ai_workflow/typed_config.py ai_workflow/benchmark_regression.py
+        run: >-
+          mypy --follow-imports=skip
+          ai_workflow/retrieval_contracts.py
+          ai_workflow/path_policy.py
+          ai_workflow/typed_config.py
+          ai_workflow/benchmark_regression.py
+          ai_workflow/execution_semantics.py
+          ai_workflow/provenance.py
+          ai_workflow/retrieval_cache.py
+          ai_workflow/retrieval_adapters.py
+          ai_workflow/api.py
+          ai_workflow/provider_runner.py
 
   package-smoke:
     runs-on: ubuntu-latest

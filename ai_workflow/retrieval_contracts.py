@@ -59,13 +59,18 @@ class ProviderResult:
 
 
 class Retriever(Protocol):
-    """Synchronous provider contract used by the current control plane.
-
-    The concurrent engine schedules implementations of this contract without
-    changing request/result semantics.
-    """
+    """Synchronous provider contract."""
 
     name: str
 
     def retrieve(self, request: RetrievalRequest) -> ProviderResult:
+        ...
+
+
+class AsyncRetriever(Protocol):
+    """Native asynchronous provider contract with identical result semantics."""
+
+    name: str
+
+    async def retrieve(self, request: RetrievalRequest) -> ProviderResult:
         ...
