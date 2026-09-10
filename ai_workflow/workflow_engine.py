@@ -404,15 +404,6 @@ class WorkflowEngine:
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
             "algorithm_policy": algorithm_policy,
-            "learning": {
-                **learning_decision.to_dict(),
-                "decision_logged": learning_path is not None,
-                "decision_path": (
-                    Path(learning_path).relative_to(root.resolve()).as_posix()
-                    if learning_path is not None
-                    else None
-                ),
-            },
             "workspace_roots": [str(path) for path in roots],
             "workspace_state": snapshot,
             "evidence_state": state,
@@ -433,6 +424,16 @@ class WorkflowEngine:
                 "elapsed_ms": round(elapsed_ms, 2),
             },
         }
+        if learning_decision.mode != "off":
+            diagnostics["learning"] = {
+                **learning_decision.to_dict(),
+                "decision_logged": learning_path is not None,
+                "decision_path": (
+                    Path(learning_path).relative_to(root.resolve()).as_posix()
+                    if learning_path is not None
+                    else None
+                ),
+            }
         diagnostics["orchestration"] = build_orchestration_contract(
             decision, diagnostics, changed, len(roots), providers, config
         )
