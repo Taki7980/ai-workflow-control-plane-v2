@@ -1,7 +1,9 @@
 from __future__ import annotations
-import ast, hashlib, json, re, tempfile
+import ast, hashlib, json, re
 from pathlib import Path
 from datetime import datetime, timezone
+
+from .io_utils import atomic_write_json, atomic_write_jsonl
 
 SOURCE_EXTS = {
     ".py", ".rs", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".cs",
@@ -135,33 +137,13 @@ def _parse_file(path: Path, rel: str, digest: str) -> tuple[list[dict], list[dic
     return symbols, endpoints
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
-        ) as temp:
-            temp.write(text)
-            temp_name = temp.name
-        Path(temp_name).replace(path)
-    finally:
-        if temp_name:
-            temp_path = Path(temp_name)
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
-
-
 def _write_jsonl(path: Path, rows: list[dict]):
-    _atomic_write_text(path, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    atomic_write_jsonl(path, rows)
 
 
 def _write_index_state(path: Path, files: dict[str, dict]) -> None:
     index_state = {"version": 2, "generated_at": datetime.now(timezone.utc).isoformat(), "files": files}
-    _atomic_write_text(path, json.dumps(index_state, indent=2, sort_keys=True) + "\n")
+    atomic_write_json(path, index_state, sort_keys=True)
 
 
 def build_indexes(root: Path) -> dict:
