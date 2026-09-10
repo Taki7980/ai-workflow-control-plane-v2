@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 
 def _number(value: Any) -> float | None:
@@ -78,15 +79,17 @@ def check_regression(baseline: dict[str, Any], current: dict[str, Any]) -> dict[
         limit = reference * (1 - tolerance) if direction == "higher" else reference * (1 + tolerance)
         regressed = actual is None or (actual < limit if direction == "higher" else actual > limit)
         if regressed:
-            failures.append({
-                "kind": "relative_regression",
-                "metric": str(metric),
-                "direction": direction,
-                "baseline": reference,
-                "relative_tolerance": tolerance,
-                "limit": limit,
-                "actual": actual,
-            })
+            failures.append(
+                {
+                    "kind": "relative_regression",
+                    "metric": str(metric),
+                    "direction": direction,
+                    "baseline": reference,
+                    "relative_tolerance": tolerance,
+                    "limit": limit,
+                    "actual": actual,
+                }
+            )
 
     current_groups = current.get("by_query_type") if isinstance(current.get("by_query_type"), dict) else {}
     for query_type, floors in (baseline.get("by_query_type") or {}).items():

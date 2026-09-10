@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from .models import ContextItem
 
@@ -60,8 +61,8 @@ class ProviderResult:
 class Retriever(Protocol):
     """Synchronous provider contract used by the current control plane.
 
-    The later concurrent-engine stage can schedule implementations of this
-    contract without changing request/result semantics.
+    The concurrent engine schedules implementations of this contract without
+    changing request/result semantics.
     """
 
     name: str

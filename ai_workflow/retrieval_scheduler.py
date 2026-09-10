@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 
 T = TypeVar("T")
@@ -76,7 +77,7 @@ class BoundedRetrievalScheduler:
                     error_kind="deadline",
                     timed_out=True,
                 )
-            except Exception as exc:  # retrieval adapters are failure-isolated
+            except Exception as exc:  # noqa: BLE001 - provider failures are deliberately isolated
                 return SchedulerOutcome(
                     label=call.label,
                     latency_ms=(time.perf_counter() - started) * 1000,

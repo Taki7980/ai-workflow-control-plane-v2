@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path, PureWindowsPath
-from typing import Any, Mapping
+from typing import Any
 
 
 class PathOutsideWorkspace(ValueError):
