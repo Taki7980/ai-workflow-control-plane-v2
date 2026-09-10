@@ -158,9 +158,9 @@ def build_safe_policy_advisor(
                 **stats,
                 "eligible": eligible,
             }
-        for context in contexts.values():
-            context["locked_high_risk_cases"] = max(
-                int(context["locked_high_risk_cases"]),
+        for context_payload in contexts.values():
+            context_payload["locked_high_risk_cases"] = max(
+                int(context_payload["locked_high_risk_cases"]),
                 locked,
             )
 
