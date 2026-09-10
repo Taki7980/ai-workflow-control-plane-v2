@@ -24,7 +24,8 @@ class SetupSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             setup(root, "demo", index_mode="none")
-            self.assertEqual((root / ".ai/PROJECT").read_text(encoding="utf-8"), ".\n")
+            self.assertEqual((root / "ai-workspace/state/PROJECT").read_text(encoding="utf-8"), ".\n")
+            self.assertFalse((root / ".ai/PROJECT").exists())
 
     def test_setup_reuses_incremental_index_state(self):
         from ai_workflow.bootstrap import setup
