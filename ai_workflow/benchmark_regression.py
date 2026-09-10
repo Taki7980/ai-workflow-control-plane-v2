@@ -14,6 +14,10 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _mapping(value: Any) -> dict[Any, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def latency_percentiles(values: Iterable[float]) -> dict[str, float | None]:
     """Return deterministic nearest-rank p50/p95/p99 values."""
 
@@ -63,16 +67,17 @@ def check_regression(
 
     failures: list[dict[str, Any]] = []
     checked = 0
-    summary = current.get("summary") if isinstance(current.get("summary"), dict) else {}
+    summary = _mapping(current.get("summary"))
 
-    for metric, floor in (baseline.get("minimum") or {}).items():
+    for metric, floor in _mapping(baseline.get("minimum")).items():
         checked += 1
         failure = _minimum_failure(str(metric), floor, summary.get(metric))
         if failure:
             failures.append(failure)
 
-    for metric, policy in (baseline.get("maximum_regression") or {}).items():
-        if not isinstance(policy, dict):
+    for metric, raw_policy in _mapping(baseline.get("maximum_regression")).items():
+        policy = _mapping(raw_policy)
+        if not policy:
             continue
         reference = _number(policy.get("baseline"))
         tolerance = _number(policy.get("relative_tolerance"))
@@ -104,13 +109,10 @@ def check_regression(
                 }
             )
 
-    raw_groups = current.get("by_query_type")
-    current_groups = raw_groups if isinstance(raw_groups, dict) else {}
-    for query_type, floors in (baseline.get("by_query_type") or {}).items():
-        if not isinstance(floors, dict):
-            continue
-        raw_group = current_groups.get(query_type)
-        group = raw_group if isinstance(raw_group, dict) else {}
+    current_groups = _mapping(current.get("by_query_type"))
+    for query_type, raw_floors in _mapping(baseline.get("by_query_type")).items():
+        floors = _mapping(raw_floors)
+        group = _mapping(current_groups.get(query_type))
         for metric, floor in floors.items():
             if floor is None:
                 continue
