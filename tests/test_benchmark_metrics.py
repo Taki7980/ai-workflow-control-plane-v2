@@ -88,5 +88,92 @@ class RetrievalMetricTests(unittest.TestCase):
         self.assertIsNone(repository_metrics([], [], [], k=5))
 
 
+    def test_stage4_graph_metrics(self):
+        from ai_workflow.workspace_graph_metrics import (
+            cross_repo_edge_recall,
+            graph_context_yield,
+            graph_node_recall_at_k,
+            structural_recall_at_k,
+            wrong_edge_rate,
+        )
+
+        items = [
+            ContextItem(
+                "workspace_graph",
+                "frontend client calls payment endpoint",
+                metadata={
+                    "graph_node_id": "node-client",
+                    "graph_edge_ids": ["edge-api"],
+                },
+            ),
+            ContextItem(
+                "workspace_graph",
+                "backend payment handler",
+                metadata={
+                    "graph_node_id": "node-handler",
+                    "graph_edge_ids": ["edge-impl"],
+                },
+            ),
+            ContextItem(
+                "workspace_graph",
+                "unrelated graph evidence",
+                metadata={
+                    "graph_node_id": "node-noise",
+                    "graph_edge_ids": ["edge-noise"],
+                },
+            ),
+        ]
+
+        self.assertEqual(
+            graph_node_recall_at_k(
+                items, ["node-client", "node-handler"], k=2
+            ),
+            1.0,
+        )
+        self.assertEqual(
+            cross_repo_edge_recall(items, ["edge-api"], k=3),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            wrong_edge_rate(
+                items,
+                ["edge-api", "edge-impl"],
+                k=3,
+            ),
+            1 / 3,
+        )
+        self.assertEqual(
+            structural_recall_at_k(
+                items,
+                ["payment endpoint", "payment handler"],
+                k=2,
+            ),
+            1.0,
+        )
+        self.assertGreater(
+            graph_context_yield(
+                items,
+                ["payment endpoint", "payment handler"],
+                k=3,
+            ),
+            0.0,
+        )
+
+    def test_stage4_graph_metrics_return_none_without_gold(self):
+        from ai_workflow.workspace_graph_metrics import (
+            cross_repo_edge_recall,
+            graph_context_yield,
+            graph_node_recall_at_k,
+            structural_recall_at_k,
+            wrong_edge_rate,
+        )
+
+        self.assertIsNone(graph_node_recall_at_k([], [], k=5))
+        self.assertIsNone(cross_repo_edge_recall([], [], k=5))
+        self.assertIsNone(wrong_edge_rate([], [], k=5))
+        self.assertIsNone(structural_recall_at_k([], [], k=5))
+        self.assertIsNone(graph_context_yield([], [], k=5))
+
+
 if __name__ == "__main__":
     unittest.main()
