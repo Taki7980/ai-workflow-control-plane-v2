@@ -83,6 +83,17 @@ jobs:
               '        except Exception as exc:  # noqa: BLE001 - isolate repository failures\n',
               1,
           )
+          message = (
+              '        "gather_workspace_detailed() cannot run inside an event loop; use gather_workspace_detailed_async()"\n'
+          )
+          if text.count(message) != 1:
+              raise RuntimeError('workspace sync wrapper error message changed')
+          text = text.replace(
+              message,
+              '        "gather_workspace_detailed() cannot run inside an event loop; "\n'
+              '        "use gather_workspace_detailed_async()"\n',
+              1,
+          )
           path.write_text(text, encoding='utf-8')
           PY
       - name: Run focused Stage 3 tests
