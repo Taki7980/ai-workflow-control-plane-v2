@@ -94,12 +94,32 @@ def _git_dir(repo: Path) -> Path | None:
     return None
 
 
+def _common_git_dir(git_dir: Path) -> Path:
+    """Return the shared Git directory for a normal repo or linked worktree."""
+
+    commondir = git_dir / "commondir"
+    try:
+        raw = commondir.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return git_dir
+    if not raw:
+        return git_dir
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = git_dir / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return git_dir
+    return resolved if resolved.is_dir() else git_dir
+
+
 def is_git_repository(path: Path) -> bool:
     return _git_dir(Path(path)) is not None
 
 
-def _read_ref(git_dir: Path, ref: str) -> str | None:
-    ref_path = git_dir / ref
+def _read_ref_from_dir(base: Path, ref: str) -> str | None:
+    ref_path = base / ref
     try:
         if ref_path.is_file():
             value = ref_path.read_text(encoding="utf-8", errors="replace").strip()
@@ -107,7 +127,7 @@ def _read_ref(git_dir: Path, ref: str) -> str | None:
     except OSError:
         return None
 
-    packed = git_dir / "packed-refs"
+    packed = base / "packed-refs"
     try:
         for line in packed.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line or line.startswith("#") or line.startswith("^"):
@@ -117,6 +137,17 @@ def _read_ref(git_dir: Path, ref: str) -> str | None:
                 return parts[0].strip()
     except OSError:
         return None
+    return None
+
+
+def _read_ref(git_dir: Path, ref: str) -> str | None:
+    common = _common_git_dir(git_dir)
+    for base in (git_dir, common):
+        value = _read_ref_from_dir(base, ref)
+        if value:
+            return value
+        if base == common:
+            break
     return None
 
 
@@ -132,7 +163,7 @@ def _read_head(git_dir: Path) -> tuple[str | None, str | None]:
 
 
 def _read_remote(git_dir: Path) -> str | None:
-    config_path = git_dir / "config"
+    config_path = _common_git_dir(git_dir) / "config"
     parser = configparser.ConfigParser()
     try:
         parser.read(config_path, encoding="utf-8")
@@ -179,7 +210,13 @@ def remote_identity(remote_url: str | None) -> str | None:
     return f"{host.lower()}/{path.lower()}"
 
 
-def _spec_for_directory(directory: Path, base: Path, *, included: bool = False, reason: str = "discovered") -> RepositorySpec | None:
+def _spec_for_directory(
+    directory: Path,
+    base: Path,
+    *,
+    included: bool = False,
+    reason: str = "discovered",
+) -> RepositorySpec | None:
     git_dir = _git_dir(directory)
     if git_dir is None:
         return None
@@ -253,7 +290,11 @@ def discover_repositories(
     walk(base, 0)
     return sorted(
         found,
-        key=lambda repo: (repo.relative_path.lower(), repo.remote_identity or "", repo.name.lower()),
+        key=lambda repo: (
+            repo.relative_path.lower(),
+            repo.remote_identity or "",
+            repo.name.lower(),
+        ),
     )
 
 
@@ -276,7 +317,11 @@ def registry_payload(repositories: list[RepositorySpec]) -> dict[str, Any]:
 
     ordered = sorted(
         repositories,
-        key=lambda repo: (repo.relative_path.lower(), repo.remote_identity or "", repo.name.lower()),
+        key=lambda repo: (
+            repo.relative_path.lower(),
+            repo.remote_identity or "",
+            repo.name.lower(),
+        ),
     )
     return {
         "version": _REGISTRY_VERSION,
@@ -310,7 +355,7 @@ def _entry_to_spec(entry: object) -> RepositorySpec | None:
         return None
     if not isinstance(reason, str) or not isinstance(included, bool):
         return None
-    return RepositorySpec(
+    spec = RepositorySpec(
         name=name.strip(),
         relative_path=relative_path.strip(),
         git_dir=git_dir,
@@ -320,10 +365,17 @@ def _entry_to_spec(entry: object) -> RepositorySpec | None:
         included=included,
         reason=reason,
     )
+    persisted_id = entry.get("repository_id")
+    if persisted_id is not None:
+        if not isinstance(persisted_id, str):
+            return None
+        if persisted_id != repository_id(spec.relative_path, spec.remote_identity):
+            return None
+    return spec
 
 
 def load_registry(root: Path, config: dict | None = None) -> list[RepositorySpec]:
-    """Load a valid registry. Invalid or unsupported registries fail closed."""
+    """Load a valid registry. Any malformed or ambiguous state fails closed."""
 
     path = registry_path(root, config)
     try:
@@ -341,13 +393,20 @@ def load_registry(root: Path, config: dict | None = None) -> list[RepositorySpec
     for raw in repositories:
         spec = _entry_to_spec(raw)
         if spec is None:
-            continue
+            return []
         key = (spec.relative_path, spec.remote_identity)
         if key in seen:
-            continue
+            return []
         seen.add(key)
         specs.append(spec)
-    return sorted(specs, key=lambda repo: (repo.relative_path.lower(), repo.remote_identity or "", repo.name.lower()))
+    return sorted(
+        specs,
+        key=lambda repo: (
+            repo.relative_path.lower(),
+            repo.remote_identity or "",
+            repo.name.lower(),
+        ),
+    )
 
 
 def workspace_registry_fingerprint(repositories: list[RepositorySpec]) -> str:
@@ -362,7 +421,10 @@ def workspace_registry_fingerprint(repositories: list[RepositorySpec]) -> str:
             "head_sha": repo.head_sha,
             "included": bool(repo.included),
         }
-        for repo in sorted(repositories, key=lambda repo: (repo.relative_path.lower(), repo.remote_identity or ""))
+        for repo in sorted(
+            repositories,
+            key=lambda repo: (repo.relative_path.lower(), repo.remote_identity or ""),
+        )
     ]
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -381,7 +443,12 @@ def registry_summary(root: Path, config: dict | None = None) -> dict[str, Any]:
     }
 
 
-def refresh_registry(root: Path, *, max_depth: int = 3, config: dict | None = None) -> dict[str, Any]:
+def refresh_registry(
+    root: Path,
+    *,
+    max_depth: int = 3,
+    config: dict | None = None,
+) -> dict[str, Any]:
     """Rediscover repositories while preserving only unchanged explicit decisions."""
 
     existing = {
