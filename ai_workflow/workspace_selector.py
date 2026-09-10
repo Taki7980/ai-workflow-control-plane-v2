@@ -11,11 +11,36 @@ from .repository_registry import is_git_repository, repository_id
 from .workspace import workspace_roots
 from .workspace_state import aggregate_workspace_fingerprint
 
-_LOW_INFORMATION_QUERY_TOKENS = frozenset({
-    "a", "an", "and", "are", "as", "at", "be", "by", "do", "does",
-    "for", "from", "how", "in", "is", "it", "of", "on", "or", "should",
-    "the", "to", "we", "where", "whether", "with",
-})
+_LOW_INFORMATION_QUERY_TOKENS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "do",
+        "does",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "should",
+        "the",
+        "to",
+        "we",
+        "where",
+        "whether",
+        "with",
+    }
+)
 _EXPLICIT_HINT_WEIGHT = 100.0
 _CHANGED_FILE_WEIGHT = 40.0
 _IDENTITY_WEIGHT = 12.0
@@ -44,7 +69,9 @@ class RepositorySelection:
 
 
 def _meaningful_tokens(text: str) -> set[str]:
-    return {token for token in tokenize(text) if token not in _LOW_INFORMATION_QUERY_TOKENS}
+    return {
+        token for token in tokenize(text) if token not in _LOW_INFORMATION_QUERY_TOKENS
+    }
 
 
 def _fallback_repository_path(workspace_root: Path, repo_root: Path) -> str:
@@ -62,7 +89,11 @@ def _partition_explicit_changes(
 ) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {repo_path: [] for _, repo_path in candidates}
     child_paths = sorted(
-        (repo_path for _, repo_path in candidates if repo_path != "." and not repo_path.startswith("legacy:")),
+        (
+            repo_path
+            for _, repo_path in candidates
+            if repo_path != "." and not repo_path.startswith("legacy:")
+        ),
         key=lambda value: (-len(value), value.casefold()),
     )
     has_primary = "." in out
@@ -76,7 +107,7 @@ def _partition_explicit_changes(
             prefix = repo_path.rstrip("/") + "/"
             if value.startswith(prefix):
                 owner = repo_path
-                local = value[len(prefix):]
+                local = value[len(prefix) :]
                 break
         if owner is None and has_primary:
             owner = "."
@@ -103,7 +134,10 @@ def build_repository_candidates(
     identities: list[tuple[Path, str, dict[str, Any]]] = []
     for repo_root in candidate_roots:
         snapshot = snapshots.get(repo_root, {})
-        repo_path = str(snapshot.get("relative_path") or _fallback_repository_path(workspace_root, repo_root))
+        repo_path = str(
+            snapshot.get("relative_path")
+            or _fallback_repository_path(workspace_root, repo_root)
+        )
         identities.append((repo_root, repo_path, snapshot))
 
     if explicit_changed_files is None:
@@ -132,7 +166,14 @@ def build_repository_candidates(
                 is_primary=repo_root == workspace_root and is_git_repository(repo_root),
             )
         )
-    return sorted(candidates, key=lambda item: (not item.is_primary, item.repository_id, item.repository_path.casefold()))
+    return sorted(
+        candidates,
+        key=lambda item: (
+            not item.is_primary,
+            item.repository_id,
+            item.repository_path.casefold(),
+        ),
+    )
 
 
 def _jsonl(path: Path) -> list[dict[str, Any]]:
@@ -166,7 +207,9 @@ def _candidate_rows(
         file = str(row.get("file", "")).replace("\\", "/").lstrip("./")
         belongs = False
         if candidate.repository_path == ".":
-            belongs = not any(file.startswith(path.rstrip("/") + "/") for path in child_paths)
+            belongs = not any(
+                file.startswith(path.rstrip("/") + "/") for path in child_paths
+            )
         elif not candidate.repository_path.startswith("legacy:"):
             belongs = file.startswith(candidate.repository_path.rstrip("/") + "/")
         if belongs:
@@ -196,7 +239,8 @@ def select_repositories(
         sorted(
             candidate.repository_path
             for candidate in candidates
-            if candidate.repository_path != "." and not candidate.repository_path.startswith("legacy:")
+            if candidate.repository_path != "."
+            and not candidate.repository_path.startswith("legacy:")
         )
     )
     query_tokens = _meaningful_tokens(query)
@@ -204,13 +248,23 @@ def select_repositories(
     for candidate in candidates:
         score = 0.0
         reasons: list[str] = []
-        symbol_rows = _candidate_rows(symbols, candidate, child_paths, max_index_candidates)
-        endpoint_rows = _candidate_rows(endpoints, candidate, child_paths, max_index_candidates)
+        symbol_rows = _candidate_rows(
+            symbols, candidate, child_paths, max_index_candidates
+        )
+        endpoint_rows = _candidate_rows(
+            endpoints, candidate, child_paths, max_index_candidates
+        )
 
-        if symbol and any(str(row.get("symbol", "")).casefold() == symbol.casefold() for row in symbol_rows):
+        if symbol and any(
+            str(row.get("symbol", "")).casefold() == symbol.casefold()
+            for row in symbol_rows
+        ):
             score += _EXPLICIT_HINT_WEIGHT
             reasons.append("symbol_hint")
-        if endpoint and any(endpoint.casefold() in str(row.get("path", "")).casefold() for row in endpoint_rows):
+        if endpoint and any(
+            endpoint.casefold() in str(row.get("path", "")).casefold()
+            for row in endpoint_rows
+        ):
             score += _EXPLICIT_HINT_WEIGHT
             reasons.append("endpoint_hint")
 
@@ -219,7 +273,9 @@ def select_repositories(
             score += _CHANGED_FILE_WEIGHT
             reasons.append("changed_file")
 
-        identity_text = " ".join(filter(None, (candidate.repository_path, candidate.remote_identity or "")))
+        identity_text = " ".join(
+            filter(None, (candidate.repository_path, candidate.remote_identity or ""))
+        )
         identity_overlap = len(query_tokens & _meaningful_tokens(identity_text))
         if identity_overlap:
             score += _IDENTITY_WEIGHT * identity_overlap
@@ -228,10 +284,11 @@ def select_repositories(
         best_index_overlap = 0
         for row in [*symbol_rows, *endpoint_rows]:
             row_text = " ".join(
-                str(row.get(key, ""))
-                for key in ("symbol", "method", "path", "file")
+                str(row.get(key, "")) for key in ("symbol", "method", "path", "file")
             )
-            best_index_overlap = max(best_index_overlap, len(query_tokens & _meaningful_tokens(row_text)))
+            best_index_overlap = max(
+                best_index_overlap, len(query_tokens & _meaningful_tokens(row_text))
+            )
         if best_index_overlap:
             score += _INDEX_WEIGHT * best_index_overlap
             reasons.append("index_match")
@@ -242,7 +299,14 @@ def select_repositories(
             reasons.append("primary_prior")
         scored.append((candidate, score, tuple(reasons), has_evidence))
 
-    ordered = sorted(scored, key=lambda row: (-row[1], row[0].repository_id, row[0].repository_path.casefold()))
+    ordered = sorted(
+        scored,
+        key=lambda row: (
+            -row[1],
+            row[0].repository_id,
+            row[0].repository_path.casefold(),
+        ),
+    )
     has_evidence = any(row[3] for row in ordered)
     selected_ids: set[str] = set()
     if len(ordered) == 1:
@@ -259,6 +323,10 @@ def select_repositories(
     result: list[RepositorySelection] = []
     for rank, (candidate, score, reason_tuple, _) in enumerate(ordered, 1):
         selected = candidate.repository_id in selected_ids
-        final_reasons = reason_tuple if selected or reason_tuple else ("no_relevant_signal",)
-        result.append(RepositorySelection(candidate, score, rank, selected, final_reasons))
+        final_reasons = (
+            reason_tuple if selected or reason_tuple else ("no_relevant_signal",)
+        )
+        result.append(
+            RepositorySelection(candidate, score, rank, selected, final_reasons)
+        )
     return result
