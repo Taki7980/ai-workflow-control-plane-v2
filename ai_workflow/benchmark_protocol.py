@@ -271,6 +271,27 @@ def validate_benchmark_cases(
     return validated
 
 
+def resolve_case_root(root: Path, case: dict[str, Any]) -> Path:
+    workspace_root = Path(root).resolve()
+    repository_path = str(case.get("repository_path", ".")).strip() or "."
+    candidate = (
+        workspace_root
+        if repository_path == "."
+        else (workspace_root / repository_path).resolve()
+    )
+    try:
+        candidate.relative_to(workspace_root)
+    except ValueError as exc:
+        raise ValueError(
+            "benchmark repository_path must stay inside the benchmark root"
+        ) from exc
+    if not candidate.is_dir():
+        raise ValueError(
+            f"benchmark repository_path does not exist: {repository_path}"
+        )
+    return candidate
+
+
 def snapshot_status(
     root: Path,
     case: dict[str, Any],
@@ -288,10 +309,8 @@ def snapshot_status(
             "match": None,
         }
 
-    workspace_root = Path(root).resolve()
-    repository_root = (workspace_root / repository_path).resolve()
     try:
-        repository_root.relative_to(workspace_root)
+        repository_root = resolve_case_root(root, case)
     except ValueError:
         return {
             "status": "invalid_path",
