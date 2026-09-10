@@ -21,16 +21,17 @@ from ai_workflow.repository_registry import (
     workspace_registry_fingerprint,
 )
 from ai_workflow.workspace import workspace_roots
+from ai_workflow.workspace_state import aggregate_workspace_fingerprint
 
 
 class RepositoryRegistryTests(unittest.TestCase):
-    def _git_repo(self, parent: Path, name: str, remote: str) -> Path:
+    def _git_repo(self, parent: Path, name: str, remote: str, head: str = "a" * 40) -> Path:
         repo = parent / name
-        repo.mkdir()
+        repo.mkdir(parents=True)
         git_dir = repo / ".git"
         (git_dir / "refs" / "heads").mkdir(parents=True)
         (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-        (git_dir / "refs" / "heads" / "main").write_text("a" * 40 + "\n", encoding="utf-8")
+        (git_dir / "refs" / "heads" / "main").write_text(head + "\n", encoding="utf-8")
         (git_dir / "config").write_text(
             f'[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = {remote}\n',
             encoding="utf-8",
@@ -201,6 +202,42 @@ class RepositoryRegistryTests(unittest.TestCase):
                 if process is not None and process.poll() is None:
                     process.kill()
                     process.wait(timeout=5)
+
+    def test_legacy_root_order_does_not_change_aggregate_fingerprint_when_identity_ties(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            workspace = base / "workspace"
+            workspace.mkdir()
+            first = self._git_repo(
+                base / "one",
+                "api",
+                "https://example.com/Team/Repo.git",
+                head="a" * 40,
+            )
+            second = self._git_repo(
+                base / "two",
+                "api",
+                "https://example.com/Team/Repo.git",
+                head="b" * 40,
+            )
+            forward = {
+                "workspace": {
+                    "roots": [str(first), str(second)],
+                    "max_roots": 3,
+                    "registry": "ai-workspace/config/repositories.json",
+                }
+            }
+            reverse = {
+                "workspace": {
+                    "roots": [str(second), str(first)],
+                    "max_roots": 3,
+                    "registry": "ai-workspace/config/repositories.json",
+                }
+            }
+
+            forward_state = aggregate_workspace_fingerprint(workspace, forward)
+            reverse_state = aggregate_workspace_fingerprint(workspace, reverse)
+            self.assertEqual(forward_state["fingerprint"], reverse_state["fingerprint"])
 
     def test_real_git_worktree_gitdir_file_is_supported_when_git_exists(self):
         if not shutil.which("git"):
