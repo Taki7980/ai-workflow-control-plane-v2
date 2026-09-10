@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from .budget import budget_for
 from .classifier import classify
 from .compress import compress_text
 from .config import estimate_tokens, find_project_root, load_config
+from .contextual_features import FEATURE_FIELDS
+from .contextual_policy import build_contextual_policy_report
 from .context_broker import detect_changed_files
 from .doctor import run as doctor_run
 from .handoff import handoff_path, render as render_handoff, validate as validate_handoff
@@ -32,11 +35,16 @@ from .indexer import build_indexes, incremental_indexes
 from .io_utils import atomic_write_json, atomic_write_text
 from .memory import add_memory, export_memory_jsonl, list_memories, prune_stale, search_memory
 from .learning_ope import evaluate_learning_policies
+from .policy_manifest import (
+    create_policy_manifest,
+    verify_policy_manifest,
+)
 from .retrieval_learning import (
     SAFE_EXPLORATION_ARMS,
     learning_status,
     record_verified_outcome,
 )
+from .shadow_policy import evaluate_shadow_policy
 from .providers import detect, execution_provider, model_tier
 from .repository_registry import refresh_registry, registry_summary, set_repository_included
 from .telemetry import policy_recommendations, summarize_traces
@@ -543,6 +551,90 @@ def cmd_benchmark_policy_advisor(args):
     _json(result)
 
 
+def _signing_key_from_env(name: str) -> bytes:
+    value = os.getenv(name, "")
+    if not value:
+        raise ValueError(
+            f"policy signing key environment variable is empty: {name}"
+        )
+    return value.encode()
+
+
+def cmd_learning_contextual_policy(args):
+    root = _root(args)
+    result = build_contextual_policy_report(
+        root,
+        context_fields=args.field or (),
+        development_fraction=args.development_fraction,
+        prior_weight=args.prior_weight,
+        folds=args.folds,
+        minimum_context_events=args.minimum_context_events,
+        minimum_direct_exposures=args.minimum_direct_exposures,
+        minimum_holdout_events=args.minimum_holdout_events,
+        minimum_effective_sample_size=args.minimum_effective_sample_size,
+        minimum_model_validation_events=(
+            args.minimum_model_validation_events
+        ),
+        minimum_estimated_gain=args.minimum_estimated_gain,
+        safety_margin=args.safety_margin,
+        max_realized_cost=args.max_realized_cost,
+        confidence=args.confidence,
+        resamples=args.resamples,
+        seed=args.seed,
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
+def cmd_learning_manifest(args):
+    report = _load_json_object(args.input)
+    manifest = create_policy_manifest(
+        report,
+        _signing_key_from_env(args.signing_key_env),
+    )
+    atomic_write_json(Path(args.output), manifest, sort_keys=True)
+    _json({
+        "created": True,
+        "policy_id": manifest["policy_id"],
+        "status": manifest["status"],
+        "output": str(Path(args.output).resolve()),
+    })
+
+
+def cmd_learning_verify_manifest(args):
+    manifest = _load_json_object(args.input)
+    result = verify_policy_manifest(
+        manifest,
+        _signing_key_from_env(args.signing_key_env),
+    )
+    _json(result)
+    if not result["valid"]:
+        raise SystemExit(1)
+
+
+def cmd_learning_shadow_evaluate(args):
+    root = _root(args)
+    manifest = _load_json_object(args.manifest)
+    result = evaluate_shadow_policy(
+        root,
+        manifest,
+        _signing_key_from_env(args.signing_key_env),
+        confidence=args.confidence,
+        reward_min=args.reward_min,
+        reward_max=args.reward_max,
+        max_importance_weight=args.max_importance_weight,
+        minimum_new_events=args.minimum_new_events,
+        safety_margin=args.safety_margin,
+        max_realized_cost=args.max_realized_cost,
+        bootstrap_resamples=args.resamples,
+        bootstrap_seed=args.seed,
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
 def cmd_learning_status(args):
     root = _root(args)
     _json(learning_status(root, load_config(root)))
@@ -872,6 +964,79 @@ def build_parser():
     l.add_argument("--reward", type=float)
     l.add_argument("--realized-cost", type=float, default=0.0)
     l.set_defaults(func=cmd_learning_record_outcome)
+
+    l = lsp.add_parser(
+        "contextual-policy",
+        help="develop and holdout-evaluate a contextual retrieval policy",
+    )
+    l.add_argument(
+        "--field",
+        action="append",
+        choices=list(FEATURE_FIELDS),
+        help="context feature used by the policy; repeat as needed",
+    )
+    l.add_argument("--development-fraction", type=float, default=0.7)
+    l.add_argument("--prior-weight", type=float, default=5.0)
+    l.add_argument("--folds", type=int, default=5)
+    l.add_argument("--minimum-context-events", type=int, default=10)
+    l.add_argument("--minimum-direct-exposures", type=int, default=3)
+    l.add_argument("--minimum-holdout-events", type=int, default=20)
+    l.add_argument(
+        "--minimum-effective-sample-size",
+        type=float,
+        default=10.0,
+    )
+    l.add_argument(
+        "--minimum-model-validation-events",
+        type=int,
+        default=10,
+    )
+    l.add_argument("--minimum-estimated-gain", type=float, default=0.0)
+    l.add_argument("--safety-margin", type=float, default=0.0)
+    l.add_argument("--max-realized-cost", type=float)
+    l.add_argument("--confidence", type=float, default=0.95)
+    l.add_argument("--resamples", type=int, default=5000)
+    l.add_argument("--seed", type=int, default=20260911)
+    l.add_argument("--output")
+    l.set_defaults(func=cmd_learning_contextual_policy)
+
+    l = lsp.add_parser(
+        "create-manifest",
+        help="create an HMAC-signed shadow-only policy manifest",
+    )
+    l.add_argument("--input", required=True)
+    l.add_argument("--output", required=True)
+    l.add_argument("--signing-key-env", required=True)
+    l.set_defaults(func=cmd_learning_manifest)
+
+    l = lsp.add_parser(
+        "verify-manifest",
+        help="verify policy manifest integrity and safety invariants",
+    )
+    l.add_argument("--input", required=True)
+    l.add_argument("--signing-key-env", required=True)
+    l.set_defaults(func=cmd_learning_verify_manifest)
+
+    l = lsp.add_parser(
+        "shadow-evaluate",
+        help=(
+            "evaluate a fixed signed policy only on verified outcomes "
+            "recorded after its evidence cutoff"
+        ),
+    )
+    l.add_argument("--manifest", required=True)
+    l.add_argument("--signing-key-env", required=True)
+    l.add_argument("--confidence", type=float, default=0.95)
+    l.add_argument("--reward-min", type=float, default=0.0)
+    l.add_argument("--reward-max", type=float, default=1.0)
+    l.add_argument("--max-importance-weight", type=float, default=20.0)
+    l.add_argument("--minimum-new-events", type=int, default=20)
+    l.add_argument("--safety-margin", type=float, default=0.0)
+    l.add_argument("--max-realized-cost", type=float)
+    l.add_argument("--resamples", type=int, default=5000)
+    l.add_argument("--seed", type=int, default=20260911)
+    l.add_argument("--output")
+    l.set_defaults(func=cmd_learning_shadow_evaluate)
 
     l = lsp.add_parser(
         "evaluate",
