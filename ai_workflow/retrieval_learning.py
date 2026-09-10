@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .io_utils import atomic_write_json
 from .models import RouteDecision
 
 
@@ -238,9 +237,26 @@ def _record_path(root: Path, kind: str, decision_id: str) -> Path:
 
 
 def _write_immutable(path: Path, payload: dict[str, Any]) -> str:
-    if path.exists():
-        raise FileExistsError(f"learning record already exists: {path.name}")
-    atomic_write_json(path, payload, sort_keys=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+    ) + "\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return path.as_posix()
 
 
@@ -325,12 +341,38 @@ def record_verified_outcome(
     decision_path = _record_path(root, "decisions", decision_id)
     if not decision_path.exists():
         raise ValueError(f"unknown learning decision: {decision_id}")
+    try:
+        decision_record = json.loads(
+            decision_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"learning decision is unreadable: {decision_id}"
+        ) from exc
+    if not isinstance(decision_record, dict):
+        raise ValueError(f"learning decision is invalid: {decision_id}")
     if not str(source).strip():
         raise ValueError("outcome source must not be blank")
     value = float(success) if reward is None else float(reward)
     cost = float(realized_cost)
     if not math.isfinite(value) or not math.isfinite(cost) or cost < 0:
         raise ValueError("reward must be finite and realized_cost must be finite/non-negative")
+
+    recorded_at = _utc_now()
+    created_at = str(decision_record.get("created_at", "")).strip()
+    delay_seconds: float | None = None
+    if created_at:
+        try:
+            created = datetime.fromisoformat(created_at)
+            recorded = datetime.fromisoformat(recorded_at)
+            if created.tzinfo is not None and recorded.tzinfo is not None:
+                delay_seconds = max(
+                    0.0,
+                    (recorded - created).total_seconds(),
+                )
+        except ValueError:
+            delay_seconds = None
+
     payload = {
         "decision_id": decision_id,
         "verified": True,
@@ -338,7 +380,13 @@ def record_verified_outcome(
         "reward": value,
         "realized_cost": cost,
         "source": str(source).strip(),
-        "recorded_at": _utc_now(),
+        "recorded_at": recorded_at,
+        "decision_created_at": created_at or None,
+        "verification_delay_seconds": (
+            round(delay_seconds, 6)
+            if delay_seconds is not None
+            else None
+        ),
         "metadata": dict(metadata or {}),
     }
     return _write_immutable(
