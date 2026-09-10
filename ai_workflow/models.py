@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any
@@ -38,7 +39,8 @@ class ContextItem:
 
     @property
     def dedupe_key(self) -> str:
-        return "".join(self.text.split())
+        canonical = " ".join(self.text.split()).encode("utf-8")
+        return hashlib.blake2b(canonical, digest_size=20).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
