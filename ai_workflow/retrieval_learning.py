@@ -90,12 +90,11 @@ def _allowed_risks(config: dict[str, Any]) -> set[str]:
     raw = _learning_config(config).get("allowed_risks", ["low"])
     if not isinstance(raw, list):
         return {"low"}
-    allowed = {
+    return {
         str(item).strip().lower()
         for item in raw
         if str(item).strip().lower() == "low"
     }
-    return allowed or {"low"}
 
 
 def _eligible_arms(config: dict[str, Any]) -> tuple[str, ...]:
@@ -230,8 +229,11 @@ def learning_root(root: Path) -> Path:
 
 
 def _record_path(root: Path, kind: str, decision_id: str) -> Path:
-    if not decision_id or any(ch not in "0123456789abcdef" for ch in decision_id):
-        raise ValueError("decision_id must be lowercase hexadecimal")
+    if (
+        len(decision_id) != 32
+        or any(ch not in "0123456789abcdef" for ch in decision_id)
+    ):
+        raise ValueError("decision_id must be a 32-character lowercase hexadecimal ID")
     return learning_root(root) / kind / f"{decision_id}.json"
 
 
