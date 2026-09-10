@@ -186,3 +186,45 @@ Changed files are partitioned to their owning repository before repository-local
 `ai-workflow brief` and `ai-workflow context` preserve the existing retrieval fields and add `retrieval.workspace_orchestration`. That block reports the aggregate workspace fingerprint, selected and skipped repositories with selector reasons, per-repository status, context allocation and use, and scheduler/deadline diagnostics. Human-readable briefs show selected/skipped repository paths and the aggregate repository budget only when the workspace has multiple candidates.
 
 Stage 3 intentionally does not add dependency-graph traversal, topology learning, learned routing, daemon behavior, or retry loops. Those remain later-stage work.
+
+
+## Stage 4 workspace intelligence graph
+
+Stage 4 adds a deterministic, evidence-backed structural graph for accepted multi-repository workspaces. The graph augments Stage 3 retrieval; it does not replace repository selection, repository acceptance, risk routing, or the parent context budget.
+
+Graph state remains inside the single top-level workspace:
+
+```text
+ai-workspace/generated/
+  workspace-graph-nodes.jsonl
+  workspace-graph-edges.jsonl
+  workspace-graph-state.json
+```
+
+Only active repositories are represented. Discovered-but-excluded repositories are not written into graph state and cannot be reached through graph expansion.
+
+The MVP builds nodes for repositories, files, packages, endpoints, symbols, and tests. Edges are persisted only when static repository evidence supports them:
+
+- `CONTAINS` for repository ownership;
+- `IMPORTS` for exact local package/module imports;
+- `DEPENDS_ON` for exact local manifest dependencies;
+- `IMPLEMENTS_ENDPOINT` from the existing endpoint index;
+- `CALLS_API` from literal HTTP client calls resolved to one unambiguous endpoint, using HTTP method evidence when available;
+- `TESTS` from deterministic test/source naming conventions.
+
+Repository content is treated as untrusted text. Graph construction does not import project modules, execute manifest scripts, run package managers, call an LLM, or install a graph database. Absolute checkout paths and credential-bearing remote URLs are excluded from portable graph identity and persisted evidence.
+
+Build or inspect graph state with:
+
+```bash
+ai-workflow graph build
+ai-workflow graph status
+```
+
+Graph retrieval begins from Stage 3-selected repository evidence, explicit symbols/endpoints, changed files, or repository seeds. Expansion is deterministic and bounded by default to two hops, 24 nodes, 40 edges, a minimum extractor confidence of 0.8, and at most 3000 graph-context characters. Those 3000 characters are only an internal graph cap: graph evidence competes with Stage 3 evidence inside the original parent `ContextBudget.context_chars`; it never creates additional context budget.
+
+A single-repository workspace keeps the existing Stage 3 retrieval path and reports graph status `single_repository`. In a multi-repository workspace, Stage 4 may still expand graph context when Stage 3 selected only one relevant repository, but traversal is confined to repository IDs permitted by the Stage 3 selection boundary. A missing, stale, corrupt, or failed graph is an optional-acceleration failure and does not discard successful Stage 3 evidence.
+
+Graph-derived context uses source `workspace_graph` and carries portable provenance including repository ID/path/fingerprint, graph node ID, traversed edge IDs, graph distance, graph fingerprint, and evidence path. The benchmark harness supports graph-node recall, cross-repository edge recall, wrong-edge rate, structural recall, and graph-context yield when corresponding gold labels are supplied.
+
+Stage 4 intentionally does not add LLM-generated topology, embeddings as a required primitive, Neo4j or another graph database, control-flow/data-flow graphs, learned traversal, graph neural networks, autonomous topology mutation, or background daemon indexing.
