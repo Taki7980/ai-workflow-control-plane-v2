@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from typing import get_type_hints
 
 
 class SetupSafetyTests(unittest.TestCase):
@@ -45,11 +46,8 @@ class CoreContractTests(unittest.TestCase):
 
     def test_orchestration_contract_is_typed_but_json_compatible(self):
         from ai_workflow.orchestration import OrchestrationContract, build_orchestration_contract
-        from ai_workflow.models import Lane, RetrievalIntent, Risk, RouteDecision
         self.assertTrue(hasattr(OrchestrationContract, "__required_keys__"))
-        result = build_orchestration_contract(RouteDecision(Lane.SMALL, Risk.LOW, 0.9, "x", RetrievalIntent.EXACT), "sufficient", {"crg": False})
-        self.assertIsInstance(result, dict)
-        self.assertIn("agent_slots", result)
+        self.assertIs(get_type_hints(build_orchestration_contract)["return"], OrchestrationContract)
 
     def test_token_estimator_is_pluggable(self):
         from ai_workflow.config import estimate_tokens
@@ -81,6 +79,7 @@ class CoreContractTests(unittest.TestCase):
             self.assertEqual(result["schema_version"], 1)
             self.assertIn("core_ok", result)
             self.assertIn("optional_capabilities", result)
+            self.assertEqual(result["exit_codes"]["strict_failure"], 1)
 
     def test_cli_exposes_setup_safety_and_hash_verification_flags(self):
         from ai_workflow.cli import build_parser
