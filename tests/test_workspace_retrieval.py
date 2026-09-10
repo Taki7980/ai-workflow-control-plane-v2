@@ -102,6 +102,134 @@ class WorkspaceRetrievalTests(unittest.TestCase):
             self.assertTrue(result.diagnostics["scheduler"]["deadline_exceeded"])
             self.assertEqual(result.diagnostics["repository_results"]["repo-a"]["status"], "deadline")
 
+    def test_stage3_ten_repo_fixture(self):
+        import json
+        import subprocess
+
+        from ai_workflow.benchmark import repository_metrics
+        from ai_workflow.repository_registry import refresh_registry, set_repository_included
+
+        def git(repo: Path, *args: str) -> None:
+            subprocess.run(
+                ["git", "-C", str(repo), *args],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            config = default_config()
+            config["workspace"]["max_roots"] = 12
+            for index in range(10):
+                repo = workspace / f"service-{index}"
+                repo.mkdir()
+                subprocess.run(
+                    ["git", "init", "-q", str(repo)],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                git(repo, "config", "user.email", "stage3@example.invalid")
+                git(repo, "config", "user.name", "Stage3 Test")
+                source = repo / "internal" / "payment"
+                source.mkdir(parents=True)
+                body = (
+                    "def ProcessPayment():\n    return 'ok'\n"
+                    if index == 7
+                    else f"def unrelated_{index}():\n    return {index}\n"
+                )
+                (source / "service.py").write_text(body, encoding="utf-8")
+                git(repo, "add", ".")
+                git(repo, "commit", "-qm", "fixture")
+
+            refresh_registry(workspace, max_depth=2, config=config)
+            for index in range(10):
+                set_repository_included(workspace, f"service-{index}", True, config)
+
+            generated = workspace / "ai-workspace" / "generated"
+            generated.mkdir(parents=True, exist_ok=True)
+            (generated / "symbol-index.jsonl").write_text(
+                json.dumps(
+                    {
+                        "symbol": "ProcessPayment",
+                        "file": "service-7/internal/payment/service.py",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (generated / "endpoint-index.jsonl").write_text("", encoding="utf-8")
+
+            providers = ProviderStatus(False, False, False, False, False)
+            decision = RouteDecision(Lane.ANSWER, Risk.LOW, ["fixture"], False, 0.9)
+            parent = ContextBudget(
+                500,
+                100,
+                2000,
+                {"hot_cache": 200, "lightweight": 600, "crg": 800, "source_fallback": 400},
+            )
+            calls = []
+
+            async def fake_gather(root, query, decision, budget, config, providers, symbol=None, endpoint=None, changed_files=None, **kwargs):
+                calls.append(kwargs.get("repository_path"))
+                return [
+                    ContextItem(
+                        "targeted_source",
+                        "ProcessPayment implementation",
+                        1.0,
+                        False,
+                        {"file": "internal/payment/service.py"},
+                    )
+                ], {
+                    "retrieval_intent": "symbol",
+                    "evidence_state": "sufficient",
+                    "sufficiency": {"sufficient": True, "score": 1.0},
+                    "fallbacks": [],
+                    "orchestration": {},
+                }
+
+            with patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather):
+                result = asyncio.run(
+                    gather_workspace_detailed_async(
+                        workspace,
+                        "ProcessPayment",
+                        decision,
+                        parent,
+                        config,
+                        providers,
+                        symbol="ProcessPayment",
+                        changed_files=[],
+                    )
+                )
+
+            selected_paths = [
+                row["repository_path"]
+                for row in result.diagnostics["selection"]
+                if row["selected"]
+            ]
+            metrics = repository_metrics(
+                list(result.items),
+                ["service-7"],
+                [f"service-{index}" for index in range(10) if index != 7],
+                k=5,
+            )
+            self.assertEqual(len(result.diagnostics["selection"]), 10)
+            self.assertEqual(selected_paths, ["service-7"])
+            self.assertEqual(calls, ["service-7"])
+            self.assertEqual(metrics["repo_recall_at_k"], 1.0)
+            self.assertEqual(metrics["wrong_repo_rate"], 0.0)
+            self.assertLessEqual(
+                result.diagnostics["budget"]["allocated_context_chars"],
+                parent.context_chars,
+            )
+            self.assertLessEqual(
+                result.diagnostics["budget"]["used_context_chars"],
+                parent.context_chars,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
