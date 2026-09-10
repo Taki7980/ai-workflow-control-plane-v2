@@ -50,6 +50,21 @@ def detect_changed_files(root: Path) -> list[str]:
 def _score(query: str, text: str) -> int:
     return len(set(tokenize(query)) & set(tokenize(text)))
 
+
+_LOW_INFORMATION_QUERY_TOKENS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "do", "does",
+    "for", "from", "how", "in", "is", "it", "of", "on", "or", "should",
+    "the", "to", "we", "where", "whether", "with",
+})
+
+
+def _semantic_overlap_score(query: str, text: str) -> int:
+    query_tokens = {
+        token for token in tokenize(query)
+        if token not in _LOW_INFORMATION_QUERY_TOKENS
+    }
+    return len(query_tokens & set(tokenize(text)))
+
 def resolve_test_files(changed_files: list[str]) -> list[dict]:
     results = []
     for f in changed_files:
@@ -245,14 +260,14 @@ def lightweight(root: Path, query: str, symbol: str | None, endpoint: str | None
     out: list[ContextItem] = []
     for r in _jsonl(root / "ai-workspace" / "generated" / "symbol-index.jsonl"):
         target = symbol or query
-        s = 10 if symbol and r.get("symbol", "").lower() == symbol.lower() else _score(target, f"{r.get('symbol','')} {r.get('file','')}")
+        s = 10 if symbol and r.get("symbol", "").lower() == symbol.lower() else _semantic_overlap_score(target, f"{r.get('symbol','')} {r.get('file','')}")
         if s:
             fresh = row_fresh(root, r, state)
             if fresh:
                 out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "symbol"}))
     for r in _jsonl(root / "ai-workspace" / "generated" / "endpoint-index.jsonl"):
         target = endpoint or query
-        s = 10 if endpoint and endpoint.lower() in r.get("path", "").lower() else _score(target, f"{r.get('method','')} {r.get('path','')} {r.get('file','')}")
+        s = 10 if endpoint and endpoint.lower() in r.get("path", "").lower() else _semantic_overlap_score(target, f"{r.get('method','')} {r.get('path','')} {r.get('file','')}")
         if s and row_fresh(root, r, state):
             out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "endpoint"}))
     out.extend(_domain_hints(root, query, limit))

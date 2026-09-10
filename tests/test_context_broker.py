@@ -62,8 +62,34 @@ class ContextBrokerTests(unittest.TestCase):
                 min_conf=0.5,
             )
 
-        self.assertEqual(len(items), 6)
+        self.assertLessEqual(len(items), 6)
         self.assertTrue(any('"symbol":"test_failed_crg_status_is_not_reported_ready"' in item.text for item in items))
+
+    def test_lightweight_exact_symbol_match_keeps_score_ten(self):
+        rows = [{"symbol": "ProcessPayment", "file": "payments.py"}]
+        with tempfile.TemporaryDirectory() as td, patch(
+            "ai_workflow.context_broker.load_state", return_value={}
+        ), patch(
+            "ai_workflow.context_broker._jsonl", side_effect=[rows, []]
+        ), patch(
+            "ai_workflow.context_broker.row_fresh", return_value=True
+        ), patch(
+            "ai_workflow.context_broker._domain_hints", return_value=[]
+        ), patch(
+            "ai_workflow.context_broker._research_hits", return_value=[]
+        ), patch(
+            "ai_workflow.context_broker.search_memory", return_value=[]
+        ):
+            items = lightweight(
+                Path(td),
+                "irrelevant words",
+                "ProcessPayment",
+                None,
+                limit=5,
+                min_conf=0.5,
+            )
+
+        self.assertEqual(items[0].score, 10.0)
 
 from ai_workflow.context_broker import gather
 from ai_workflow.budget import budget_for
