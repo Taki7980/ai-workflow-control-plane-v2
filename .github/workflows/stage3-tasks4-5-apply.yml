@@ -120,40 +120,42 @@ jobs:
           tests = test_path.read_text(encoding="utf-8")
           old_start = tests.index("    def test_workspace_roots_execute_concurrently_but_diagnostics_keep_root_order(self):")
           old_end = tests.index("    def test_semantic_and_external_retrievers_execute_concurrently_in_stable_order(self):", old_start)
-          replacement = '''    def test_engine_executes_only_requested_repository_when_workspace_roots_exist(self):
-              from ai_workflow.workflow_engine import WorkflowEngine
-
-              cfg = self._config()
-              cfg["workspace"]["roots"] = ["one", "two"]
-              decision = RouteDecision(Lane.FULL, Risk.MEDIUM, confidence=0.9)
-              budget = ContextBudget(6000, 1200, 24000, {})
-              calls = []
-
-              def base(root, query, decision, budget, config, providers, symbol, endpoint, changed):
-                  calls.append(Path(root).resolve())
-                  return [ContextItem("lightweight_index", f"{root.name} evidence for {query}", 1.0)]
-
-              with tempfile.TemporaryDirectory() as td:
-                  root = Path(td)
-                  (root / "one").mkdir()
-                  (root / "two").mkdir()
-                  engine = WorkflowEngine(base_gather=base)
-                  _, diagnostics = engine.gather_detailed(
-                      root,
-                      "payment architecture dependency flow",
-                      decision,
-                      budget,
-                      cfg,
-                      ProviderStatus(False, False, False, False, False),
-                  )
-                  expected_root = root.resolve()
-
-              self.assertEqual(calls, [expected_root])
-              self.assertEqual(diagnostics["providers_attempted"][0], "base")
-              self.assertFalse(any(label.startswith("workspace:") for label in diagnostics["providers_attempted"]))
-              self.assertEqual(diagnostics["scheduler"]["max_concurrency"], 4)
-
-          '''
+          replacement = "\n".join([
+              "    def test_engine_executes_only_requested_repository_when_workspace_roots_exist(self):",
+              "        from ai_workflow.workflow_engine import WorkflowEngine",
+              "",
+              "        cfg = self._config()",
+              "        cfg[\"workspace\"][\"roots\"] = [\"one\", \"two\"]",
+              "        decision = RouteDecision(Lane.FULL, Risk.MEDIUM, confidence=0.9)",
+              "        budget = ContextBudget(6000, 1200, 24000, {})",
+              "        calls = []",
+              "",
+              "        def base(root, query, decision, budget, config, providers, symbol, endpoint, changed):",
+              "            calls.append(Path(root).resolve())",
+              "            return [ContextItem(\"lightweight_index\", f\"{root.name} evidence for {query}\", 1.0)]",
+              "",
+              "        with tempfile.TemporaryDirectory() as td:",
+              "            root = Path(td)",
+              "            (root / \"one\").mkdir()",
+              "            (root / \"two\").mkdir()",
+              "            engine = WorkflowEngine(base_gather=base)",
+              "            _, diagnostics = engine.gather_detailed(",
+              "                root,",
+              "                \"payment architecture dependency flow\",",
+              "                decision,",
+              "                budget,",
+              "                cfg,",
+              "                ProviderStatus(False, False, False, False, False),",
+              "            )",
+              "            expected_root = root.resolve()",
+              "",
+              "        self.assertEqual(calls, [expected_root])",
+              "        self.assertEqual(diagnostics[\"providers_attempted\"][0], \"base\")",
+              "        self.assertFalse(any(label.startswith(\"workspace:\") for label in diagnostics[\"providers_attempted\"]))",
+              "        self.assertEqual(diagnostics[\"scheduler\"][\"max_concurrency\"], 4)",
+              "",
+              "",
+          ])
           test_path.write_text(tests[:old_start] + replacement + tests[old_end:], encoding="utf-8")
           PY
       - name: Verify focused Stage 3 retrieval tests
