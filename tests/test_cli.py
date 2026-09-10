@@ -84,7 +84,7 @@ class CliStateTests(unittest.TestCase):
         packet = self.run_cli("init", "--project-name", "Example")
         self.assertEqual(packet["status"], "initialized")
         self.assertEqual((self.root / "AGENTS.md").read_text(), "# Example\n")
-        self.assertEqual((self.root / ".ai/PROJECT").read_text().strip(), str(self.root.resolve()))
+        self.assertEqual((self.root / ".ai/PROJECT").read_text().strip(), ".")
         self.assertTrue((self.root / "ai-workspace/generated/index-state.json").is_file())
 
     def test_answer_brief_does_not_create_state(self):
