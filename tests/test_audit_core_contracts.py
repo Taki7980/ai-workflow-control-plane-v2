@@ -49,12 +49,22 @@ class CoreContractTests(unittest.TestCase):
         self.assertGreaterEqual(len(a.dedupe_key), 32)
 
     def test_orchestration_contract_is_typed_but_json_compatible(self):
+        from ai_workflow.config import default_config
+        from ai_workflow.models import Lane, Risk, RouteDecision
         from ai_workflow.orchestration import OrchestrationContract, build_orchestration_contract
-        from ai_workflow.models import Lane, RetrievalIntent, Risk, RouteDecision
+        from ai_workflow.providers import ProviderStatus
 
         self.assertTrue(hasattr(OrchestrationContract, "__required_keys__"))
-        decision = RouteDecision(Lane.SMALL, Risk.LOW, 0.9, "x", RetrievalIntent.EXACT)
-        result = build_orchestration_contract(decision, "sufficient", {"crg": False})
+        decision = RouteDecision(Lane.SMALL, Risk.LOW, ["test"], False, 0.9)
+        providers = ProviderStatus(False, False, False, False, False)
+        result = build_orchestration_contract(
+            decision,
+            {"retrieval_intent": "exact", "sufficiency": {"sufficient": True}},
+            [],
+            1,
+            providers,
+            default_config(),
+        )
         self.assertIsInstance(result, dict)
         self.assertIn("agent_slots", result)
 
