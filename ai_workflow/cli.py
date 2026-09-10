@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .adaptive_broker import gather_detailed
+from .workspace_retrieval import gather_workspace_detailed
 from .benchmark import load_tasks, run_benchmark
 from .bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
 from .budget import budget_for
@@ -179,7 +179,24 @@ def _format_brief(packet: dict, fmt: str) -> str:
     skills = orchestration.get("superpowers_skills", []) or []
     crg_plan = orchestration.get("crg_plan", []) or []
     evidence = retrieval.get("evidence_state", "unknown")
-    fingerprint = (retrieval.get("workspace_state") or {}).get("fingerprint", "unknown")
+    workspace_orchestration = retrieval.get("workspace_orchestration", {}) or {}
+    fingerprint = (
+        workspace_orchestration.get("workspace_fingerprint")
+        or (retrieval.get("workspace_state") or {}).get("fingerprint", "unknown")
+    )
+    multi_repo = int(workspace_orchestration.get("repository_count") or 0) > 1
+    selection = workspace_orchestration.get("selection") or []
+    selected_paths = [
+        str(row.get("repository_path"))
+        for row in selection
+        if row.get("selected") and row.get("repository_path")
+    ]
+    skipped_paths = [
+        str(row.get("repository_path"))
+        for row in selection
+        if not row.get("selected") and row.get("repository_path")
+    ]
+    repo_budget = workspace_orchestration.get("budget") or {}
     ctx_text = "\n".join(i["text"] for i in packet.get("context", []) if i.get("text"))
     if fmt == "markdown":
         lines = [
@@ -197,6 +214,11 @@ def _format_brief(packet: dict, fmt: str) -> str:
             "",
             ctx_text or "(no context gathered)",
         ]
+        if multi_repo:
+            lines[9:9] = [
+                f"**Repositories**: selected {', '.join(selected_paths) or 'none'}; skipped {', '.join(skipped_paths) or 'none'}",
+                f"**Repo budget**: allocated={repo_budget.get('allocated_context_chars', 0)} used={repo_budget.get('used_context_chars', 0)}",
+            ]
         return "\n".join(lines)
     lines = [
         f"[TASK] {packet['task']}",
@@ -212,6 +234,11 @@ def _format_brief(packet: dict, fmt: str) -> str:
         f"[BUDGET] context={packet['budget']['estimated_context_tokens']}tok output={packet['budget']['max_output_tokens']}tok",
         f"[CHANGED_FILES] {', '.join(packet.get('changed_files_detected', [])) or 'none'}",
     ]
+    if multi_repo:
+        lines += [
+            f"[REPOSITORIES] selected={', '.join(selected_paths) or 'none'} skipped={', '.join(skipped_paths) or 'none'}",
+            f"[REPO_BUDGET] allocated={repo_budget.get('allocated_context_chars', 0)} used={repo_budget.get('used_context_chars', 0)}",
+        ]
     if packet.get("context"):
         lines += ["[CONTEXT_START]", ctx_text, "[CONTEXT_END]"]
     lines.append(
@@ -223,8 +250,8 @@ def _format_brief(packet: dict, fmt: str) -> str:
 def cmd_brief(args):
     root = _root(args)
     config, providers, decision, budget, provider, model = _decision(root, args.task)
-    changed = _resolve_changed(root, args.changed_file)
-    items, retrieval = gather_detailed(
+    explicit_changed = list(args.changed_file) if args.changed_file else None
+    workspace_result = gather_workspace_detailed(
         root,
         args.task,
         decision,
@@ -233,9 +260,14 @@ def cmd_brief(args):
         providers,
         args.symbol,
         args.endpoint,
-        changed,
+        explicit_changed,
         write_telemetry=(decision.lane.value != "answer" or args.trace),
     )
+    items = list(workspace_result.items)
+    workspace_orchestration = workspace_result.diagnostics
+    retrieval = dict(workspace_orchestration.get("primary_retrieval") or {})
+    retrieval["workspace_orchestration"] = workspace_orchestration
+    changed = list(workspace_orchestration.get("changed_files_detected") or [])
     packet = {
         "task": args.task,
         **decision.to_dict(),
@@ -273,8 +305,8 @@ def cmd_brief(args):
 def cmd_context(args):
     root = _root(args)
     config, providers, decision, budget, _, _ = _decision(root, args.task)
-    changed = _resolve_changed(root, args.changed_file)
-    items, retrieval = gather_detailed(
+    explicit_changed = list(args.changed_file) if args.changed_file else None
+    workspace_result = gather_workspace_detailed(
         root,
         args.task,
         decision,
@@ -283,9 +315,13 @@ def cmd_context(args):
         providers,
         args.symbol,
         args.endpoint,
-        changed,
+        explicit_changed,
         write_telemetry=args.trace,
     )
+    items = list(workspace_result.items)
+    workspace_orchestration = workspace_result.diagnostics
+    retrieval = dict(workspace_orchestration.get("primary_retrieval") or {})
+    retrieval["workspace_orchestration"] = workspace_orchestration
     _json(
         {
             "lane": decision.lane.value,

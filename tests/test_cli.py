@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_workflow.cli import build_parser
 from ai_workflow.config import DEFAULT_RELATIVE
@@ -118,6 +119,79 @@ class CliStateTests(unittest.TestCase):
         self.assertTrue((self.root / "ai-workspace/handoff/HANDOFF.md").is_file())
         self.assertEqual(packet["handoff_written"], "ai-workspace/handoff/HANDOFF.md")
         self.assertEqual(json.loads((self.root / "ai-workspace/generated/last-brief.json").read_text()), packet)
+
+    def test_stage3_cli_workspace_metadata(self):
+        self.template()
+        packet = self.run_cli("context", "Explain this function")
+        self.assertIn("lane", packet)
+        self.assertIn("risk", packet)
+        self.assertIn("budget", packet)
+        self.assertIn("retrieval", packet)
+        self.assertIn("items", packet)
+        orchestration = packet["retrieval"]["workspace_orchestration"]
+        budget = orchestration["budget"]
+        self.assertLessEqual(budget["allocated_context_chars"], budget["parent_context_chars"])
+        self.assertLessEqual(budget["used_context_chars"], budget["parent_context_chars"])
+
+    def test_stage3_cli_multi_repo_metadata_and_prompt_are_portable(self):
+        self.template()
+        from ai_workflow.models import ContextItem
+        from ai_workflow.workspace_retrieval import WorkspaceRetrievalResult
+
+        primary = {
+            "retrieval_intent": "mixed",
+            "evidence_state": "sufficient",
+            "sufficiency": {"sufficient": True, "score": 1.0},
+            "fallbacks": [],
+            "orchestration": {"agent_slots": 1, "superpowers_skills": [], "crg_plan": []},
+            "workspace_state": {"fingerprint": "repo-fp"},
+        }
+        diagnostics = {
+            "workspace_fingerprint": "workspace-fp",
+            "repository_count": 3,
+            "repositories_searched": ["repo-backend", "repo-frontend"],
+            "repositories_skipped": ["repo-docs"],
+            "changed_files_detected": ["backend/payments.py"],
+            "selection": [
+                {"repository_id": "repo-backend", "repository_path": "backend", "rank": 1, "score": 20.0, "selected": True, "reasons": ["changed_file"]},
+                {"repository_id": "repo-frontend", "repository_path": "frontend", "rank": 2, "score": 12.0, "selected": True, "reasons": ["identity_match"]},
+                {"repository_id": "repo-docs", "repository_path": "docs", "rank": 3, "score": 0.0, "selected": False, "reasons": ["no_relevant_signal"]},
+            ],
+            "repository_results": {},
+            "budget": {
+                "parent_context_chars": 1000,
+                "allocated_context_chars": 1000,
+                "used_context_chars": 120,
+                "raw_repository_used_context_chars": 120,
+            },
+            "scheduler": {"max_workers": 2, "deadline_seconds": 12, "deadline_exceeded": False},
+            "primary_retrieval": primary,
+        }
+        result = WorkspaceRetrievalResult(
+            (
+                ContextItem(
+                    "targeted_source",
+                    "payments.py:1 ProcessPayment",
+                    1.0,
+                    False,
+                    {"repository_id": "repo-backend", "repository_path": "backend", "repository_fingerprint": "fp"},
+                    {"repository_id": "repo-backend", "repository_path": "backend", "repository_fingerprint": "fp"},
+                ),
+            ),
+            diagnostics,
+        )
+        with patch("ai_workflow.cli.gather_workspace_detailed", return_value=result):
+            packet = self.run_cli("brief", "Fix typo in README")
+            prompt = self.run_cli_text("brief", "Fix typo in README", "--format", "prompt")
+
+        orchestration = packet["retrieval"]["workspace_orchestration"]
+        self.assertEqual(orchestration["workspace_fingerprint"], "workspace-fp")
+        self.assertEqual(orchestration["repositories_searched"], ["repo-backend", "repo-frontend"])
+        self.assertEqual(packet["changed_files_detected"], ["backend/payments.py"])
+        self.assertLessEqual(orchestration["budget"]["allocated_context_chars"], orchestration["budget"]["parent_context_chars"])
+        self.assertIn("[REPOSITORIES] selected=backend, frontend skipped=docs", prompt)
+        self.assertIn("[REPO_BUDGET] allocated=1000 used=120", prompt)
+        self.assertNotIn(str(self.root.resolve()), prompt)
 
 
 if __name__ == "__main__":
