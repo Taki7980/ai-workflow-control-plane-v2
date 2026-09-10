@@ -60,7 +60,7 @@ def _partition_explicit_changes(
     candidates: list[tuple[Path, str]],
     changed_files: list[str],
 ) -> dict[str, list[str]]:
-    out = {repo_path: [] for _, repo_path in candidates}
+    out: dict[str, list[str]] = {repo_path: [] for _, repo_path in candidates}
     child_paths = sorted(
         (repo_path for _, repo_path in candidates if repo_path != "." and not repo_path.startswith("legacy:")),
         key=lambda value: (-len(value), value.casefold()),
@@ -248,7 +248,7 @@ def select_repositories(
     if len(ordered) == 1:
         selected_ids.add(ordered[0][0].repository_id)
     elif has_evidence:
-        for candidate, score, reasons, evidence in ordered:
+        for candidate, score, reason_tuple, evidence in ordered:
             if evidence and score > 0 and len(selected_ids) < max(1, int(max_selected)):
                 selected_ids.add(candidate.repository_id)
     else:
@@ -257,8 +257,8 @@ def select_repositories(
             selected_ids.add(primary[0].repository_id)
 
     result: list[RepositorySelection] = []
-    for rank, (candidate, score, reasons, _) in enumerate(ordered, 1):
+    for rank, (candidate, score, reason_tuple, _) in enumerate(ordered, 1):
         selected = candidate.repository_id in selected_ids
-        final_reasons = reasons if selected or reasons else ("no_relevant_signal",)
+        final_reasons = reason_tuple if selected or reason_tuple else ("no_relevant_signal",)
         result.append(RepositorySelection(candidate, score, rank, selected, final_reasons))
     return result
