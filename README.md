@@ -294,6 +294,46 @@ ai-workflow benchmark-intervene \
 
 The runner receives one JSON object on stdin containing the task, frozen repository root, seed mode, seed files, and gold files. It returns one JSON object with optional `success: true|false` and `trajectory_events`. Runner subprocesses use no shell, a restricted environment, a timeout, and disk-spooled bounded stdout. Results include paired deltas against `random_non_gold`.
 
+Stage 4 adds statistical confidence and calibration without allowing experiments to change runtime behavior:
+
+```bash
+ai-workflow benchmark-statistics \
+  --input seed-run.json \
+  --confidence 0.95 \
+  --resamples 5000 \
+  --stratify task_type \
+  --output seed-stats.json
+```
+
+This computes deterministic paired bootstrap confidence intervals, win/tie/loss counts, win rates, and paired effect sizes against the `random_non_gold` condition. Stratification supports fields such as `task_type` or `repository_path`.
+
+Sufficiency thresholds can be evaluated on a deterministic held-out split:
+
+```bash
+ai-workflow benchmark-calibrate \
+  --input benchmark-report.json \
+  --calibration-fraction 0.7 \
+  --false-accept-cost 5 \
+  --false-reject-cost 1 \
+  --output calibration.json
+```
+
+The selected threshold minimizes explicit misclassification cost on the calibration split and is then reported separately on holdout cases. The result is always `advisory_only`; it is never written into production configuration automatically.
+
+Stage 3 algorithm reports can also feed the conservative policy advisor:
+
+```bash
+ai-workflow benchmark-policy-advisor \
+  --input algorithm-report.json \
+  --context-field task_type \
+  --minimum-samples 10 \
+  --confidence 0.95 \
+  --safety-margin 0.0 \
+  --output policy-advice.json
+```
+
+A candidate algorithm is recommended only when its paired bootstrap lower confidence bound clears the configured safety margin versus `adaptive_math`. High/critical-risk cases are excluded from learning and remain baseline-locked. The advisor does not perform online bandit actions and explicitly refuses off-policy claims until randomized logging or action propensities exist.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -316,6 +356,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-11-agent-retrieval-bench-alignment.md`
 - `docs/research/2026-09-11-retrieval-eval-stage2.md`
 - `docs/research/2026-09-11-retrieval-eval-stage3.md`
+- `docs/research/2026-09-11-retrieval-eval-stage4.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
