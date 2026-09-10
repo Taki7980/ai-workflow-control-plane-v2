@@ -29,5 +29,14 @@
       "direction": "lower"
     }
   },
-  "by_query_type": {}
+  "by_query_type": {
+    "exact": {"lane_accuracy": 1.0, "intent_accuracy": 1.0},
+    "high-risk": {"lane_accuracy": 1.0, "intent_accuracy": 1.0},
+    "mixed": {"lane_accuracy": 1.0, "intent_accuracy": 1.0},
+    "mutation": {"lane_accuracy": 0.6667, "intent_accuracy": 0.6667},
+    "no-gold": {"lane_accuracy": 0.75, "intent_accuracy": 0.5},
+    "path": {"lane_accuracy": 1.0, "intent_accuracy": 1.0},
+    "semantic": {"lane_accuracy": 0.9, "intent_accuracy": 0.8},
+    "structural": {"lane_accuracy": 0.5, "intent_accuracy": 0.5}
+  }
 }
