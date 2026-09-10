@@ -33,10 +33,38 @@ jobs:
             exit 1
           fi
           echo "Red phase confirmed"
-      - name: Apply Tasks 6-8 implementation
+      - name: Apply Tasks 6-7 implementation
+        run: python scripts/stage3_tasks_6_8.py impl
+      - name: Apply Task 8 docs and quality targets
+        shell: bash
         run: |
-          python scripts/stage3_tasks_6_8.py impl
-          python scripts/stage3_tasks_6_8.py docs
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/tests.yml')
+          workflow = workflow_path.read_text(encoding='utf-8')
+          targets = (
+              '          ai_workflow/workspace_selector.py\n'
+              '          ai_workflow/workspace_budget.py\n'
+              '          ai_workflow/workspace_retrieval.py\n'
+          )
+          if 'ai_workflow/workspace_selector.py' not in workflow:
+              ruff_marker = '          scripts/check_benchmark_regression.py\n'
+              if workflow.count(ruff_marker) != 1:
+                  raise RuntimeError('ruff insertion marker changed')
+              workflow = workflow.replace(ruff_marker, targets + ruff_marker, 1)
+              mypy_start = workflow.index('      - name: Mypy typed-boundary gate')
+              mypy_marker = '          ai_workflow/provider_runner.py\n'
+              marker_at = workflow.index(mypy_marker, mypy_start)
+              workflow = workflow[:marker_at + len(mypy_marker)] + targets + workflow[marker_at + len(mypy_marker):]
+              workflow_path.write_text(workflow, encoding='utf-8')
+
+          docs_path = Path('docs/multi-repo-workspace-registry.md')
+          docs = docs_path.read_text(encoding='utf-8')
+          if '## Stage 3 retrieval orchestration' not in docs:
+              docs += '''\n\n## Stage 3 retrieval orchestration\n\nAccepted repositories are retrieval **candidates**, not repositories that are searched automatically. `brief` and `context` score the accepted candidate set deterministically and search at most three repositories by default. A strong secondary-repository signal can outrank the primary repository; unrelated accepted repositories remain skipped.\n\nAll selected repositories share one parent context budget. The rank-1 repository receives the strongest allocation, per-repository slices are bounded, and the sum of allocations and final merged evidence never exceeds the parent budget. Repository retrieval runs with at most three workers under one 12-second monotonic workspace deadline by default. A timed-out or failed repository is reported and is not retried or replaced by an unselected repository.\n\nChanged files are partitioned to their owning repository before repository-local retrieval. Every merged context item carries portable `repository_id`, `repository_path`, and `repository_fingerprint` provenance; absolute checkout paths are not serialized into portable evidence. Identical evidence text from two repositories remains distinct because cross-repository deduplication includes repository identity.\n\n`ai-workflow brief` and `ai-workflow context` preserve the existing retrieval fields and add `retrieval.workspace_orchestration`. That block reports the aggregate workspace fingerprint, selected and skipped repositories with selector reasons, per-repository status, context allocation and use, and scheduler/deadline diagnostics. Human-readable briefs show selected/skipped repository paths and the aggregate repository budget only when the workspace has multiple candidates.\n\nStage 3 intentionally does not add dependency-graph traversal, topology learning, learned routing, daemon behavior, or retry loops. Those remain later-stage work.\n'''
+              docs_path.write_text(docs, encoding='utf-8')
+          PY
       - name: Run focused Stage 3 tests
         run: python -m unittest tests.test_cli tests.test_brief_format tests.test_benchmark_metrics tests.test_workspace_retrieval tests.test_workspace_selector tests.test_workspace_budget -v
       - name: Remove temporary completion machinery before verification
