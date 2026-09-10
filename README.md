@@ -232,11 +232,10 @@ The research protocol also supports Agent Retrieval Bench-style `code2test`, `co
 ```bash
 ai-workflow benchmark \
   --tasks benchmarks/research-protocol-example.json \
-  --research-protocol \
-  --require-frozen-snapshot
+  --research-protocol
 ```
 
-Use the strict flags for publishable/reproducible benchmark runs. The legacy corpus remains backward-compatible for fast regression checks.
+The bundled file demonstrates the schema against a historical frozen commit, so its snapshot may intentionally report a mismatch on newer checkouts. For publishable/reproducible runs, point cases at pinned target clones/worktrees and add `--require-frozen-snapshot`. The legacy corpus remains backward-compatible for fast regression checks.
 
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
