@@ -283,14 +283,22 @@ async def gather_workspace_detailed_async(
     graph_enabled = bool(graph_cfg.get("enabled", True))
     graph_diagnostics: dict[str, Any] = {
         "enabled": graph_enabled,
-        "status": "disabled" if not graph_enabled else "missing",
+        "status": (
+            "disabled"
+            if not graph_enabled
+            else "single_repository"
+            if len(selected_ids) <= 1
+            else "missing"
+        ),
     }
-    if graph_enabled and selected_ids:
+    if graph_enabled and len(selected_ids) > 1:
         try:
             graph = None
             graph_state: dict[str, Any] = {}
             build_on_demand = bool(graph_cfg.get("build_on_demand", True))
-            read_only_lane = getattr(decision.lane, "value", str(decision.lane)) == "answer"
+            read_only_lane = (
+                getattr(decision.lane, "value", str(decision.lane)) == "answer"
+            )
             if build_on_demand and not read_only_lane:
                 graph, graph_state = build_workspace_graph(
                     workspace_root,
