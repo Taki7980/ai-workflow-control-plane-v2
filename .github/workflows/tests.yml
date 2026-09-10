@@ -59,6 +59,9 @@ jobs:
           ai_workflow/benchmark_ablation.py
           ai_workflow/benchmark_algorithm_ablation.py
           ai_workflow/benchmark_intervention.py
+          ai_workflow/benchmark_statistics.py
+          ai_workflow/benchmark_calibration.py
+          ai_workflow/benchmark_policy_advisor.py
           ai_workflow/benchmark_trajectory.py
           ai_workflow/retrieval_scheduler.py
           ai_workflow/path_policy.py
@@ -79,6 +82,9 @@ jobs:
           ai_workflow/benchmark_ablation.py
           ai_workflow/benchmark_algorithm_ablation.py
           ai_workflow/benchmark_intervention.py
+          ai_workflow/benchmark_statistics.py
+          ai_workflow/benchmark_calibration.py
+          ai_workflow/benchmark_policy_advisor.py
           ai_workflow/benchmark_trajectory.py
           ai_workflow/path_policy.py
           ai_workflow/typed_config.py
