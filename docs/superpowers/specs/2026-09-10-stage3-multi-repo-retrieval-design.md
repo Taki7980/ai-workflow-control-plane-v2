@@ -76,11 +76,19 @@ The selector runs before expensive retrieval. It is deterministic and model-free
 - a small primary-repository prior;
 - optional explicit symbol/endpoint hints.
 
-The primary repository receives a modest prior so ambiguous local tasks still behave naturally, but it must not automatically outrank a clearly matching secondary repository.
+Signal priority is contractual even if numeric weights remain implementation details:
+
+1. explicit symbol/endpoint evidence;
+2. changed-file evidence;
+3. repository identity/path/name evidence;
+4. indexed symbol/file-path lexical evidence;
+5. primary-repository prior.
+
+The primary prior is only a final weak preference. It must not outrank a secondary repository with stronger explicit, changed-file, identity, or indexed evidence.
 
 Selection output includes a reason breakdown so `brief`/telemetry can explain why a repository was selected or skipped.
 
-Unrelated repositories should normally receive score zero and no retrieval budget.
+Unrelated repositories should normally receive score zero and no retrieval budget. At most three repositories are selected by default.
 
 ### 3. One global budget
 
@@ -88,27 +96,31 @@ Add `ai_workflow/workspace_budget.py`.
 
 The lane-level `ContextBudget` remains the hard parent ceiling. Stage 3 allocates slices to selected repositories; it never creates one full budget per repository.
 
-Required invariant:
+Required invariants:
 
 `sum(repo.context_chars) <= parent.context_chars`
 
-and source-specific per-repository allocations must also sum to no more than their parent source budgets.
+and, for each source class:
+
+`sum(repo.source_chars[source]) <= parent.source_chars[source]`
 
 Allocation policy:
 
-1. guarantee a minimum useful slice to the highest-ranked repository;
-2. distribute the remaining budget proportionally by deterministic normalized selector score;
-3. cap very low-ranked repositories so a broad workspace cannot starve the best match;
-4. if only one repository is selected, preserve the existing single-repo budget exactly;
-5. rounding must be deterministic and any remainder assigned by stable repository ordering.
+1. if only one repository is selected, it receives the existing parent budget exactly;
+2. with multiple repositories, the highest-ranked repository receives at least 50% of the parent context budget;
+3. the remaining budget is distributed proportionally by deterministic normalized selector score across all selected repositories, while respecting the 50% floor for rank 1;
+4. source-specific budgets use the same final repository allocation ratios and deterministic integer rounding;
+5. any rounding remainder is assigned in stable repository-rank order;
+6. zero-score/skipped repositories receive zero allocation;
+7. no allocation may be negative or exceed its parent budget.
 
-No allocation may be negative or exceed the parent budget.
+The 50% top-repository floor is an internal deterministic policy in Stage 3, not a user-facing tuning knob.
 
 ### 4. Per-repository retrieval
 
 Add a thin orchestration layer rather than duplicating retrieval algorithms.
 
-Preferred module: `ai_workflow/workspace_retrieval.py`.
+Module: `ai_workflow/workspace_retrieval.py`.
 
 For each selected repository:
 
@@ -120,7 +132,7 @@ For each selected repository:
 - preserve provider eligibility and existing structural fallbacks;
 - collect repository-local retrieval metadata and evidence state.
 
-The existing single-repository path remains valid and should use the same orchestration API with one selected repo.
+The existing single-repository path remains valid and uses the same orchestration API with one selected repo.
 
 ### 5. Repository provenance
 
@@ -137,23 +149,28 @@ Deduplication must be repository-aware. Identical text from two repositories can
 
 Cross-repo merge happens after per-repo retrieval and before final context packing.
 
-Ranking inputs may include:
+The ordering contract is:
 
-- repository selector score;
-- existing item score/fused relevance;
-- evidence/source class;
-- changed-file relevance;
-- stable repository and source/path tie-breakers.
+1. repository-local retrieval relevance remains primary;
+2. repository selector score is the secondary preference when local relevance is tied/equivalent;
+3. changed-file evidence may break otherwise equivalent relevance in favor of the repository owning the changed file;
+4. remaining ties are resolved deterministically by repository ID, source type, normalized source path, then dedupe key.
 
-The merge must be deterministic. Thread completion order, filesystem enumeration order, and Python hash randomization must not alter the final ranked result.
+The implementation may reuse the existing fusion/diversification helpers, but it must preserve that ordering contract and must not make thread completion order observable in the result.
 
 The final packed context must stay within the original global `ContextBudget`.
 
 ### 7. Concurrency and deadline
 
-Independent repository retrieval may execute concurrently, but concurrency is bounded by a small configurable worker count.
+Independent repository retrieval may execute concurrently, but concurrency is bounded.
 
-Use one global deadline for the whole multi-repo retrieval operation. Per-repository calls receive only the remaining time budget. A slow repository must not extend the overall task deadline.
+Default Stage 3 settings:
+
+- `workspace.retrieval.max_selected_repositories = 3`
+- `workspace.retrieval.max_workers = 3`
+- `workspace.retrieval.deadline_seconds = 12`
+
+Use one monotonic global deadline for the whole multi-repo retrieval operation. Per-repository calls receive only the remaining time budget. A slow repository must not extend the overall task deadline.
 
 Determinism rule: concurrency may change wall-clock time only, never final ranking or allocation.
 
@@ -200,16 +217,17 @@ No new required user command is needed for Stage 3. Existing `repos` commands fr
 
 ## Configuration
 
-Add only minimal optional workspace retrieval settings, with safe defaults, for example:
+Stage 3 adds exactly these optional settings under `workspace.retrieval`:
 
-- `workspace.retrieval.max_selected_repositories`;
-- `workspace.retrieval.max_workers`;
-- `workspace.retrieval.deadline_seconds`;
-- `workspace.retrieval.minimum_repo_share`.
+- `max_selected_repositories` — positive integer, default `3`;
+- `max_workers` — positive integer, default `3`;
+- `deadline_seconds` — positive number, default `12`.
 
-Defaults must preserve current single-repo behavior and keep multi-repo work bounded.
+Validation must reject zero/negative values and clamp effective worker count to selected-repository count.
 
-Do not require users to manually configure per-repo budgets.
+No per-repository budget configuration is introduced in Stage 3.
+
+Defaults preserve current single-repository behavior and keep multi-repository work bounded.
 
 ## Error handling and safety
 
@@ -244,6 +262,7 @@ Do not require users to manually configure per-repo budgets.
 - sum of repository allocations never exceeds parent budget;
 - sum of per-source allocations never exceeds parent source budget;
 - one-repo allocation equals current budget contract;
+- top-ranked repo receives at least 50% in multi-repo mode;
 - deterministic rounding/remainder behavior;
 - ten-repository fixture cannot multiply budget by repository count;
 - zero-score/skipped repos receive zero allocation.
@@ -277,7 +296,7 @@ Existing retrieval-quality floors must not be relaxed to make Stage 3 pass.
 
 Repository selection must be materially cheaper than full retrieval. It should rely on bounded summaries/index metadata rather than reading full repository contents.
 
-Multi-repo retrieval should use bounded concurrency and one global deadline. Memory usage should scale with selected repositories and bounded candidate counts, not all files from all accepted repositories.
+Multi-repo retrieval uses at most three workers and one 12-second global deadline by default. Memory usage must scale with selected repositories and bounded candidate counts, not all files from all accepted repositories.
 
 ## Compatibility
 
@@ -297,13 +316,13 @@ Primary additions:
 - `ai_workflow/workspace_budget.py`
 - `ai_workflow/workspace_retrieval.py`
 
-Likely focused edits:
+Focused edits:
 
 - `ai_workflow/context_broker.py` — baseline stopword scoring repair and minimal repo-local hooks only;
 - `ai_workflow/adaptive_broker.py` — expose repo-scoped retrieval metadata without absorbing orchestration logic;
 - `ai_workflow/cli.py` — consume workspace orchestration for `brief`/`context`;
-- `ai_workflow/config.py` / control-plane config — validate optional retrieval settings;
-- `ai_workflow/models.py` only if a small typed descriptor is clearly cleaner than dictionaries;
+- `ai_workflow/config.py` and control-plane config — validate the three optional retrieval settings;
+- `ai_workflow/models.py` only if a small immutable repository descriptor avoids dictionary coupling;
 - benchmark/test/docs files.
 
 Avoid a broad `Workspace` object refactor in this stage.
