@@ -1,0 +1,13 @@
+.git
+.github
+.ai
+.agents
+ai-workspace/generated
+ai-workspace/memory/*.sqlite3
+__pycache__
+*.pyc
+.venv
+venv
+dist
+build
+*.egg-info

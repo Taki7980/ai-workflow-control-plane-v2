@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+PackageIdentifier: Taki7980.AIWorkflow
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: Taki7980
+PackageName: AI Workflow Control Plane
+License: MIT
+ShortDescription: Agent-agnostic adaptive control plane for AI-assisted software development.
+PackageUrl: https://github.com/Taki7980/ai-workflow-control-plane-v2
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

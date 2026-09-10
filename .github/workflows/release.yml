@@ -1,0 +1,215 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Validate tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${GITHUB_REF_NAME#v}"
+          actual="$(python -c 'from ai_workflow import __version__; print(__version__)')"
+          test "$expected" = "$actual" || {
+            echo "tag version $expected does not match package version $actual" >&2
+            exit 1
+          }
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release already exists; reusing it"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "AI Workflow $GITHUB_REF_NAME"
+          fi
+
+  publish-pypi:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build Python distributions
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+          python -m pip install dist/*.whl
+          ai-workflow --version
+      - name: Attest Python distributions
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: "dist/*"
+      - name: Attach Python distributions to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+      - name: Publish package distributions to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  portable-binaries:
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+            exe: ""
+          - os: windows-latest
+            suffix: windows-x86_64
+            exe: ".exe"
+          - os: macos-latest
+            suffix: macos-arm64
+            exe: ""
+          - os: macos-15-intel
+            suffix: macos-x86_64
+            exe: ""
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build portable executable
+        id: asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install "pyinstaller==6.22.2"
+          python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
+          version="${GITHUB_REF_NAME#v}"
+          asset="ai-workflow-v${version}-${{ matrix.suffix }}${{ matrix.exe }}"
+          mkdir -p release
+          mv "dist/ai-workflow${{ matrix.exe }}" "release/$asset"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "path=release/$asset" >> "$GITHUB_OUTPUT"
+      - name: Smoke portable executable
+        shell: bash
+        run: '"./${{ steps.asset.outputs.path }}" --version'
+      - name: Attest portable executable
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.asset.outputs.path }}
+      - name: Attach portable executable to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.asset.outputs.path }}" --clobber
+
+  container:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Log in to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push container with provenance and SBOM
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --push \
+            --tag "$image:$GITHUB_REF_NAME" \
+            --metadata-file build-metadata.json \
+            .
+          digest="$(jq -r '."containerimage.digest"' build-metadata.json)"
+          test -n "$digest" && test "$digest" != "null"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Attest pushed container image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+  finalize-release:
+    needs: [publish-pypi, portable-binaries, container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Download release assets and create checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "$GITHUB_REF_NAME" --dir release-assets --clobber
+          rm -f release-assets/SHA256SUMS
+          rm -f release-assets/Taki7980.AIWorkflow*.yaml release-assets/ai-workflow.rb release-assets/meta.yaml
+          (cd release-assets && sha256sum * > ../SHA256SUMS)
+      - name: Render package-manager manifests from verified asset digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/render_distribution_manifests.py \
+            --version "${GITHUB_REF_NAME#v}" \
+            --checksums SHA256SUMS \
+            --output-dir release-manifests
+      - name: Attest checksums and rendered manifests
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            SHA256SUMS
+            release-manifests/*
+      - name: Upload release metadata and publish draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS release-manifests/* --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
