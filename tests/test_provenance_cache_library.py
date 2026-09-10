@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,25 @@ class ExecutionSemanticsTests(unittest.TestCase):
         self.assertEqual(explicit.version, "2026.09")
         self.assertTrue(explicit.semantics.deterministic)
         self.assertTrue(explicit.semantics.cacheable)
+
+    def test_native_async_command_provider_round_trips_request(self):
+        from ai_workflow.provider_runner import CommandProviderSpec, run_command_provider_async
+        from ai_workflow.retrieval_contracts import RetrievalRequest
+
+        script = (
+            "import json,sys; r=json.loads(sys.stdin.readline()); "
+            "print(json.dumps([{'text':r['query'],'score':1.0}]))"
+        )
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as td:
+                spec = CommandProviderSpec("async-test", (sys.executable, "-c", script))
+                request = RetrievalRequest("async evidence", Path(td), 1)
+                return await run_command_provider_async(spec, request, source="async-test")
+
+        result = asyncio.run(exercise())
+        self.assertIsNone(result.error)
+        self.assertEqual(result.items[0].text, "async evidence")
 
 
 class RetrievalCacheTests(unittest.TestCase):
