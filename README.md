@@ -254,6 +254,46 @@ The ablation profiles intentionally measure provider-family contribution: `base_
 
 Research cases may also provide `trajectory_events` inline or a benchmark-root-relative `trajectory_file`. Events use `kind: seed|explored|utilized`, `file`, and `step`. Reports then separate exploration precision/recall from utilization precision/recall, duplicate exploration, seed gold recall, and post-seed exploration.
 
+Stage 3 can isolate ranking and context-selection algorithms while preserving production defaults:
+
+```bash
+ai-workflow benchmark-algorithms \
+  --tasks benchmarks/research-protocol-example.json \
+  --profile adaptive_math \
+  --profile bm25_rank \
+  --profile rrf_only \
+  --profile rrf_mmr_075 \
+  --profile selector_off \
+  --profile no_early_stop
+```
+
+Available profiles cover provider-score ordering, BM25 ordering, RRF without MMR, MMR sensitivity at 0.50/0.75/0.90, selector removal, fixed context budgets, and early-sufficiency-gate removal. The active algorithm policy is written into every benchmark case result.
+
+Controlled seed interventions compare retrieved context with a deterministic non-gold baseline and oracle gold context:
+
+```bash
+ai-workflow benchmark-intervene \
+  --tasks benchmarks/research-protocol-example.json \
+  --mode retrieval \
+  --mode random_non_gold \
+  --mode oracle_gold \
+  --seed-k 5 \
+  --output seed-manifest.json
+```
+
+Without a runner command this creates a reproducible intervention manifest. To execute real coding-agent trials, provide an explicit runner executable:
+
+```bash
+ai-workflow benchmark-intervene \
+  --tasks benchmark-cases.json \
+  --research-protocol \
+  --require-frozen-snapshot \
+  --runner-command python \
+  --runner-arg scripts/my_agent_runner.py
+```
+
+The runner receives one JSON object on stdin containing the task, frozen repository root, seed mode, seed files, and gold files. It returns one JSON object with optional `success: true|false` and `trajectory_events`. Runner subprocesses use no shell, a restricted environment, a timeout, and disk-spooled bounded stdout. Results include paired deltas against `random_non_gold`.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -275,6 +315,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-07-v22-research.md`
 - `docs/research/2026-09-11-agent-retrieval-bench-alignment.md`
 - `docs/research/2026-09-11-retrieval-eval-stage2.md`
+- `docs/research/2026-09-11-retrieval-eval-stage3.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
