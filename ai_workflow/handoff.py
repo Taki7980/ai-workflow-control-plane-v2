@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 
 REQUIRED = ["Lane / risk", "Goal / state", "Exact paths+symbols", "Context sources", "Ordered edits", "Invariants", "Changed files", "Checks", "Blockers", "Exact next step"]
+HANDOFF_RELATIVE = Path("ai-workspace/handoff/HANDOFF.md")
+LEGACY_HANDOFF_RELATIVE = Path(".ai/HANDOFF.md")
 
 PLACEHOLDER_RE = re.compile(
     r"\[(?:answer\||small\||full\||low\||medium\||high\||goal and|bounded edit|cache/index|max \d+|contracts that|files changed|exact verification|one action|TODO|YOUR_)[^\]]*\]"
@@ -11,10 +13,27 @@ PLACEHOLDER_RE = re.compile(
     re.I,
 )
 
+
+def handoff_path(root: Path) -> Path:
+    """Return the clean-layout handoff path inside ai-workspace."""
+
+    return root / HANDOFF_RELATIVE
+
+
+def _existing_handoff_path(root: Path) -> Path:
+    clean = handoff_path(root)
+    if clean.exists():
+        return clean
+    legacy = root / LEGACY_HANDOFF_RELATIVE
+    if legacy.exists():
+        return legacy
+    return clean
+
+
 def validate(root: Path, max_lines: int = 30) -> list[str]:
-    path = root / ".ai" / "HANDOFF.md"
+    path = _existing_handoff_path(root)
     if not path.exists():
-        return ["missing .ai/HANDOFF.md"]
+        return [f"missing {HANDOFF_RELATIVE.as_posix()}"]
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     errors = []
@@ -26,6 +45,7 @@ def validate(root: Path, max_lines: int = 30) -> list[str]:
     if PLACEHOLDER_RE.search(text):
         errors.append("handoff still contains template placeholders")
     return errors
+
 
 def render(decision, provider: str, context_sources: list[str], goal: str) -> str:
     sources = ", ".join(dict.fromkeys(context_sources)) or "none"
