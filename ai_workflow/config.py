@@ -47,6 +47,11 @@ _DEFAULT_CONFIG = {
         "max_roots": 4,
         "registry": "ai-workspace/config/repositories.json",
         "discovery": {"max_depth": 3, "require_acceptance": True},
+        "retrieval": {
+            "max_selected_repositories": 3,
+            "max_workers": 3,
+            "deadline_seconds": 12,
+        },
     },
     "execution": {
         "prefer_superpowers_for_full": True,
@@ -213,6 +218,20 @@ def validate_config(data: dict[str, Any]) -> None:
     _nonnegative_int(discovery.get("max_depth", 3), "workspace.discovery.max_depth")
     if not isinstance(discovery.get("require_acceptance", True), bool):
         raise ValueError("workspace.discovery.require_acceptance must be boolean")
+    retrieval = data["workspace"].get(
+        "retrieval",
+        {"max_selected_repositories": 3, "max_workers": 3, "deadline_seconds": 12},
+    )
+    if not isinstance(retrieval, dict):
+        raise ValueError("workspace.retrieval must be an object")
+    _positive_int(
+        retrieval.get("max_selected_repositories", 3),
+        "workspace.retrieval.max_selected_repositories",
+    )
+    _positive_int(retrieval.get("max_workers", 3), "workspace.retrieval.max_workers")
+    deadline = retrieval.get("deadline_seconds", 12)
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or float(deadline) <= 0:
+        raise ValueError("workspace.retrieval.deadline_seconds must be a positive number")
     orchestration = data["execution"].get("orchestration_budget")
     if not isinstance(orchestration, dict):
         raise ValueError("missing required section: execution.orchestration_budget")
