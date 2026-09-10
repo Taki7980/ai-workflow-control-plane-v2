@@ -6,6 +6,7 @@ All notable repository changes are summarized here. The project follows semantic
 
 ### Added
 
+- Agent Retrieval Bench-aligned file-level benchmark protocol with frozen snapshot validation, selective no-gold/wrong-repository controls, and per-task-type metrics.
 - Typed public `WorkflowClient` / `TaskRequest` / `WorkflowResult` library API over the existing control-plane engine.
 - Immutable run provenance with reproducibility keys, provider versions, workspace/index/config identity, and optional external artifact references.
 - Explicit provider execution semantics and an opt-in deterministic retrieval cache.
