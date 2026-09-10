@@ -33,6 +33,8 @@ async def gather_detailed_async(
     changed_files: list[str] | None = None,
     *,
     write_telemetry: bool = False,
+    workspace_root: Path | None = None,
+    repository_path: str = ".",
 ) -> tuple[list[ContextItem], dict]:
     return await _engine().gather_detailed_async(
         root,
@@ -45,6 +47,8 @@ async def gather_detailed_async(
         endpoint,
         changed_files,
         write_telemetry=write_telemetry,
+        workspace_root=workspace_root,
+        repository_path=repository_path,
     )
 
 
@@ -60,6 +64,8 @@ def gather_detailed(
     changed_files: list[str] | None = None,
     *,
     write_telemetry: bool = False,
+    workspace_root: Path | None = None,
+    repository_path: str = ".",
 ) -> tuple[list[ContextItem], dict]:
     return _engine().gather_detailed(
         root,
@@ -72,6 +78,8 @@ def gather_detailed(
         endpoint,
         changed_files,
         write_telemetry=write_telemetry,
+        workspace_root=workspace_root,
+        repository_path=repository_path,
     )
 
 
