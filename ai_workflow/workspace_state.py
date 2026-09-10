@@ -255,7 +255,13 @@ def aggregate_workspace_fingerprint(
             )
         )
 
-    snapshots.sort(key=lambda item: (str(item["relative_path"]).lower(), item["repository_id"]))
+    snapshots.sort(
+        key=lambda item: (
+            str(item["relative_path"]).lower(),
+            item["repository_id"],
+            item["fingerprint"],
+        )
+    )
     stable_repositories = [
         {key: value for key, value in snapshot.items() if key != "root"}
         for snapshot in snapshots
