@@ -99,9 +99,9 @@ jobs:
           PY
       - name: Run focused Stage 3 tests
         run: python -m unittest tests.test_cli tests.test_brief_format tests.test_benchmark_metrics tests.test_workspace_retrieval tests.test_workspace_selector tests.test_workspace_budget -v
-      - name: Remove temporary completion machinery before verification
+      - name: Remove temporary completion script before verification
         shell: bash
-        run: rm -f scripts/stage3_tasks_6_8.py .github/workflows/stage3-tasks6-8-apply.yml
+        run: rm -f scripts/stage3_tasks_6_8.py
       - name: Run full unit suite and compile
         shell: bash
         run: |
@@ -130,8 +130,9 @@ jobs:
           git commit -m "test: add multi-repo retrieval metrics"
           git add ai_workflow/workspace_selector.py ai_workflow/workspace_budget.py ai_workflow/workspace_retrieval.py
           git commit -m "style: satisfy stage3 retrieval quality gates"
-          git add .github/workflows/tests.yml docs/multi-repo-workspace-registry.md
+          git add docs/multi-repo-workspace-registry.md
           git commit -m "docs: finalize stage3 multi-repo retrieval"
-          git add -u scripts/stage3_tasks_6_8.py .github/workflows/stage3-tasks6-8-apply.yml
-          git commit -m "chore: remove stage3 completion helper"
+          git add -u scripts/stage3_tasks_6_8.py
+          git commit -m "chore: remove stage3 completion script"
+          git restore .github/workflows/tests.yml
           git push origin HEAD:research/stage3-complete-retrieval
