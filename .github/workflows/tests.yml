@@ -64,6 +64,10 @@ jobs:
           ai_workflow/benchmark_policy_advisor.py
           ai_workflow/retrieval_learning.py
           ai_workflow/learning_ope.py
+          ai_workflow/contextual_features.py
+          ai_workflow/contextual_policy.py
+          ai_workflow/policy_manifest.py
+          ai_workflow/shadow_policy.py
           ai_workflow/benchmark_trajectory.py
           ai_workflow/retrieval_scheduler.py
           ai_workflow/path_policy.py
@@ -89,6 +93,10 @@ jobs:
           ai_workflow/benchmark_policy_advisor.py
           ai_workflow/retrieval_learning.py
           ai_workflow/learning_ope.py
+          ai_workflow/contextual_features.py
+          ai_workflow/contextual_policy.py
+          ai_workflow/policy_manifest.py
+          ai_workflow/shadow_policy.py
           ai_workflow/benchmark_trajectory.py
           ai_workflow/path_policy.py
           ai_workflow/typed_config.py
