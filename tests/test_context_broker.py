@@ -1,7 +1,7 @@
 import tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
-from ai_workflow.context_broker import _domain_hints, _score
+from ai_workflow.context_broker import _domain_hints, _score, lightweight
 
 class ContextBrokerTests(unittest.TestCase):
     def test_score_uses_tokens_not_substrings(self):
@@ -28,6 +28,37 @@ class ContextBrokerTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].source, 'domain_manifest')
             self.assertIn('services/billing', rows[0].text)
+
+    def test_lightweight_keeps_rare_query_signal_under_generic_symbol_noise(self):
+        generic = [
+            {"symbol": f"repository_rule_{index}", "file": f"tests/repository_rule_{index}.py"}
+            for index in range(6)
+        ]
+        rare = {"symbol": "crg_gate", "file": "ai_workflow/retrieval_policy.py"}
+        with tempfile.TemporaryDirectory() as td, patch(
+            "ai_workflow.context_broker.load_state", return_value={}
+        ), patch(
+            "ai_workflow.context_broker._jsonl", side_effect=[generic + [rare], []]
+        ), patch(
+            "ai_workflow.context_broker.row_fresh", return_value=True
+        ), patch(
+            "ai_workflow.context_broker._domain_hints", return_value=[]
+        ), patch(
+            "ai_workflow.context_broker._research_hits", return_value=[]
+        ), patch(
+            "ai_workflow.context_broker.search_memory", return_value=[]
+        ):
+            items = lightweight(
+                Path(td),
+                "Where do we decide whether CRG should be attempted for a large repository?",
+                None,
+                None,
+                limit=5,
+                min_conf=0.5,
+            )
+
+        self.assertEqual(len(items), 5)
+        self.assertTrue(any('"symbol":"crg_gate"' in item.text for item in items))
 
 from ai_workflow.context_broker import gather
 from ai_workflow.budget import budget_for
