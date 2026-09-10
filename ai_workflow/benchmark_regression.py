@@ -28,7 +28,13 @@ def latency_percentiles(values: Iterable[float]) -> dict[str, float | None]:
     return {"p50": percentile(0.50), "p95": percentile(0.95), "p99": percentile(0.99)}
 
 
-def _minimum_failure(metric: str, floor: Any, actual: Any, *, query_type: str | None = None) -> dict[str, Any] | None:
+def _minimum_failure(
+    metric: str,
+    floor: Any,
+    actual: Any,
+    *,
+    query_type: str | None = None,
+) -> dict[str, Any] | None:
     expected = _number(floor)
     observed = _number(actual)
     if expected is None:
@@ -46,7 +52,10 @@ def _minimum_failure(metric: str, floor: Any, actual: Any, *, query_type: str | 
     return failure
 
 
-def check_regression(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+def check_regression(
+    baseline: dict[str, Any],
+    current: dict[str, Any],
+) -> dict[str, Any]:
     """Compare a benchmark result with an explicit, versioned regression policy."""
 
     if int(baseline.get("schema_version", 0) or 0) != 1:
@@ -76,8 +85,12 @@ def check_regression(baseline: dict[str, Any], current: dict[str, Any]) -> dict[
         if direction not in {"higher", "lower"}:
             raise ValueError(f"invalid direction for {metric}: {direction}")
         checked += 1
-        limit = reference * (1 - tolerance) if direction == "higher" else reference * (1 + tolerance)
-        regressed = actual is None or (actual < limit if direction == "higher" else actual > limit)
+        if direction == "higher":
+            limit = reference * (1 - tolerance)
+            regressed = actual is None or actual < limit
+        else:
+            limit = reference * (1 + tolerance)
+            regressed = actual is None or actual > limit
         if regressed:
             failures.append(
                 {
@@ -91,16 +104,23 @@ def check_regression(baseline: dict[str, Any], current: dict[str, Any]) -> dict[
                 }
             )
 
-    current_groups = current.get("by_query_type") if isinstance(current.get("by_query_type"), dict) else {}
+    raw_groups = current.get("by_query_type")
+    current_groups = raw_groups if isinstance(raw_groups, dict) else {}
     for query_type, floors in (baseline.get("by_query_type") or {}).items():
         if not isinstance(floors, dict):
             continue
-        group = current_groups.get(query_type) if isinstance(current_groups.get(query_type), dict) else {}
+        raw_group = current_groups.get(query_type)
+        group = raw_group if isinstance(raw_group, dict) else {}
         for metric, floor in floors.items():
             if floor is None:
                 continue
             checked += 1
-            failure = _minimum_failure(str(metric), floor, group.get(metric), query_type=str(query_type))
+            failure = _minimum_failure(
+                str(metric),
+                floor,
+                group.get(metric),
+                query_type=str(query_type),
+            )
             if failure:
                 failures.append(failure)
 

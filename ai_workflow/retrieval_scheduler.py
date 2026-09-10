@@ -46,7 +46,11 @@ class BoundedRetrievalScheduler:
             raise ValueError("max_concurrency must be >= 1")
         self.max_concurrency = int(max_concurrency)
 
-    async def run(self, calls: list[ScheduledCall[T]], deadline_seconds: float) -> list[SchedulerOutcome[T]]:
+    async def run(
+        self,
+        calls: list[ScheduledCall[T]],
+        deadline_seconds: float,
+    ) -> list[SchedulerOutcome[T]]:
         if float(deadline_seconds) <= 0:
             raise ValueError("deadline_seconds must be > 0")
         if not calls:
@@ -54,7 +58,10 @@ class BoundedRetrievalScheduler:
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + float(deadline_seconds)
-        executor = ThreadPoolExecutor(max_workers=self.max_concurrency, thread_name_prefix="ai-workflow-retrieval")
+        executor = ThreadPoolExecutor(
+            max_workers=self.max_concurrency,
+            thread_name_prefix="ai-workflow-retrieval",
+        )
 
         async def execute(call: ScheduledCall[T]) -> SchedulerOutcome[T]:
             started = time.perf_counter()
@@ -73,11 +80,14 @@ class BoundedRetrievalScheduler:
                 return SchedulerOutcome(
                     label=call.label,
                     latency_ms=(time.perf_counter() - started) * 1000,
-                    error=f"global retrieval deadline exceeded after {deadline_seconds:g} seconds",
+                    error=(
+                        "global retrieval deadline exceeded after "
+                        f"{deadline_seconds:g} seconds"
+                    ),
                     error_kind="deadline",
                     timed_out=True,
                 )
-            except Exception as exc:  # noqa: BLE001 - provider failures are deliberately isolated
+            except Exception as exc:  # noqa: BLE001 - provider failures are isolated
                 return SchedulerOutcome(
                     label=call.label,
                     latency_ms=(time.perf_counter() - started) * 1000,
