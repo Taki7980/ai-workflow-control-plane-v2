@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .execution_semantics import ProviderSemantics
 from .models import ContextItem
 from .path_policy import confine_metadata_paths
 from .retrieval_contracts import ProviderResult, RetrievalRequest
@@ -45,6 +47,8 @@ class CommandProviderSpec:
     intents: tuple[str, ...] = ("all",)
     env_allowlist: tuple[str, ...] = ()
     executable_trust: str = "configured_local_executable"
+    version: str = "unknown"
+    semantics: ProviderSemantics = field(default_factory=ProviderSemantics)
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -55,6 +59,8 @@ class CommandProviderSpec:
             raise ValueError(f"provider {self.name!r} timeout_seconds must be > 0")
         if self.max_output_bytes <= 0:
             raise ValueError(f"provider {self.name!r} max_output_bytes must be > 0")
+        if not self.version.strip():
+            raise ValueError(f"provider {self.name!r} version must not be blank")
 
 
 def build_provider_env(allowed_keys: Iterable[str] = ()) -> dict[str, str]:
@@ -88,6 +94,10 @@ def command_provider_spec(raw: Mapping[str, Any], default_name: str = "provider"
     ):
         raise ValueError("provider env_allowlist must be a list of non-empty strings")
 
+    semantics_raw = raw.get("semantics")
+    if semantics_raw is not None and not isinstance(semantics_raw, Mapping):
+        raise ValueError("provider semantics must be an object")
+
     return CommandProviderSpec(
         name=str(raw.get("name") or default_name),
         command=argv,
@@ -95,6 +105,8 @@ def command_provider_spec(raw: Mapping[str, Any], default_name: str = "provider"
         max_output_bytes=int(raw.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)),
         intents=tuple(intents),
         env_allowlist=tuple(env_allowlist),
+        version=str(raw.get("version") or "unknown"),
+        semantics=ProviderSemantics.from_mapping(semantics_raw),
     )
 
 
@@ -129,6 +141,19 @@ def _bounded_reader(proc: subprocess.Popen[bytes], limit: int, output: bytearray
             output.extend(chunk)
     except OSError:
         return
+
+
+async def _bounded_async_reader(stream: asyncio.StreamReader, limit: int) -> tuple[bytes, bool]:
+    output = bytearray()
+    while True:
+        remaining = limit - len(output)
+        chunk = await stream.read(min(65536, max(1, remaining + 1)))
+        if not chunk:
+            return bytes(output), False
+        if len(chunk) > remaining:
+            output.extend(chunk[: max(0, remaining)])
+            return bytes(output), True
+        output.extend(chunk)
 
 
 def _parse_records(raw: str) -> list[dict[str, Any]]:
@@ -204,6 +229,42 @@ def _context_items(
     return tuple(items[:limit])
 
 
+def _result_from_bytes(
+    spec: CommandProviderSpec,
+    request: RetrievalRequest,
+    source: str,
+    metadata_defaults: Mapping[str, Any] | None,
+    output: bytes,
+    latency_ms: float,
+    returncode: int | None,
+) -> ProviderResult:
+    text = output.decode("utf-8", errors="replace")
+    if not text.strip():
+        return ProviderResult(
+            provider=spec.name,
+            latency_ms=latency_ms,
+            error="provider returned an empty payload",
+            error_kind="empty_output",
+            returncode=returncode,
+        )
+    try:
+        records = _parse_records(text)
+    except ValueError as exc:
+        return ProviderResult(
+            provider=spec.name,
+            latency_ms=latency_ms,
+            error=str(exc),
+            error_kind="invalid_payload",
+            returncode=returncode,
+        )
+    return ProviderResult(
+        provider=spec.name,
+        items=_context_items(request.root, records, source, request.limit, spec.name, metadata_defaults),
+        latency_ms=latency_ms,
+        returncode=returncode,
+    )
+
+
 def run_command_provider(
     spec: CommandProviderSpec,
     request: RetrievalRequest,
@@ -216,7 +277,6 @@ def run_command_provider(
     started = time.perf_counter()
     output = bytearray()
     exceeded = threading.Event()
-    proc: subprocess.Popen[bytes] | None = None
     timed_out = False
 
     try:
@@ -289,30 +349,90 @@ def run_command_provider(
             error_kind="exit",
             returncode=returncode,
         )
+    return _result_from_bytes(spec, request, source, metadata_defaults, bytes(output), latency_ms, returncode)
 
-    text = output.decode("utf-8", errors="replace")
-    if not text.strip():
-        return ProviderResult(
-            provider=spec.name,
-            latency_ms=latency_ms,
-            error="provider returned an empty payload",
-            error_kind="empty_output",
-            returncode=returncode,
-        )
+
+async def run_command_provider_async(
+    spec: CommandProviderSpec,
+    request: RetrievalRequest,
+    *,
+    source: str,
+    metadata_defaults: Mapping[str, Any] | None = None,
+) -> ProviderResult:
+    """Native async provider runner with bounded stdout and cancellation cleanup."""
+
+    started = time.perf_counter()
     try:
-        records = _parse_records(text)
-    except ValueError as exc:
+        proc = await asyncio.create_subprocess_exec(
+            *spec.command,
+            cwd=request.root,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=build_provider_env(spec.env_allowlist),
+        )
+    except (OSError, ValueError) as exc:
+        return ProviderResult(
+            provider=spec.name,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            error=f"provider could not be started: {type(exc).__name__}",
+            error_kind="launch",
+        )
+
+    effective_timeout = min(float(spec.timeout_seconds), float(request.timeout_seconds))
+
+    async def exchange() -> tuple[bytes, bool, int]:
+        if proc.stdin is not None:
+            try:
+                proc.stdin.write(_request_payload(request))
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                proc.stdin.close()
+        assert proc.stdout is not None
+        output, exceeded = await _bounded_async_reader(proc.stdout, spec.max_output_bytes)
+        if exceeded and proc.returncode is None:
+            proc.kill()
+        returncode = await proc.wait()
+        return output, exceeded, returncode
+
+    try:
+        output, exceeded, returncode = await asyncio.wait_for(exchange(), timeout=effective_timeout)
+    except asyncio.TimeoutError:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
+        return ProviderResult(
+            provider=spec.name,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            error=f"provider timed out after {effective_timeout:g} seconds",
+            error_kind="timeout",
+            timed_out=True,
+            returncode=proc.returncode,
+        )
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
+        raise
+
+    latency_ms = (time.perf_counter() - started) * 1000
+    if exceeded:
         return ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
-            error=str(exc),
-            error_kind="invalid_payload",
+            error=f"provider output exceeded {spec.max_output_bytes} bytes",
+            error_kind="output_limit",
+            output_limited=True,
             returncode=returncode,
         )
-
-    return ProviderResult(
-        provider=spec.name,
-        items=_context_items(request.root, records, source, request.limit, spec.name, metadata_defaults),
-        latency_ms=latency_ms,
-        returncode=returncode,
-    )
+    if returncode != 0:
+        return ProviderResult(
+            provider=spec.name,
+            latency_ms=latency_ms,
+            error=f"provider exited with status {returncode}",
+            error_kind="exit",
+            returncode=returncode,
+        )
+    return _result_from_bytes(spec, request, source, metadata_defaults, output, latency_ms, returncode)
