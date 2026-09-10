@@ -33,7 +33,7 @@ jobs:
           echo "Red phase confirmed"
       - name: Apply Stage 3 Tasks 4-5 implementation
         run: python scripts/stage3_tasks_4_5.py impl
-      - name: Preserve existing lightweight cutoff semantics
+      - name: Preserve scoped and legacy lightweight semantics
         shell: bash
         run: |
           python - <<'PY'
@@ -41,6 +41,11 @@ jobs:
 
           path = Path("ai_workflow/context_broker.py")
           text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "from .indexer import load_state, sha256",
+              "from .indexer import load_state, row_fresh, sha256",
+              1,
+          )
           start = text.index("def lightweight(")
           end = text.index("def _run_crg(", start)
           corrected = '''def lightweight(
@@ -57,6 +62,7 @@ jobs:
           ) -> list[ContextItem]:
               index_root = Path(workspace_root).resolve() if workspace_root is not None else Path(root).resolve()
               state = load_state(index_root)
+              use_scoped_freshness = workspace_root is not None or repository_path != "." or bool(child_repository_paths)
               out: list[ContextItem] = []
               for raw in _jsonl(index_root / "ai-workspace/generated/symbol-index.jsonl"):
                   mapped = _scope_index_row(raw, repository_path, child_repository_paths)
@@ -65,7 +71,8 @@ jobs:
                   row, original = mapped
                   target = symbol or query
                   score = 10 if symbol and row.get("symbol", "").lower() == symbol.lower() else _semantic_overlap_score(target, f"{row.get('symbol','')} {row.get('file','')}")
-                  if score and _scoped_row_fresh(root, row, original, state):
+                  fresh = _scoped_row_fresh(root, row, original, state) if use_scoped_freshness else row_fresh(root, row, state)
+                  if score and fresh:
                       out.append(ContextItem("lightweight_index", json.dumps(row, separators=(",", ":")), float(score), False, {"kind": "symbol"}))
               for raw in _jsonl(index_root / "ai-workspace/generated/endpoint-index.jsonl"):
                   mapped = _scope_index_row(raw, repository_path, child_repository_paths)
@@ -74,7 +81,8 @@ jobs:
                   row, original = mapped
                   target = endpoint or query
                   score = 10 if endpoint and endpoint.lower() in row.get("path", "").lower() else _semantic_overlap_score(target, f"{row.get('method','')} {row.get('path','')} {row.get('file','')}")
-                  if score and _scoped_row_fresh(root, row, original, state):
+                  fresh = _scoped_row_fresh(root, row, original, state) if use_scoped_freshness else row_fresh(root, row, state)
+                  if score and fresh:
                       out.append(ContextItem("lightweight_index", json.dumps(row, separators=(",", ":")), float(score), False, {"kind": "endpoint"}))
               out.extend(_domain_hints(index_root, query, limit))
               out.extend(_research_hits(index_root, query, limit))
@@ -107,6 +115,46 @@ jobs:
 
           '''
           path.write_text(text[:start] + corrected + "\n" + text[end:], encoding="utf-8")
+
+          test_path = Path("tests/test_workflow_engine.py")
+          tests = test_path.read_text(encoding="utf-8")
+          old_start = tests.index("    def test_workspace_roots_execute_concurrently_but_diagnostics_keep_root_order(self):")
+          old_end = tests.index("    def test_semantic_and_external_retrievers_execute_concurrently_in_stable_order(self):", old_start)
+          replacement = '''    def test_engine_executes_only_requested_repository_when_workspace_roots_exist(self):
+              from ai_workflow.workflow_engine import WorkflowEngine
+
+              cfg = self._config()
+              cfg["workspace"]["roots"] = ["one", "two"]
+              decision = RouteDecision(Lane.FULL, Risk.MEDIUM, confidence=0.9)
+              budget = ContextBudget(6000, 1200, 24000, {})
+              calls = []
+
+              def base(root, query, decision, budget, config, providers, symbol, endpoint, changed):
+                  calls.append(Path(root).resolve())
+                  return [ContextItem("lightweight_index", f"{root.name} evidence for {query}", 1.0)]
+
+              with tempfile.TemporaryDirectory() as td:
+                  root = Path(td)
+                  (root / "one").mkdir()
+                  (root / "two").mkdir()
+                  engine = WorkflowEngine(base_gather=base)
+                  _, diagnostics = engine.gather_detailed(
+                      root,
+                      "payment architecture dependency flow",
+                      decision,
+                      budget,
+                      cfg,
+                      ProviderStatus(False, False, False, False, False),
+                  )
+                  expected_root = root.resolve()
+
+              self.assertEqual(calls, [expected_root])
+              self.assertEqual(diagnostics["providers_attempted"][0], "base")
+              self.assertFalse(any(label.startswith("workspace:") for label in diagnostics["providers_attempted"]))
+              self.assertEqual(diagnostics["scheduler"]["max_concurrency"], 4)
+
+          '''
+          test_path.write_text(tests[:old_start] + replacement + tests[old_end:], encoding="utf-8")
           PY
       - name: Verify focused Stage 3 retrieval tests
         run: python -m unittest tests.test_scoped_retrieval tests.test_workspace_retrieval -v
@@ -122,7 +170,7 @@ jobs:
         run: |
           git config user.name "Stage3 CI"
           git config user.email "actions@users.noreply.github.com"
-          git add ai_workflow/context_broker.py ai_workflow/workflow_engine.py ai_workflow/adaptive_broker.py tests/test_scoped_retrieval.py
+          git add ai_workflow/context_broker.py ai_workflow/workflow_engine.py ai_workflow/adaptive_broker.py tests/test_scoped_retrieval.py tests/test_workflow_engine.py
           git commit -m "feat: scope retrieval to one repository"
       - name: Commit workspace retrieval orchestration
         shell: bash
