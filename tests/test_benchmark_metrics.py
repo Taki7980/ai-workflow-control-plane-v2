@@ -175,5 +175,83 @@ class RetrievalMetricTests(unittest.TestCase):
         self.assertIsNone(graph_context_yield([], [], k=5))
 
 
+    def test_stage4_graph_metrics_are_integrated_into_benchmark(self):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from ai_workflow.benchmark import run_benchmark
+        from ai_workflow.budget import ContextBudget
+        from ai_workflow.config import default_config
+        from ai_workflow.models import Lane, Risk, RouteDecision
+        from ai_workflow.providers import ProviderStatus
+        from ai_workflow.workspace_retrieval import WorkspaceRetrievalResult
+
+        graph_item = ContextItem(
+            "workspace_graph",
+            "frontend payment endpoint",
+            metadata={
+                "graph_node_id": "node-client",
+                "graph_edge_ids": ["edge-api"],
+                "repository_path": "frontend",
+            },
+        )
+        workspace = {
+            "primary_retrieval": {
+                "sufficiency": {"sufficient": True, "score": 1.0},
+                "fallbacks": [],
+            },
+            "budget": {
+                "allocated_context_chars": 100,
+                "used_context_chars": len(graph_item.text),
+            },
+            "repositories_searched": ["repo-front"],
+            "workspace_fingerprint": "workspace-fp",
+        }
+        result = WorkspaceRetrievalResult((graph_item,), workspace)
+        decision = RouteDecision(
+            Lane.ANSWER,
+            Risk.LOW,
+            ["test"],
+            False,
+            0.9,
+        )
+        budget = ContextBudget(
+            100,
+            20,
+            400,
+            {
+                "hot_cache": 40,
+                "lightweight": 120,
+                "crg": 160,
+                "source_fallback": 80,
+            },
+        )
+        providers = ProviderStatus(False, False, False, False, False)
+        task = {
+            "task": "where is the payment endpoint",
+            "retrieval_k": 5,
+            "gold_graph_nodes": ["node-client"],
+            "gold_graph_edges": ["edge-api"],
+            "gold_structural_evidence": ["payment endpoint"],
+        }
+
+        with patch("ai_workflow.benchmark.detect", return_value=providers), patch(
+            "ai_workflow.benchmark.classify", return_value=decision
+        ), patch("ai_workflow.benchmark.budget_for", return_value=budget), patch(
+            "ai_workflow.benchmark.gather_workspace_detailed",
+            return_value=result,
+        ):
+            report = run_benchmark(Path("."), default_config(), [task])
+
+        case = report["cases"][0]
+        self.assertEqual(case["graph_node_recall_at_k"], 1.0)
+        self.assertEqual(case["cross_repo_edge_recall"], 1.0)
+        self.assertEqual(case["wrong_edge_rate"], 0.0)
+        self.assertEqual(case["structural_recall_at_k"], 1.0)
+        self.assertEqual(case["graph_context_yield"], 1.0)
+        self.assertEqual(report["summary"]["mean_graph_node_recall_at_k"], 1.0)
+        self.assertEqual(report["summary"]["mean_cross_repo_edge_recall"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
