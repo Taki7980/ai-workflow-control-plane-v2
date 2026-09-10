@@ -1,0 +1,91 @@
+[
+  {
+    "task": "Which tests directly exercise retrieval_metrics?",
+    "task_type": "code2test",
+    "query_type": "exact",
+    "symbol": "retrieval_metrics",
+    "expected_lane": "answer",
+    "expected_intent": "exact",
+    "gold_files": [
+      "tests/test_benchmark_metrics.py"
+    ],
+    "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
+    "repository_path": ".",
+    "control_type": "positive",
+    "retrieval_k": 5
+  },
+  {
+    "task": "Where do we explain that retrieval metrics do not prove downstream patch correctness?",
+    "task_type": "comment2context",
+    "query_type": "semantic",
+    "expected_lane": "answer",
+    "expected_intent": "semantic",
+    "gold_files": [
+      "ai_workflow/benchmark.py",
+      "README.md"
+    ],
+    "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
+    "repository_path": ".",
+    "control_type": "positive",
+    "retrieval_k": 5
+  },
+  {
+    "task": "Traceback points into ai_workflow/benchmark.py inside run_benchmark while computing retrieval metrics. Which file should be inspected first?",
+    "task_type": "trace2code",
+    "query_type": "path",
+    "expected_lane": "answer",
+    "expected_intent": "exact",
+    "gold_files": [
+      "ai_workflow/benchmark.py"
+    ],
+    "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
+    "repository_path": ".",
+    "control_type": "positive",
+    "retrieval_k": 5
+  },
+  {
+    "task": "What files are likely affected if the benchmark output schema changes?",
+    "task_type": "edit2ripple",
+    "query_type": "structural",
+    "expected_lane": "full",
+    "expected_intent": "structural",
+    "gold_files": [
+      "ai_workflow/benchmark.py",
+      "ai_workflow/benchmark_regression.py",
+      "tests/test_benchmark_regression_policy.py"
+    ],
+    "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
+    "repository_path": ".",
+    "control_type": "positive",
+    "retrieval_k": 8
+  },
+  {
+    "task": "Where is the built-in PostgreSQL vector-index migration for retrieval stored?",
+    "task_type": "no_gold",
+    "query_type": "no-gold",
+    "expected_lane": "answer",
+    "expected_intent": "semantic",
+    "expected_evidence_state": "abstain",
+    "no_gold": true,
+    "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
+    "repository_path": ".",
+    "control_type": "natural_no_gold",
+    "retrieval_k": 5
+  },
+  {
+    "task": "Locate the production Kubernetes billing reconciler from an unrelated service repository.",
+    "task_type": "no_gold",
+    "query_type": "no-gold",
+    "expected_lane": "answer",
+    "expected_intent": "semantic",
+    "expected_evidence_state": "abstain",
+    "no_gold": true,
+    "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
+    "repository_path": ".",
+    "control_type": "wrong_repo",
+    "forbidden_repositories": [
+      "github.com/Taki7980/ai-workflow-control-plane-v2"
+    ],
+    "retrieval_k": 5
+  }
+]
