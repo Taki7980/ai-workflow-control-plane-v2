@@ -12,6 +12,13 @@ from .classifier import classify
 from .config import estimate_tokens
 from .models import ContextItem
 from .providers import detect, execution_provider, model_tier
+from .workspace_graph_metrics import (
+    cross_repo_edge_recall,
+    graph_context_yield,
+    graph_node_recall_at_k,
+    structural_recall_at_k,
+    wrong_edge_rate,
+)
 from .workspace_retrieval import gather_workspace_detailed
 
 
@@ -217,6 +224,38 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
         )
         if file_metric is not None:
             row["file_recall_at_k"] = file_metric
+
+        graph_k = int(case.get("retrieval_k", 5))
+        graph_metrics = {
+            "graph_node_recall_at_k": graph_node_recall_at_k(
+                items,
+                case.get("gold_graph_nodes") or [],
+                graph_k,
+            ),
+            "cross_repo_edge_recall": cross_repo_edge_recall(
+                items,
+                case.get("gold_graph_edges") or [],
+                graph_k,
+            ),
+            "wrong_edge_rate": wrong_edge_rate(
+                items,
+                case.get("gold_graph_edges") or [],
+                graph_k,
+            ),
+            "structural_recall_at_k": structural_recall_at_k(
+                items,
+                case.get("gold_structural_evidence") or [],
+                graph_k,
+            ),
+            "graph_context_yield": graph_context_yield(
+                items,
+                case.get("gold_structural_evidence") or [],
+                graph_k,
+            ),
+        }
+        for metric_name, metric_value in graph_metrics.items():
+            if metric_value is not None:
+                row[metric_name] = metric_value
         rows.append(row)
 
     lane_rows = [row for row in rows if "lane_correct" in row]
@@ -309,6 +348,21 @@ def run_benchmark(root: Path, config: dict, tasks: list[dict]) -> dict:
         summary["mean_wrong_repo_rate"] = _mean(wrong_repo_rows, "value")
     if file_recall_rows:
         summary["mean_file_recall_at_k"] = _mean(file_recall_rows, "value")
+
+    for metric_name in (
+        "graph_node_recall_at_k",
+        "cross_repo_edge_recall",
+        "wrong_edge_rate",
+        "structural_recall_at_k",
+        "graph_context_yield",
+    ):
+        metric_rows = [
+            {"value": row.get(metric_name)}
+            for row in rows
+            if metric_name in row
+        ]
+        if metric_rows:
+            summary[f"mean_{metric_name}"] = _mean(metric_rows, "value")
 
     return {
         "scope": "routing-and-context-only",
