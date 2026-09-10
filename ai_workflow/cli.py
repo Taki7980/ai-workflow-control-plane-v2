@@ -31,6 +31,12 @@ from .handoff import handoff_path, render as render_handoff, validate as validat
 from .indexer import build_indexes, incremental_indexes
 from .io_utils import atomic_write_json, atomic_write_text
 from .memory import add_memory, export_memory_jsonl, list_memories, prune_stale, search_memory
+from .learning_ope import evaluate_learning_policies
+from .retrieval_learning import (
+    SAFE_EXPLORATION_ARMS,
+    learning_status,
+    record_verified_outcome,
+)
 from .providers import detect, execution_provider, model_tier
 from .repository_registry import refresh_registry, registry_summary, set_repository_included
 from .telemetry import policy_recommendations, summarize_traces
@@ -537,6 +543,46 @@ def cmd_benchmark_policy_advisor(args):
     _json(result)
 
 
+def cmd_learning_status(args):
+    root = _root(args)
+    _json(learning_status(root, load_config(root)))
+
+
+def cmd_learning_record_outcome(args):
+    root = _root(args)
+    path = record_verified_outcome(
+        root,
+        args.decision_id,
+        success=bool(args.success),
+        source=args.source,
+        reward=args.reward,
+        realized_cost=args.realized_cost,
+    )
+    _json({
+        "recorded": True,
+        "decision_id": args.decision_id,
+        "path": Path(path).relative_to(root.resolve()).as_posix(),
+    })
+
+
+def cmd_learning_evaluate(args):
+    root = _root(args)
+    result = evaluate_learning_policies(
+        root,
+        arms=args.arm or None,
+        confidence=args.confidence,
+        resamples=args.resamples,
+        seed=args.seed,
+        minimum_effective_sample_size=args.minimum_effective_sample_size,
+        minimum_direct_exposures=args.minimum_direct_exposures,
+        safety_margin=args.safety_margin,
+        max_realized_cost=args.max_realized_cost,
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
 def cmd_stats(args):
     root = _root(args)
     result = summarize_traces(root, args.limit)
@@ -804,6 +850,48 @@ def build_parser():
     q.add_argument("--token-penalty", type=float, default=0.05)
     q.add_argument("--latency-penalty", type=float, default=0.01)
     q.set_defaults(func=cmd_benchmark_policy_advisor)
+
+    q = sp.add_parser(
+        "learning",
+        help="inspect and evaluate the opt-in safe retrieval learning layer",
+    )
+    lsp = q.add_subparsers(dest="learning_command", required=True)
+
+    l = lsp.add_parser("status", help="show learning mode, safety locks, and record counts")
+    l.set_defaults(func=cmd_learning_status)
+
+    l = lsp.add_parser(
+        "record-outcome",
+        help="attach a delayed verified outcome to one logged retrieval decision",
+    )
+    l.add_argument("decision_id")
+    outcome = l.add_mutually_exclusive_group(required=True)
+    outcome.add_argument("--success", action="store_true")
+    outcome.add_argument("--failure", action="store_true")
+    l.add_argument("--source", required=True)
+    l.add_argument("--reward", type=float)
+    l.add_argument("--realized-cost", type=float, default=0.0)
+    l.set_defaults(func=cmd_learning_record_outcome)
+
+    l = lsp.add_parser(
+        "evaluate",
+        help="run propensity-aware IPS/SNIPS evaluation and conservative promotion gates",
+    )
+    l.add_argument(
+        "--arm",
+        action="append",
+        choices=list(SAFE_EXPLORATION_ARMS),
+        help="target retrieval arm; repeat to evaluate a subset",
+    )
+    l.add_argument("--confidence", type=float, default=0.95)
+    l.add_argument("--resamples", type=int, default=5000)
+    l.add_argument("--seed", type=int, default=20260911)
+    l.add_argument("--minimum-effective-sample-size", type=float, default=10.0)
+    l.add_argument("--minimum-direct-exposures", type=int, default=5)
+    l.add_argument("--safety-margin", type=float, default=0.0)
+    l.add_argument("--max-realized-cost", type=float)
+    l.add_argument("--output")
+    l.set_defaults(func=cmd_learning_evaluate)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
