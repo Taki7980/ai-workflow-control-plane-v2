@@ -260,20 +260,29 @@ def lightweight(root: Path, query: str, symbol: str | None, endpoint: str | None
     for m in search_memory(root, query, limit=limit, minimum_confidence=min_conf, exclude_stale=True):
         compact = {k: m.get(k) for k in ("id","type","summary","evidence","files","confidence")}
         out.append(ContextItem("durable_memory", json.dumps(compact, ensure_ascii=False, separators=(",", ":")), float(m.get("score", 0)), False))
-    if query and len(out) > 1:
-        bm25 = BM25Scorer()
-        bm25.fit([item.text for item in out], out)
-        lexical_scores = {id(item): score for score, item in bm25.rank(query)}
-        out.sort(
-            key=lambda item: (
-                -item.score,
-                -lexical_scores.get(id(item), 0.0),
-                item.dedupe_key,
-            )
-        )
-    else:
-        out.sort(key=lambda item: (-item.score, item.dedupe_key))
-    return out[:limit]
+    out.sort(key=lambda item: -item.score)
+    if len(out) <= limit or not query:
+        return out[:limit]
+
+    cutoff_score = out[limit - 1].score
+    stronger = [item for item in out if item.score > cutoff_score]
+    tied = [item for item in out if item.score == cutoff_score]
+    slots = limit - len(stronger)
+    if slots <= 0 or len(tied) <= slots:
+        return out[:limit]
+
+    bm25 = BM25Scorer()
+    bm25.fit([item.text for item in tied], tied)
+    lexical_scores = {id(item): score for score, item in bm25.rank(query)}
+    selected = sorted(
+        tied,
+        key=lambda item: (
+            -lexical_scores.get(id(item), 0.0),
+            item.dedupe_key,
+        ),
+    )[:slots]
+    selected_ids = {id(item) for item in selected}
+    return stronger + [item for item in tied if id(item) in selected_ids]
 
 def _run_crg(root: Path, args: list[str], timeout: int = 8) -> str | None:
     if not shutil.which("code-review-graph"):
