@@ -120,7 +120,7 @@ async def gather_workspace_detailed_async(
             if remaining <= 0:
                 return selection, allocation, (), {}, "deadline", (time.perf_counter() - started) * 1000
             try:
-                items, diagnostics = await asyncio.wait_for(
+                items, repo_diagnostics = await asyncio.wait_for(
                     gather_detailed_async(
                         candidate.root,
                         query,
@@ -142,7 +142,7 @@ async def gather_workspace_detailed_async(
             except Exception as exc:
                 return selection, allocation, (), {"error": f"{type(exc).__name__}: {exc}"}, "error", (time.perf_counter() - started) * 1000
         portable = tuple(_portable_item(item, candidate) for item in items)
-        return selection, allocation, portable, diagnostics, "ok", (time.perf_counter() - started) * 1000
+        return selection, allocation, portable, repo_diagnostics, "ok", (time.perf_counter() - started) * 1000
 
     results = await asyncio.gather(*(run_one(row) for row in selected)) if selected else []
     entries: list[tuple[Any, ...]] = []
@@ -153,7 +153,7 @@ async def gather_workspace_detailed_async(
     deadline_exceeded = False
     searched: list[str] = []
 
-    for selection, allocation, items, diagnostics, status, latency_ms in sorted(
+    for selection, allocation, items, repo_diagnostics, status, latency_ms in sorted(
         results,
         key=lambda row: (row[0].rank, row[0].candidate.repository_id),
     ):
@@ -166,7 +166,7 @@ async def gather_workspace_detailed_async(
         if status == "deadline":
             deadline_exceeded = True
         if not primary_retrieval and status == "ok":
-            primary_retrieval = diagnostics
+            primary_retrieval = repo_diagnostics
         repository_results[candidate.repository_id] = {
             "status": status,
             "repository_path": candidate.repository_path,
@@ -177,7 +177,7 @@ async def gather_workspace_detailed_async(
             "allocated_context_chars": allocated,
             "used_context_chars": used,
             "latency_ms": round(latency_ms, 2),
-            "error": diagnostics.get("error") if status == "error" else None,
+            "error": repo_diagnostics.get("error") if status == "error" else None,
         }
         changed = set(candidate.changed_files)
         for local_rank, item in enumerate(items):
