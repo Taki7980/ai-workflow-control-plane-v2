@@ -9,11 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ai_workflow.benchmark_regression import check_regression
+from ai_workflow.benchmark_regression import check_regression  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check AI Workflow benchmark output against a measured baseline")
+    parser = argparse.ArgumentParser(
+        description="Check AI Workflow benchmark output against a measured baseline"
+    )
     parser.add_argument("baseline", type=Path)
     parser.add_argument("current", type=Path)
     args = parser.parse_args()
