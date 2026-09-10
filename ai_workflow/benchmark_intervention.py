@@ -4,6 +4,7 @@ import hashlib
 import json
 import statistics
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -84,11 +85,17 @@ def seed_metrics(
     matched = [path for path in seed if path in gold]
     precision = len(matched) / len(seed) if seed else 0.0
     recall = len(set(matched)) / len(gold) if gold else None
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if recall is not None and precision + recall
+        else 0.0
+    )
     return {
         "seed_count": len(seed),
         "matched_gold_files": matched,
         "precision": precision,
         "recall": recall,
+        "f1": f1,
     }
 
 
@@ -257,16 +264,27 @@ def run_intervention_runner(
     raw_input = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
     try:
-        proc = subprocess.run(
-            argv,
-            cwd=case_root,
-            input=raw_input,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=build_provider_env(env_allowlist),
-            timeout=timeout,
-            check=False,
-        )
+        with tempfile.TemporaryFile() as stdout_file:
+            proc = subprocess.run(
+                argv,
+                cwd=case_root,
+                input=raw_input,
+                stdout=stdout_file,
+                stderr=subprocess.DEVNULL,
+                env=build_provider_env(env_allowlist),
+                timeout=timeout,
+                check=False,
+            )
+            output_size = stdout_file.tell()
+            if output_size > output_limit:
+                return {
+                    "status": "output_limit",
+                    "success": None,
+                    "trajectory": None,
+                    "error": f"runner output exceeded {output_limit} bytes",
+                }
+            stdout_file.seek(0)
+            raw_output = stdout_file.read(output_limit + 1)
     except subprocess.TimeoutExpired:
         return {
             "status": "timeout",
@@ -282,13 +300,6 @@ def run_intervention_runner(
             "error": f"runner could not start: {type(exc).__name__}",
         }
 
-    if len(proc.stdout) > output_limit:
-        return {
-            "status": "output_limit",
-            "success": None,
-            "trajectory": None,
-            "error": f"runner output exceeded {output_limit} bytes",
-        }
     if proc.returncode != 0:
         return {
             "status": "exit_error",
@@ -298,7 +309,7 @@ def run_intervention_runner(
         }
 
     try:
-        decoded = json.loads(proc.stdout.decode("utf-8"))
+        decoded = json.loads(raw_output.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {
             "status": "invalid_output",
@@ -376,6 +387,11 @@ def _seed_mode_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in ok
         if isinstance(row["runner"].get("trajectory"), dict)
     ]
+    seed_rows = [
+        row["seed_metrics"]
+        for row in rows
+        if isinstance(row.get("seed_metrics"), dict)
+    ]
     successes = [
         bool(row["runner"]["success"])
         for row in ok
@@ -389,6 +405,9 @@ def _seed_mode_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if successes
             else None
         ),
+        "mean_seed_precision": _mean(seed_rows, "precision"),
+        "mean_seed_recall": _mean(seed_rows, "recall"),
+        "mean_seed_f1": _mean(seed_rows, "f1"),
         "mean_seed_gold_recall": _mean(trajectories, "seed_gold_recall"),
         "mean_exploration_recall": _mean(trajectories, "exploration_recall"),
         "mean_utilization_recall": _mean(trajectories, "utilization_recall"),
@@ -404,6 +423,61 @@ def _seed_mode_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             trajectories,
             "post_seed_exploration_unique_files",
         ),
+    }
+
+
+def _paired_delta_vs_random(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_case: dict[int, dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        case_index = int(row["case_index"])
+        by_case.setdefault(case_index, {})[str(row["seed_mode"])] = row
+
+    metric_keys = (
+        "exploration_recall",
+        "utilization_recall",
+        "context_utilization_rate",
+        "duplicate_exploration_rate",
+        "post_seed_exploration_unique_files",
+    )
+    paired: dict[str, list[dict[str, float]]] = {}
+    for modes in by_case.values():
+        baseline = modes.get("random_non_gold")
+        if baseline is None:
+            continue
+        baseline_runner = baseline.get("runner") or {}
+        baseline_traj = baseline_runner.get("trajectory")
+        if not isinstance(baseline_traj, dict):
+            continue
+        for mode, row in modes.items():
+            if mode == "random_non_gold":
+                continue
+            current_traj = (row.get("runner") or {}).get("trajectory")
+            if not isinstance(current_traj, dict):
+                continue
+            deltas: dict[str, float] = {}
+            for key in metric_keys:
+                left = baseline_traj.get(key)
+                right = current_traj.get(key)
+                if (
+                    isinstance(left, (int, float))
+                    and not isinstance(left, bool)
+                    and isinstance(right, (int, float))
+                    and not isinstance(right, bool)
+                ):
+                    deltas[key] = float(right) - float(left)
+            paired.setdefault(mode, []).append(deltas)
+
+    return {
+        mode: {
+            "paired_cases": len(values),
+            **{
+                f"mean_delta_{key}": _mean(values, key)
+                for key in metric_keys
+            },
+        }
+        for mode, values in sorted(paired.items())
     }
 
 
@@ -441,6 +515,7 @@ def run_seed_interventions(
             mode: _seed_mode_summary(group)
             for mode, group in sorted(by_mode.items())
         },
+        "paired_delta_vs_random_non_gold": _paired_delta_vs_random(rows),
         "note": (
             "Runner commands execute only when explicitly supplied to the "
             "benchmark-intervene CLI and receive a restricted environment."
