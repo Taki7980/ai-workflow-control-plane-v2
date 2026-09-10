@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .token_estimator import CharacterTokenEstimator, TokenEstimator
+
 DEFAULT_RELATIVE = Path("ai-workspace/config/control-plane.json")
 REQUIRED_SECTIONS = ("budgets", "classifier", "context", "workspace", "execution", "handoff", "memory", "models")
 
@@ -35,7 +37,7 @@ _DEFAULT_CONFIG = {
         "external_retrievers": [],
         "sufficiency": {"threshold": 0.72},
         "adaptive_budget": {"enabled": True, "high_sufficiency_fraction": 0.45, "medium_sufficiency_fraction": 0.7, "minimum_chars": 900},
-        "selector": {"enabled": True, "tight_budget_fraction": 0.3, "mandatory_structural_evidence": True},
+        "selector": {"enabled": True, "tight_budget_fraction": 0.3, "mandatory_structural_evidence": True, "max_selector_candidates": 200},
         "telemetry": {"mode": "mutations"},
         "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
     },
@@ -149,6 +151,7 @@ def validate_config(data: dict[str, Any]) -> None:
     _fraction(selector.get("tight_budget_fraction"), "context.selector.tight_budget_fraction")
     if not isinstance(selector.get("mandatory_structural_evidence", True), bool):
         raise ValueError("context.selector.mandatory_structural_evidence must be boolean")
+    _positive_int(selector.get("max_selector_candidates", 200), "context.selector.max_selector_candidates")
     if data["context"]["telemetry"].get("mode", "mutations") not in {"off", "mutations", "all"}:
         raise ValueError("context.telemetry.mode must be off, mutations, or all")
 
@@ -185,5 +188,5 @@ def load_config(root: Path) -> dict[str, Any]:
     return data
 
 
-def estimate_tokens(text: str) -> int:
-    return max(1, (len(text) + 3) // 4) if text else 0
+def estimate_tokens(text: str, *, estimator: TokenEstimator | None = None) -> int:
+    return (estimator or CharacterTokenEstimator()).estimate(text)
