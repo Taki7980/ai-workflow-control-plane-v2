@@ -182,6 +182,7 @@ def run_benchmark(
             "model_tier": model_tier(decision, case_config),
             "providers": case_providers.to_dict(),
             "retrieval_intent": retrieval["retrieval_intent"],
+            "algorithm_policy": retrieval.get("algorithm_policy") or {},
             "retrieval_sufficient": retrieval["sufficiency"]["sufficient"],
             "retrieval_sufficiency_score": retrieval["sufficiency"]["score"],
             "evidence_state": retrieval.get("evidence_state"),
