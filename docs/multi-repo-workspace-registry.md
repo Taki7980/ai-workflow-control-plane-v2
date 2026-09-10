@@ -45,7 +45,7 @@ The registry lives at `ai-workspace/config/repositories.json`:
 }
 ```
 
-Raw remote URLs are not part of the persisted registry contract. A remote such as `https://user:token@github.com/acme/backend.git` is normalized to the credential-free identity `github.com/acme/backend` before anything is written.
+Raw remote URLs are not part of the persisted registry contract. A remote such as `https://user:token@github.com/acme/backend.git` is normalized to the credential-free identity `github.com/acme/backend` before anything is written. The remote host is normalized to lowercase, while the repository path preserves its original casing so case-sensitive Git servers cannot collapse distinct repository identities.
 
 Each repository also gets a deterministic `repository_id` derived from its workspace-relative path and normalized remote identity. This gives automation a stable selector without storing an absolute checkout path.
 
@@ -62,7 +62,13 @@ ai-workflow repos exclude backend
 
 `include` and `exclude` accept an exact workspace-relative path, repository ID, remote identity, or unique repository name. An ambiguous name fails without changing the registry.
 
+`review_required` is a fail-closed trust gate: a registry is accepted only when the field is present and exactly `true`. Missing, false, malformed, unsupported, or ambiguous registry state is ignored for repository activation. `repos refresh` is the explicit recovery path.
+
 `repos refresh` performs discovery again and atomically rewrites the registry. An explicit inclusion decision is preserved only when both the repository path and remote identity are unchanged. If the same path now points to a different remote identity, it returns to `included: false` and must be reviewed again.
+
+Older Stage 2 registries may contain fully lowercased remote identities. After upgrading, `repos refresh` migrates to host-only case normalization. If preserving the remote path casing changes the repository identity, prior inclusion is intentionally reset and must be accepted again rather than silently carrying an ambiguous legacy decision forward.
+
+Registry read-modify-write operations are serialized across processes with a persistent sidecar lock next to `repositories.json`. Readers remain lock-free because registry replacement is atomic, while concurrent `refresh`, `include`, and `exclude` writers cannot overwrite each other's decisions.
 
 Newly discovered repositories are always excluded by default.
 
@@ -74,13 +80,16 @@ The registry model follows these rules:
 
 - persist workspace-relative repository paths rather than absolute checkout locations;
 - persist normalized remote identity, never raw remote URLs or embedded credentials;
+- normalize remote hosts but preserve remote path casing;
+- require `review_required: true` before registry entries can activate repositories;
+- serialize registry writers so concurrent commands cannot lose accepted/excluded decisions;
 - keep per-repository boundaries explicit;
 - require explicit inclusion before a discovered sibling becomes an active workspace root;
 - reject registry-controlled absolute paths, parent traversal, and symlink escapes;
 - require an activated registry path to still be a Git repository;
 - cap active roots with `workspace.max_roots`;
 - preserve existing registries during `setup` so user decisions are not overwritten;
-- support Git worktrees by reading their `gitdir:` pointer;
+- support Git worktrees by reading their `gitdir:` pointer and shared Git metadata;
 - keep generated state and handoffs inside `ai-workspace/`.
 
 Malformed or unsupported registry files fail closed for repository activation. Running `repos refresh` is the explicit recovery path when local repository discovery should rebuild the registry.
@@ -98,7 +107,7 @@ A repository fingerprint includes stable identity plus current Git/worktree evid
 - optional index-state digest;
 - explicitly supplied changed-file hashes.
 
-The aggregate workspace fingerprint hashes the active repository snapshots in deterministic order. Absolute checkout paths are returned for diagnostics but are excluded from the hashed identity, so moving an otherwise identical workspace does not change its aggregate fingerprint.
+The aggregate workspace fingerprint hashes the active repository snapshots in deterministic total order. Repository fingerprint is used as a final tie-breaker when legacy roots otherwise share the same synthetic identity, so reversing equivalent input-root order cannot change the aggregate fingerprint. Absolute checkout paths are returned for diagnostics but are excluded from the hashed identity, so moving an otherwise identical workspace does not change its aggregate fingerprint.
 
 The original single-root `workspace_fingerprint()` contract remains supported for compatibility.
 
@@ -150,14 +159,17 @@ A multi-repo fixture should include at least:
 - parent folder with no Git repo;
 - parent folder that is itself a Git repo;
 - sibling `frontend` and `backend` repos with different remotes;
-- a Git worktree with `.git` as a file;
+- a Git worktree with `.git` as a file and shared remote metadata;
 - credential-bearing remote URLs that must never be persisted raw;
+- case-sensitive remote paths that must remain distinct;
+- `review_required` values that must fail closed unless exactly true;
+- concurrent registry writers that must serialize;
 - unaccepted repositories that must not become workspace roots;
 - accepted repositories capped by `workspace.max_roots`;
 - registry path traversal, absolute-path, and symlink-escape attempts;
 - ambiguous repository names that must fail without writes;
 - repository identity changes that reset prior inclusion;
-- path-independent aggregate workspace fingerprints;
+- path-independent and input-order-independent aggregate workspace fingerprints;
 - dirty tracked and untracked content that changes repository fingerprints;
 - legacy `workspace.roots` compatibility;
 - malicious nested folders such as `node_modules/.git` that must be skipped.
