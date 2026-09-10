@@ -327,7 +327,13 @@ class WorkspaceRetrievalTests(unittest.TestCase):
             repo = workspace / "backend"
             repo.mkdir()
             candidate = RepositoryCandidate(repo, "repo-a", "backend", None, "fp-a", (), False)
+            other_root = workspace / "frontend"
+            other_root.mkdir()
+            other = RepositoryCandidate(other_root, "repo-b", "frontend", None, "fp-b", (), False)
             selection = RepositorySelection(candidate, 10.0, 1, True, ("identity_match",))
+            skipped_selection = RepositorySelection(
+                other, 0.0, 2, False, ("no_relevant_signal",)
+            )
             parent = ContextBudget(100, 20, 300, {"hot_cache": 30, "lightweight": 90, "crg": 120, "source_fallback": 60})
             repo_budget = RepositoryBudget("repo-a", 1, 1.0, parent)
             config = default_config()
@@ -337,8 +343,8 @@ class WorkspaceRetrievalTests(unittest.TestCase):
             async def fake_gather(*args, **kwargs):
                 return [ContextItem("targeted_source", "stage3 survives", 1.0, False, {"file": "api.py"})], {}
 
-            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate]), \
-                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection]), \
+            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate, other]), \
+                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection, skipped_selection]), \
                  patch("ai_workflow.workspace_retrieval.allocate_repository_budgets", return_value=[repo_budget]), \
                  patch("ai_workflow.workspace_retrieval.aggregate_workspace_fingerprint", return_value={"fingerprint": "workspace-fp"}), \
                  patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather), \
