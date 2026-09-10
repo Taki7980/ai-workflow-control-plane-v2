@@ -6,6 +6,7 @@ All notable repository changes are summarized here. The project follows semantic
 
 ### Added
 
+- Stage-5 opt-in safe retrieval learning with low-risk bounded exploration, propensity logging, delayed verified outcomes, IPS/SNIPS OPE, and conservative promotion gates.
 - Stage-4 statistical evaluation with paired bootstrap confidence intervals, held-out cost-sensitive calibration, and safety-bounded advisory retrieval policies.
 - Stage-3 causal retrieval evaluation with algorithm-level ablations and deterministic retrieval/random/oracle seed interventions.
 - Stage-2 retrieval evaluation with provider ablations, per-case multi-repo isolation, and explored-vs-utilized trajectory metrics.
