@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .contextual_features import (
+    FEATURE_SCHEMA_VERSION,
+    build_context_features,
+)
 from .models import RouteDecision
 
 
@@ -46,6 +50,8 @@ class LearningDecision:
     risk: str
     intent: str
     task_fingerprint: str
+    feature_schema_version: str
+    context_features: dict[str, str]
     created_at: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,6 +153,8 @@ def choose_learning_decision(
     intent: str,
     config: dict[str, Any],
     *,
+    changed_files_count: int = 0,
+    workspace_roots_count: int = 1,
     rng: random.Random | None = None,
 ) -> LearningDecision:
     mode = learning_mode(config)
@@ -176,6 +184,13 @@ def choose_learning_decision(
             safety_reason = "bounded_exploration" if explored else "baseline_sample"
 
     fingerprint = hashlib.sha256(query.encode()).hexdigest()
+    features = build_context_features(
+        query,
+        decision,
+        intent,
+        changed_files_count=changed_files_count,
+        workspace_roots_count=workspace_roots_count,
+    )
     return LearningDecision(
         decision_id=uuid.uuid4().hex,
         policy_version="safe-epsilon-v1",
@@ -195,6 +210,8 @@ def choose_learning_decision(
         risk=risk,
         intent=str(intent),
         task_fingerprint=fingerprint,
+        feature_schema_version=FEATURE_SCHEMA_VERSION,
+        context_features=features.to_dict(),
         created_at=_utc_now(),
     )
 
@@ -219,6 +236,8 @@ def baseline_fallback(
         risk=source.risk,
         intent=source.intent,
         task_fingerprint=source.task_fingerprint,
+        feature_schema_version=source.feature_schema_version,
+        context_features=dict(source.context_features),
         created_at=_utc_now(),
     )
 
@@ -277,6 +296,8 @@ def prepare_learning_decision(
     intent: str,
     config: dict[str, Any],
     *,
+    changed_files_count: int = 0,
+    workspace_roots_count: int = 1,
     rng: random.Random | None = None,
 ) -> tuple[LearningDecision, str | None]:
     selected = choose_learning_decision(
@@ -284,6 +305,8 @@ def prepare_learning_decision(
         decision,
         intent,
         config,
+        changed_files_count=changed_files_count,
+        workspace_roots_count=workspace_roots_count,
         rng=rng,
     )
     if selected.mode == "off":
