@@ -5,9 +5,14 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Protocol
+
+
+_INITIALIZE_LOCK = threading.RLock()
 
 
 class MemoryStore(Protocol):
@@ -25,16 +30,20 @@ class SQLiteMemoryStore:
         self.root = root.resolve()
         self.path = self.root / "ai-workspace" / "memory" / "memory.sqlite3"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
-        legacy = self.root / "ai-workspace" / "memory" / "memory.jsonl"
-        if legacy.exists():
-            self._migrate_legacy(legacy)
+        # SQLite's PRAGMA journal_mode=WAL takes an exclusive schema-level lock.
+        # Multiple store constructors in one process can otherwise race before
+        # ordinary busy_timeout handling applies consistently on Windows.
+        with _INITIALIZE_LOCK:
+            self._initialize()
+            legacy = self.root / "ai-workspace" / "memory" / "memory.jsonl"
+            if legacy.exists():
+                self._migrate_legacy(legacy)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path, timeout=5.0)
+        conn = sqlite3.connect(self.path, timeout=30.0)
         try:
-            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA busy_timeout=30000")
             conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
             conn.commit()
@@ -44,31 +53,45 @@ class SQLiteMemoryStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _is_lock_error(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "locked" in message or "busy" in message
+
     def _initialize(self) -> None:
-        with self._connection() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS memories (
-                    id TEXT PRIMARY KEY,
-                    type TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    verified_at TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    record_json TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)")
+        # The process-local lock handles threads. A bounded retry additionally
+        # covers another process initializing the same workspace at the same time.
+        for attempt in range(8):
+            try:
+                with self._connection() as conn:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS memories (
+                            id TEXT PRIMARY KEY,
+                            type TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            verified_at TEXT NOT NULL,
+                            confidence REAL NOT NULL,
+                            record_json TEXT NOT NULL
+                        )
+                        """
+                    )
+                    conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS metadata (
+                            key TEXT PRIMARY KEY,
+                            value TEXT NOT NULL
+                        )
+                        """
+                    )
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)")
+                return
+            except sqlite3.OperationalError as exc:
+                if not self._is_lock_error(exc) or attempt == 7:
+                    raise
+                time.sleep(min(0.025 * (2**attempt), 0.4))
 
     @staticmethod
     def _payload(record: dict) -> tuple:
