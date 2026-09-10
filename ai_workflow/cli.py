@@ -12,7 +12,7 @@ from .context_broker import detect_changed_files
 from .doctor import run as doctor_run
 from .handoff import validate as validate_handoff, render as render_handoff
 from .indexer import build_indexes, incremental_indexes
-from .memory import add_memory, search_memory, list_memories, prune_stale
+from .memory import add_memory, search_memory, list_memories, prune_stale, export_memory_jsonl
 from .providers import detect, execution_provider, model_tier
 from .telemetry import policy_recommendations, summarize_traces
 from .verify import verify
@@ -136,6 +136,10 @@ def cmd_memory_search(args):
     root=_root(args); cfg=load_config(root); _json(search_memory(root,args.query,args.limit or int(cfg["memory"]["max_results"]),float(cfg["memory"].get("minimum_confidence",0.55))))
 def cmd_memory_list(args): _json(list_memories(_root(args)))
 def cmd_memory_prune(args): _json(prune_stale(_root(args)))
+def cmd_memory_export(args):
+    destination = Path(args.output).resolve()
+    count = export_memory_jsonl(_root(args), destination)
+    _json({"format": "jsonl", "output": str(destination), "records": count})
 def cmd_compress(args):
     text=Path(args.file).read_text(encoding="utf-8",errors="replace") if args.file else sys.stdin.read(); sys.stdout.write(compress_text(text,args.max_lines,args.max_chars))
 def cmd_verify(args):
@@ -170,6 +174,7 @@ def build_parser():
     m=msp.add_parser("add"); m.add_argument("--type",required=True); m.add_argument("--keywords",required=True); m.add_argument("--summary",required=True); m.add_argument("--evidence"); m.add_argument("--file",action="append"); m.add_argument("--confidence",type=float,default=0.8); m.set_defaults(func=cmd_memory_add)
     m=msp.add_parser("search"); m.add_argument("query"); m.add_argument("--limit",type=int); m.set_defaults(func=cmd_memory_search)
     m=msp.add_parser("list"); m.set_defaults(func=cmd_memory_list); m=msp.add_parser("prune"); m.set_defaults(func=cmd_memory_prune)
+    m=msp.add_parser("export"); m.add_argument("--format",choices=["jsonl"],default="jsonl"); m.add_argument("--output",required=True); m.set_defaults(func=cmd_memory_export)
     q=sp.add_parser("compress"); q.add_argument("--file"); q.add_argument("--max-lines",type=int,default=80); q.add_argument("--max-chars",type=int,default=12000); q.set_defaults(func=cmd_compress)
     return p
 
