@@ -227,6 +227,17 @@ The built-in corpus contains exact, semantic, structural, mutation, high-risk, p
 - matched-pattern yield per 1K estimated context tokens;
 - context utilization, sufficiency/fallback rate, and latency.
 
+The research protocol also supports Agent Retrieval Bench-style `code2test`, `comment2context`, `trace2code`, `edit2ripple`, natural no-gold, and wrong-repository controls. Cases can declare exact `gold_files`, a frozen `base_commit`, and a `repository_path`; results add file-level Precision/Recall/MRR/nDCG/F1, frozen-snapshot status, selective-control accuracy, and wrong-repository contamination diagnostics when repository identity is available.
+
+```bash
+ai-workflow benchmark \
+  --tasks benchmarks/research-protocol-example.json \
+  --research-protocol \
+  --require-frozen-snapshot
+```
+
+Use the strict flags for publishable/reproducible benchmark runs. The legacy corpus remains backward-compatible for fast regression checks.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -246,6 +257,7 @@ Research/design rationale and formulas are documented in:
 
 - `docs/research/2026-adaptive-retrieval.md`
 - `docs/research/2026-09-07-v22-research.md`
+- `docs/research/2026-09-11-agent-retrieval-bench-alignment.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
