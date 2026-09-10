@@ -171,7 +171,7 @@ No edge below 0.8 is persisted in Stage 4.
 
 ### Repository/file containment
 
-Create repository and file nodes for active repositories and indexed source files.
+Create repository and file nodes only for active repositories and their indexed source files. Discovered-but-inactive repositories are excluded from persisted graph state entirely.
 
 ### Imports
 
@@ -252,7 +252,7 @@ Graph expansion defaults:
 - max_context_chars: 3000
 - min_edge_confidence: 0.8
 
-The graph budget is a slice inside the existing parent context budget. It is NOT additional context.
+The graph budget is a cap inside the existing parent context budget. It is NOT additional context and is not pre-reserved. Graph items and Stage 3 repository items enter the same final deterministic pack, whose total characters remain bounded by the original parent `ContextBudget.context_chars`.
 
 Expansion must be deterministic and breadth-bounded.
 
@@ -456,6 +456,13 @@ Stage 4 is done only when:
 - graph output is deterministic across repeated builds;
 - absolute-path relocation does not change graph identity;
 - inactive repositories cannot be reached through graph expansion.
+
+## Self-review resolution
+
+- No placeholders or TBD requirements remain.
+- Inactive repositories are excluded at graph-build time and cannot be activated by traversal.
+- Graph context has no additive budget; Stage 3's parent budget remains the single hard ceiling.
+- Incremental invalidation may recompose the graph from persisted unchanged repository fragments, but correctness must not depend on in-place mutation.
 
 ## Delivery
 
