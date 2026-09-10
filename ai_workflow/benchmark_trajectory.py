@@ -61,7 +61,8 @@ def load_trajectory_events(
 
     if inline is not None and trajectory_file is not None:
         raise ValueError(
-            "benchmark case must define either trajectory_events or trajectory_file, not both"
+            "benchmark case must define either trajectory_events or "
+            "trajectory_file, not both"
         )
 
     if inline is not None:
