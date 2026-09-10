@@ -125,20 +125,6 @@ jobs:
         shell: bash
         run: |
           python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json --output benchmark-result.json > /dev/null
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          data = json.loads(Path("benchmark-result.json").read_text())
-          for row in data["cases"]:
-              retrieval = row.get("retrieval") or {}
-              print("BENCHMARK_CASE=" + json.dumps({
-                  "task": row["task"],
-                  "query_type": row["query_type"],
-                  "density": retrieval.get("relevant_item_density"),
-                  "relevant_items": retrieval.get("relevant_items"),
-                  "sources": row.get("context_sources"),
-              }, sort_keys=True))
-          PY
           python scripts/check_benchmark_regression.py benchmarks/baseline.json benchmark-result.json
           python - <<'PY'
           import json
