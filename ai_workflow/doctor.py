@@ -5,6 +5,9 @@ from .providers import detect
 from .indexer import load_state, sha256
 from .handoff import validate as validate_handoff
 
+DOCTOR_SCHEMA_VERSION = 1
+
+
 def run(root: Path, config: dict) -> tuple[dict, bool]:
     status = detect(root, config)
     state = load_state(root)
@@ -47,14 +50,25 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
         recommendations.append("Code Review Graph is installed but no healthy graph was detected; run `code-review-graph build`")
     if not status.superpowers:
         recommendations.append("Superpowers not detected; Full lane will use native Plan -> Build -> Review")
+    core_ok = config.get("version") == 2 and bool(state) and not handoff_errors and stale == 0
+    optional_capabilities = {
+        "ripgrep": bool(status.ripgrep),
+        "rtk": bool(status.rtk),
+        "superpowers": bool(status.superpowers),
+        "code_review_graph": bool(crg_health.get("ready")),
+        "semantic_retriever": bool(status.semantic),
+    }
     result = {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "core_ok": core_ok,
         "python": sys.version.split()[0],
         "providers": status.to_dict(),
+        "optional_capabilities": optional_capabilities,
         "code_review_graph_health": crg_health,
         "config_version": config.get("version"),
         "index": {"present": bool(state), "tracked_files": tracked, "stale_files": stale},
         "handoff_errors": handoff_errors,
         "recommendations": recommendations,
+        "exit_codes": {"ok": 0, "strict_failure": 1},
     }
-    ok = config.get("version") == 2 and bool(state) and not handoff_errors and stale == 0
-    return result, ok
+    return result, core_ok
