@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import math
 import statistics
@@ -11,9 +12,11 @@ from .adaptive_broker import gather_detailed
 from .benchmark_protocol import (
     file_retrieval_metrics,
     repository_control_metrics,
+    resolve_case_root,
     snapshot_status,
     validate_benchmark_cases,
 )
+from .benchmark_trajectory import load_trajectory_events, trajectory_metrics
 from .budget import budget_for
 from .classifier import classify
 from .config import estimate_tokens
@@ -62,9 +65,18 @@ def _accuracy(rows: list[dict], key: str) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
 
 
+def _isolated_case_config(config: dict) -> dict:
+    out = copy.deepcopy(config)
+    workspace = out.setdefault("workspace", {})
+    workspace["roots"] = []
+    workspace["max_roots"] = 1
+    return out
+
+
 def _group_summary(group: list[dict]) -> dict:
     pattern_rows = [r["retrieval"] for r in group if "retrieval" in r]
     file_rows = [r["file_retrieval"] for r in group if "file_retrieval" in r]
+    trajectory_rows = [r["trajectory"] for r in group if "trajectory" in r]
     return {
         "cases": len(group),
         "lane_accuracy": _accuracy(group, "lane_correct"),
@@ -84,6 +96,24 @@ def _group_summary(group: list[dict]) -> dict:
         "mean_file_f1": _mean(file_rows, "file_f1"),
         "mean_file_yield_per_1k_tokens": _mean(
             file_rows, "matched_gold_files_per_1k_tokens"
+        ),
+        "mean_exploration_precision": _mean(
+            trajectory_rows, "exploration_precision"
+        ),
+        "mean_exploration_recall": _mean(
+            trajectory_rows, "exploration_recall"
+        ),
+        "mean_utilization_precision": _mean(
+            trajectory_rows, "utilization_precision"
+        ),
+        "mean_utilization_recall": _mean(
+            trajectory_rows, "utilization_recall"
+        ),
+        "mean_context_utilization_rate": _mean(
+            trajectory_rows, "context_utilization_rate"
+        ),
+        "mean_duplicate_exploration_rate": _mean(
+            trajectory_rows, "duplicate_exploration_rate"
         ),
     }
 
@@ -105,6 +135,9 @@ def run_benchmark(
 
     for case in tasks:
         task = str(case.get("task", "")).strip()
+        case_root = resolve_case_root(root, case)
+        case_config = _isolated_case_config(config)
+        case_providers = detect(case_root, case_config)
         snapshot = snapshot_status(root, case)
         if require_frozen_snapshot and snapshot["status"] != "match":
             raise ValueError(
@@ -114,15 +147,15 @@ def run_benchmark(
             )
 
         start = time.perf_counter()
-        decision = classify(task, config)
-        budget = budget_for(decision.lane, config)
+        decision = classify(task, case_config)
+        budget = budget_for(decision.lane, case_config)
         items, retrieval = gather_detailed(
-            root,
+            case_root,
             task,
             decision,
             budget,
-            config,
-            providers,
+            case_config,
+            case_providers,
             case.get("symbol"),
             case.get("endpoint"),
             case.get("changed_files") or [],
@@ -138,12 +171,16 @@ def run_benchmark(
             "task_type": task_type,
             "query_type": case.get("query_type", "unclassified"),
             "control_type": control_type,
+            "repository_path": str(case.get("repository_path", ".")).strip() or ".",
             "snapshot": snapshot,
             "lane": decision.lane.value,
             "risk": decision.risk.value,
             "routing_confidence": decision.confidence,
-            "execution_provider": execution_provider(decision.lane, config, providers),
-            "model_tier": model_tier(decision, config),
+            "execution_provider": execution_provider(
+                decision.lane, case_config, case_providers
+            ),
+            "model_tier": model_tier(decision, case_config),
+            "providers": case_providers.to_dict(),
             "retrieval_intent": retrieval["retrieval_intent"],
             "retrieval_sufficient": retrieval["sufficiency"]["sufficient"],
             "retrieval_sufficiency_score": retrieval["sufficiency"]["score"],
@@ -224,6 +261,14 @@ def run_benchmark(
         if repository_control:
             row["repository_control"] = repository_control
 
+        events = load_trajectory_events(root, case)
+        trajectory = trajectory_metrics(
+            events,
+            case.get("gold_files") or [],
+        )
+        if trajectory:
+            row["trajectory"] = trajectory
+
         rows.append(row)
 
     lane_rows = [r for r in rows if "lane_correct" in r]
@@ -233,6 +278,7 @@ def run_benchmark(
     control_rows = [r for r in rows if "selective_control_correct" in r]
     retrieval_rows = [r["retrieval"] for r in rows if "retrieval" in r]
     file_rows = [r["file_retrieval"] for r in rows if "file_retrieval" in r]
+    trajectory_rows = [r["trajectory"] for r in rows if "trajectory" in r]
     frozen_rows = [r for r in rows if r["snapshot"]["match"] is not None]
 
     by_query_groups = defaultdict(list)
@@ -256,6 +302,8 @@ def run_benchmark(
             "file_level_gold_supported": True,
             "frozen_snapshot_check_supported": True,
             "selective_controls_supported": True,
+            "multi_repo_case_isolation_supported": True,
+            "trajectory_utilization_metrics_supported": True,
             "task_types": [
                 "code2test",
                 "comment2context",
@@ -316,6 +364,24 @@ def run_benchmark(
             "mean_file_f1": _mean(file_rows, "file_f1"),
             "mean_file_yield_per_1k_tokens": _mean(
                 file_rows, "matched_gold_files_per_1k_tokens"
+            ),
+            "mean_exploration_precision": _mean(
+                trajectory_rows, "exploration_precision"
+            ),
+            "mean_exploration_recall": _mean(
+                trajectory_rows, "exploration_recall"
+            ),
+            "mean_utilization_precision": _mean(
+                trajectory_rows, "utilization_precision"
+            ),
+            "mean_utilization_recall": _mean(
+                trajectory_rows, "utilization_recall"
+            ),
+            "mean_context_utilization_rate": _mean(
+                trajectory_rows, "context_utilization_rate"
+            ),
+            "mean_duplicate_exploration_rate": _mean(
+                trajectory_rows, "duplicate_exploration_rate"
             ),
             "frozen_snapshot_match_rate": (
                 round(
