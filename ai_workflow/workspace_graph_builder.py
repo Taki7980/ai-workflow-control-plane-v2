@@ -30,6 +30,11 @@ _JS_IMPORT = re.compile(
     r"(?:from\s+|require\(\s*)[\"']([^\"']+)[\"']"
 )
 _HTTP_LITERAL = re.compile(r"[\"'](/api/[A-Za-z0-9_./:{}-]+)[\"']")
+_HTTP_METHOD = re.compile(r"\\bmethod\\s*:\\s*[\"\']([A-Za-z]+)[\"\']", re.I)
+_HTTP_VERB_CLIENT = re.compile(
+    r"\\b(?:axios|client|http|api|requests)\\.(get|post|put|delete|patch)\\s*\\(",
+    re.I,
+)
 _PYPROJECT_NAME = re.compile(r"^\s*name\s*=\s*[\"']([^\"']+)[\"']")
 _PYPROJECT_DEP = re.compile(r"[\"']([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?(?:[<>=!~ ].*)?[\"']")
 
@@ -243,6 +248,28 @@ def _extract_imports(path: Path, text: str) -> list[tuple[str, int]]:
                 quoted = re.search(r"[\"']([^\"']+)[\"']", line)
                 if quoted:
                     found.append((quoted.group(1), line_no))
+    return found
+
+
+
+def _extract_http_calls(text: str) -> list[tuple[str, str | None, int]]:
+    found: list[tuple[str, str | None, int]] = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        for match in _HTTP_LITERAL.finditer(line):
+            prefix = line[: match.start()]
+            is_fetch = "fetch(" in prefix.replace(" ", "")
+            verb_match = _HTTP_VERB_CLIENT.search(prefix)
+            if not is_fetch and verb_match is None:
+                continue
+            method_match = _HTTP_METHOD.search(line)
+            method = (
+                method_match.group(1).upper()
+                if method_match
+                else verb_match.group(1).upper()
+                if verb_match
+                else None
+            )
+            found.append((match.group(1), method, line_no))
     return found
 
 
@@ -467,7 +494,7 @@ def build_workspace_graph(
             and not candidate.repository_path.startswith("legacy:")
         )
     )
-    endpoint_nodes_by_route: dict[str, list[GraphNode]] = {}
+    endpoint_nodes_by_route: dict[str, list[tuple[str, GraphNode]]] = {}
     for row in _workspace_index_rows(workspace_root, "endpoint-index.jsonl"):
         indexed_file = str(row.get("file", ""))
         route = str(row.get("path", "")).strip()
@@ -492,7 +519,7 @@ def build_workspace_graph(
                 evidence=local,
             )
             nodes[endpoint_node.node_id] = endpoint_node
-            endpoint_nodes_by_route.setdefault(route, []).append(endpoint_node)
+            endpoint_nodes_by_route.setdefault(route, []).append((method, endpoint_node))
             source = file_nodes.get((candidate.repository_id, local))
             if source is not None:
                 implements = _edge(
@@ -563,27 +590,38 @@ def build_workspace_graph(
             )
             edges[relation.edge_id] = relation
 
-        for match in _HTTP_LITERAL.finditer(text):
-            route = match.group(1)
-            line_no = text.count("\n", 0, match.start()) + 1
-            targets = endpoint_nodes_by_route.get(route, [])
-            for target in targets:
-                if (
+        for route, call_method, line_no in _extract_http_calls(text):
+            targets = [
+                (method, target)
+                for method, target in endpoint_nodes_by_route.get(route, [])
+                if not (
                     target.repository_id == repository_id
                     and target.path == rel
-                ):
-                    continue
-                relation = _edge(
-                    edge_type="CALLS_API",
-                    source=source,
-                    target=target,
-                    evidence_path=rel,
-                    evidence_line=line_no,
-                    extractor="http-literal",
-                    confidence=0.9,
-                    evidence_key=f"{rel}:{line_no}:{route}:{target.node_id}",
                 )
-                edges[relation.edge_id] = relation
+            ]
+            if call_method is not None:
+                targets = [
+                    (method, target)
+                    for method, target in targets
+                    if method == call_method
+                ]
+            if len(targets) != 1:
+                continue
+            target_method, target = targets[0]
+            relation = _edge(
+                edge_type="CALLS_API",
+                source=source,
+                target=target,
+                evidence_path=rel,
+                evidence_line=line_no,
+                extractor="http-literal",
+                confidence=0.9,
+                evidence_key=(
+                    f"{rel}:{line_no}:{call_method or target_method}:"
+                    f"{route}:{target.node_id}"
+                ),
+            )
+            edges[relation.edge_id] = relation
 
     files_by_repo_basename: dict[tuple[str, str], list[GraphNode]] = {}
     for (repository_id, _), node in file_nodes.items():
