@@ -40,6 +40,21 @@ _DEFAULT_CONFIG = {
         "adaptive_budget": {"enabled": True, "high_sufficiency_fraction": 0.45, "medium_sufficiency_fraction": 0.7, "minimum_chars": 900},
         "selector": {"enabled": True, "tight_budget_fraction": 0.3, "mandatory_structural_evidence": True, "max_selector_candidates": 200},
         "telemetry": {"mode": "mutations"},
+        "learning": {
+            "mode": "off",
+            "kill_switch": False,
+            "exploration_probability": 0.05,
+            "allowed_risks": ["low"],
+            "eligible_arms": [
+                "adaptive_math",
+                "source_rank",
+                "bm25_rank",
+                "rrf_only",
+                "rrf_mmr_050",
+                "rrf_mmr_075",
+                "rrf_mmr_090",
+            ],
+        },
         "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
     },
     "workspace": {
@@ -199,6 +214,48 @@ def validate_config(data: dict[str, Any]) -> None:
     _positive_int(selector.get("max_selector_candidates", 200), "context.selector.max_selector_candidates")
     if data["context"]["telemetry"].get("mode", "mutations") not in {"off", "mutations", "all"}:
         raise ValueError("context.telemetry.mode must be off, mutations, or all")
+
+    learning = data["context"].get("learning")
+    if learning is not None:
+        if not isinstance(learning, dict):
+            raise ValueError("context.learning must be an object")
+        if learning.get("mode", "off") not in {"off", "observe", "explore"}:
+            raise ValueError("context.learning.mode must be off, observe, or explore")
+        if not isinstance(learning.get("kill_switch", False), bool):
+            raise ValueError("context.learning.kill_switch must be boolean")
+        _fraction(
+            learning.get("exploration_probability", 0.05),
+            "context.learning.exploration_probability",
+        )
+        allowed_risks = _string_list(
+            learning.get("allowed_risks", ["low"]),
+            "context.learning.allowed_risks",
+        )
+        if not {value.lower() for value in allowed_risks}.issubset({"low"}):
+            raise ValueError(
+                "context.learning.allowed_risks may only contain low"
+            )
+        eligible_arms = _string_list(
+            learning.get("eligible_arms", ["adaptive_math"]),
+            "context.learning.eligible_arms",
+        )
+        safe_arms = {
+            "adaptive_math",
+            "source_rank",
+            "bm25_rank",
+            "rrf_only",
+            "rrf_mmr_050",
+            "rrf_mmr_075",
+            "rrf_mmr_090",
+        }
+        if not set(eligible_arms).issubset(safe_arms):
+            raise ValueError(
+                "context.learning.eligible_arms contains an unsafe or unknown arm"
+            )
+        if "adaptive_math" not in eligible_arms:
+            raise ValueError(
+                "context.learning.eligible_arms must include adaptive_math"
+            )
 
     roots = data["workspace"].get("roots", [])
     if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
