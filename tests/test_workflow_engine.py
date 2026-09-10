@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -27,17 +28,27 @@ class WorkflowEngineTests(unittest.TestCase):
         cfg["workspace"]["roots"] = ["one", "two"]
         decision = RouteDecision(Lane.FULL, Risk.MEDIUM, confidence=0.9)
         budget = ContextBudget(6000, 1200, 24000, {})
+        lock = threading.Lock()
+        active = 0
+        max_active = 0
 
         def base(root, query, decision, budget, config, providers, symbol, endpoint, changed):
-            time.sleep(0.06)
-            return [ContextItem("lightweight_index", f"{root.name} evidence for {query}", 1.0)]
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.06)
+                return [ContextItem("lightweight_index", f"{root.name} evidence for {query}", 1.0)]
+            finally:
+                with lock:
+                    active -= 1
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "one").mkdir()
             (root / "two").mkdir()
             engine = WorkflowEngine(base_gather=base)
-            started = time.perf_counter()
             _, diagnostics = engine.gather_detailed(
                 root,
                 "payment architecture dependency flow",
@@ -46,9 +57,8 @@ class WorkflowEngineTests(unittest.TestCase):
                 cfg,
                 ProviderStatus(False, False, False, False, False),
             )
-            elapsed = time.perf_counter() - started
 
-        self.assertLess(elapsed, 0.15)
+        self.assertGreaterEqual(max_active, 2)
         self.assertEqual(diagnostics["providers_attempted"][:3], ["base", "workspace:one", "workspace:two"])
         self.assertEqual(diagnostics["scheduler"]["max_concurrency"], 4)
 
@@ -62,22 +72,43 @@ class WorkflowEngineTests(unittest.TestCase):
         ]
         decision = RouteDecision(Lane.ANSWER, Risk.LOW, confidence=0.9)
         budget = ContextBudget(1200, 400, 4800, {})
+        lock = threading.Lock()
+        active = 0
+        max_active = 0
 
         def base(*args, **kwargs):
             return [ContextItem("lightweight_index", "unrelated config", 0.1)]
 
+        def enter_provider() -> None:
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+
+        def leave_provider() -> None:
+            nonlocal active
+            with lock:
+                active -= 1
+
         def semantic(root, query, config, limit):
-            time.sleep(0.06)
-            return ProviderResult("semantic", (ContextItem("semantic", "duplicate charge retry protection", 0.95),), 60.0)
+            enter_provider()
+            try:
+                time.sleep(0.06)
+                return ProviderResult("semantic", (ContextItem("semantic", "duplicate charge retry protection", 0.95),), 60.0)
+            finally:
+                leave_provider()
 
         def external(root, query, intent, spec, limit):
-            time.sleep(0.06)
-            name = spec["name"]
-            return ProviderResult(name, (ContextItem(f"external:{name}", f"{name} duplicate charge evidence", 0.8),), 60.0)
+            enter_provider()
+            try:
+                time.sleep(0.06)
+                name = spec["name"]
+                return ProviderResult(name, (ContextItem(f"external:{name}", f"{name} duplicate charge evidence", 0.8),), 60.0)
+            finally:
+                leave_provider()
 
         with tempfile.TemporaryDirectory() as td:
             engine = WorkflowEngine(base_gather=base, semantic_provider=semantic, external_provider=external)
-            started = time.perf_counter()
             items, diagnostics = engine.gather_detailed(
                 Path(td),
                 "Where do we prevent duplicate charges during retries?",
@@ -86,9 +117,8 @@ class WorkflowEngineTests(unittest.TestCase):
                 cfg,
                 ProviderStatus(False, False, False, False, True),
             )
-            elapsed = time.perf_counter() - started
 
-        self.assertLess(elapsed, 0.15)
+        self.assertGreaterEqual(max_active, 2)
         self.assertEqual(diagnostics["providers_attempted"], ["base", "semantic", "external:a", "external:b"])
         self.assertEqual(diagnostics["provider_errors"], {})
         self.assertTrue(any(item.source == "semantic" for item in items))
