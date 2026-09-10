@@ -63,6 +63,9 @@ jobs:
           ai_workflow/retrieval_adapters.py
           ai_workflow/api.py
           ai_workflow/provider_runner.py
+          ai_workflow/workspace_selector.py
+          ai_workflow/workspace_budget.py
+          ai_workflow/workspace_retrieval.py
           scripts/check_benchmark_regression.py
       - name: Mypy typed-boundary gate
         run: >-
@@ -77,6 +80,9 @@ jobs:
           ai_workflow/retrieval_adapters.py
           ai_workflow/api.py
           ai_workflow/provider_runner.py
+          ai_workflow/workspace_selector.py
+          ai_workflow/workspace_budget.py
+          ai_workflow/workspace_retrieval.py
 
   package-smoke:
     runs-on: ubuntu-latest
