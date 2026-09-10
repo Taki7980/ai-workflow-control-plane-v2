@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -64,14 +66,17 @@ class RepositoryRegistryTests(unittest.TestCase):
             repos = registry_payload(discover_repositories(root, max_depth=2))
             for entry in repos["repositories"]:
                 entry["included"] = entry["relative_path"] == "backend"
-            registry.write_text(__import__("json").dumps(repos), encoding="utf-8")
+            registry.write_text(json.dumps(repos), encoding="utf-8")
 
-            roots = workspace_roots(root, {"workspace": {"registry": "ai-workspace/config/repositories.json", "roots": [], "max_roots": 4}})
+            roots = workspace_roots(
+                root,
+                {"workspace": {"registry": "ai-workspace/config/repositories.json", "roots": [], "max_roots": 4}},
+            )
             self.assertEqual(roots, [root.resolve(), backend.resolve()])
             self.assertNotIn(frontend.resolve(), roots)
 
     def test_real_git_worktree_gitdir_file_is_supported_when_git_exists(self):
-        if subprocess.run(["git", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        if not shutil.which("git"):
             self.skipTest("git not installed")
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -84,7 +89,13 @@ class RepositoryRegistryTests(unittest.TestCase):
             subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             worktree = root / "repo-wt"
-            subprocess.run(["git", "worktree", "add", str(worktree)], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["git", "worktree", "add", "-b", "worktree-test", str(worktree), "HEAD"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
             found = discover_repositories(root, max_depth=1)
             self.assertIn("repo-wt", {repo.relative_path for repo in found})
