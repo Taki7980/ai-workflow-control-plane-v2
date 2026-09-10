@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+PackageIdentifier: Taki7980.AIWorkflow
+PackageVersion: @VERSION@
+InstallerType: portable
+Commands:
+  - ai-workflow
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/Taki7980/ai-workflow-control-plane-v2/releases/download/v@VERSION@/@WINDOWS_ASSET@
+    InstallerSha256: @WINDOWS_SHA256@
+ManifestType: installer
+ManifestVersion: 1.12.0

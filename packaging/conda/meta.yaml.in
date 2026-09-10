@@ -1,0 +1,31 @@
+package:
+  name: ai-workflow-control-plane
+  version: "@VERSION@"
+
+source:
+  url: https://github.com/Taki7980/ai-workflow-control-plane-v2/releases/download/v@VERSION@/@SDIST_ASSET@
+  sha256: @SDIST_SHA256@
+
+build:
+  noarch: python
+  number: 0
+  script: "{{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation"
+  entry_points:
+    - ai-workflow = ai_workflow.entrypoint:main
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=77
+  run:
+    - python >=3.10
+
+test:
+  commands:
+    - ai-workflow --version
+
+about:
+  home: https://github.com/Taki7980/ai-workflow-control-plane-v2
+  license: MIT
+  summary: Agent-agnostic adaptive control plane for AI-assisted software development.
