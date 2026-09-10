@@ -356,7 +356,10 @@ def record_verified_outcome(
     value = float(success) if reward is None else float(reward)
     cost = float(realized_cost)
     if not math.isfinite(value) or not math.isfinite(cost) or cost < 0:
-        raise ValueError("reward must be finite and realized_cost must be finite/non-negative")
+        raise ValueError(
+            "reward must be finite and realized_cost must be "
+            "finite/non-negative"
+        )
 
     recorded_at = _utc_now()
     created_at = str(decision_record.get("created_at", "")).strip()
