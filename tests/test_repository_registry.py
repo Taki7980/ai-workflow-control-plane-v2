@@ -3,15 +3,21 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
+import ai_workflow.repository_registry as repository_registry_module
 from ai_workflow.repository_registry import (
     discover_repositories,
     load_registry,
+    refresh_registry,
     registry_payload,
     remote_identity,
+    repository_id,
+    set_repository_included,
     workspace_registry_fingerprint,
 )
 from ai_workflow.workspace import workspace_roots
@@ -31,14 +37,14 @@ class RepositoryRegistryTests(unittest.TestCase):
         )
         return repo
 
-    def test_remote_identity_removes_credentials_and_normalizes_git_urls(self):
+    def test_remote_identity_removes_credentials_normalizes_host_and_preserves_path_case(self):
         self.assertEqual(
             remote_identity("https://token@example.com/Taki7980/Repo.git"),
-            "example.com/taki7980/repo",
+            "example.com/Taki7980/Repo",
         )
         self.assertEqual(
-            remote_identity("git@github.com:Taki7980/Repo.git"),
-            "github.com/taki7980/repo",
+            remote_identity("git@GITHUB.com:Taki7980/Repo.git"),
+            "github.com/Taki7980/Repo",
         )
         self.assertTrue(str(remote_identity("file:///private/repo")).startswith("opaque:"))
 
@@ -76,6 +82,58 @@ class RepositoryRegistryTests(unittest.TestCase):
             self.assertEqual(roots, [root.resolve(), backend.resolve()])
             self.assertNotIn(frontend.resolve(), roots)
 
+    def test_registry_requires_explicit_review_gate(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._git_repo(root, "api", "https://github.com/acme/api.git")
+            registry = root / "ai-workspace/config/repositories.json"
+            registry.parent.mkdir(parents=True)
+            payload = registry_payload(discover_repositories(root, max_depth=1))
+            payload["repositories"][0]["included"] = True
+
+            payload["review_required"] = False
+            registry.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(load_registry(root), [])
+
+            payload.pop("review_required")
+            registry.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(load_registry(root), [])
+
+    def test_refresh_migrates_legacy_lowercase_identity_without_preserving_acceptance(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._git_repo(root, "api", "https://example.com/Team/Repo.git")
+            registry = root / "ai-workspace/config/repositories.json"
+            registry.parent.mkdir(parents=True)
+            legacy_identity = "example.com/team/repo"
+            registry.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "review_required": True,
+                        "repositories": [
+                            {
+                                "repository_id": repository_id("api", legacy_identity),
+                                "name": "api",
+                                "relative_path": "api",
+                                "git_dir": "api/.git",
+                                "remote_identity": legacy_identity,
+                                "head_ref": "refs/heads/main",
+                                "head_sha": "a" * 40,
+                                "included": True,
+                                "reason": "manual",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            refreshed = refresh_registry(root, max_depth=1)
+            self.assertEqual(refreshed["accepted"], 0)
+            self.assertEqual(refreshed["repositories"][0]["remote_identity"], "example.com/Team/Repo")
+            self.assertNotEqual(refreshed["repositories"][0]["repository_id"], repository_id("api", legacy_identity))
+
     def test_duplicate_repository_identity_fails_closed(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -100,6 +158,49 @@ class RepositoryRegistryTests(unittest.TestCase):
             )
 
             self.assertEqual(load_registry(root), [])
+
+    def test_registry_mutation_waits_for_interprocess_lock(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._git_repo(root, "api", "https://github.com/acme/api.git")
+            refresh_registry(root, max_depth=1)
+            registry = root / "ai-workspace/config/repositories.json"
+            started = root / "child-started"
+            finished = root / "child-finished"
+            registry_lock = getattr(repository_registry_module, "_registry_lock")
+            script = (
+                "from pathlib import Path\n"
+                "import sys\n"
+                "from ai_workflow.repository_registry import set_repository_included\n"
+                "root = Path(sys.argv[1])\n"
+                "Path(sys.argv[2]).write_text('started', encoding='utf-8')\n"
+                "set_repository_included(root, 'api', True)\n"
+                "Path(sys.argv[3]).write_text('finished', encoding='utf-8')\n"
+            )
+            process = None
+            try:
+                with registry_lock(registry):
+                    process = subprocess.Popen(
+                        [sys.executable, "-c", script, str(root), str(started), str(finished)],
+                        cwd=Path.cwd(),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    deadline = time.monotonic() + 5.0
+                    while not started.exists() and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(started.exists(), "child process did not start")
+                    time.sleep(0.15)
+                    self.assertFalse(finished.exists(), "registry mutation bypassed the lock")
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 0, msg=f"stdout={stdout}\nstderr={stderr}")
+                self.assertTrue(finished.exists())
+                self.assertTrue(load_registry(root)[0].included)
+            finally:
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
 
     def test_real_git_worktree_gitdir_file_is_supported_when_git_exists(self):
         if not shutil.which("git"):
