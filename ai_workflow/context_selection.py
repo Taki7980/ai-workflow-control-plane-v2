@@ -11,7 +11,7 @@ from .models import ContextItem
 class _Candidate:
     item: ContextItem
     relevance: float
-    tokens: frozenset[str]
+    terms: frozenset[str]
     cost: int
 
 
@@ -38,22 +38,22 @@ def _candidates(query: str, items: list[ContextItem]) -> list[_Candidate]:
     unique = _dedupe(items)
     if not unique:
         return []
-    query_tokens = frozenset(tokenize(query))
+    query_terms = frozenset(tokenize(query))
     max_score = max((max(0.0, float(item.score)) for item in unique), default=1.0) or 1.0
     rows = []
     for item in unique:
-        tokens = frozenset(tokenize(item.text))
-        lexical = _jaccard(query_tokens, tokens)
+        terms = frozenset(tokenize(item.text))
+        lexical = _jaccard(query_terms, terms)
         source = max(0.0, float(item.score)) / max_score
         relevance = min(1.0, 0.65 * source + 0.35 * lexical)
-        rows.append(_Candidate(item, relevance, tokens, max(1, len(item.text))))
+        rows.append(_Candidate(item, relevance, terms, max(1, len(item.text))))
     return rows
 
 
 def _gain(candidate: _Candidate, universe: list[_Candidate], coverage: list[float]) -> float:
     gain = 0.0
     for index, target in enumerate(universe):
-        represented = target.relevance * _jaccard(target.tokens, candidate.tokens)
+        represented = target.relevance * _jaccard(target.terms, candidate.terms)
         if represented > coverage[index]:
             gain += represented - coverage[index]
     return gain
@@ -61,23 +61,47 @@ def _gain(candidate: _Candidate, universe: list[_Candidate], coverage: list[floa
 
 def _apply(candidate: _Candidate, universe: list[_Candidate], coverage: list[float]) -> None:
     for index, target in enumerate(universe):
-        represented = target.relevance * _jaccard(target.tokens, candidate.tokens)
+        represented = target.relevance * _jaccard(target.terms, candidate.terms)
         if represented > coverage[index]:
             coverage[index] = represented
+
+
+def _bounded(rows: list[_Candidate], limit: int, mandatory_sources: tuple[str, ...]) -> list[_Candidate]:
+    if len(rows) <= limit:
+        return rows
+    mandatory = [row for row in rows if row.item.source in mandatory_sources]
+    mandatory_keys = {row.item.dedupe_key for row in mandatory}
+    ranked = sorted(
+        (row for row in rows if row.item.dedupe_key not in mandatory_keys),
+        key=lambda c: (-c.relevance, c.cost, c.item.source, c.item.dedupe_key),
+    )
+    return mandatory + ranked[: max(0, limit - len(mandatory))]
 
 
 def select_context(
     query: str,
     items: list[ContextItem],
-    char_budget: int,
-    config: dict,
+    char_budget: int | None = None,
+    config: dict | None = None,
     *,
     mandatory_sources: tuple[str, ...] = (),
+    budget_chars: int | None = None,
+    max_selector_candidates: int | None = None,
 ) -> tuple[list[ContextItem], dict]:
-    budget = max(0, int(char_budget))
-    rows = _candidates(query, items)
+    budget = max(0, int(budget_chars if budget_chars is not None else (char_budget or 0)))
+    selector_cfg = (((config or {}).get("context") or {}).get("selector") or {})
+    requested_limit = max_selector_candidates if max_selector_candidates is not None else selector_cfg.get("max_selector_candidates", 200)
+    try:
+        candidate_limit = max(1, int(requested_limit))
+    except (TypeError, ValueError):
+        candidate_limit = 200
+    all_rows = _candidates(query, items)
+    rows = _bounded(all_rows, candidate_limit, mandatory_sources)
     if not rows or budget <= 0:
-        return [], {"mode": "empty", "candidate_count": len(rows), "selected_count": 0, "used_chars": 0}
+        return [], {
+            "mode": "empty", "candidate_count": len(all_rows), "selector_candidates": len(rows),
+            "selected_count": 0, "used_chars": 0,
+        }
 
     selected: list[_Candidate] = []
     selected_keys: set[str] = set()
@@ -88,14 +112,11 @@ def select_context(
             continue
         if candidate.item.dedupe_key in selected_keys or used + candidate.cost > budget:
             continue
-        selected.append(candidate)
-        selected_keys.add(candidate.item.dedupe_key)
-        used += candidate.cost
+        selected.append(candidate); selected_keys.add(candidate.item.dedupe_key); used += candidate.cost
 
     remaining_rows = [row for row in rows if row.item.dedupe_key not in selected_keys]
     total_cost = sum(row.cost for row in rows)
     ratio = budget / max(1, total_cost)
-    selector_cfg = ((config.get("context") or {}).get("selector") or {})
     tight_fraction = float(selector_cfg.get("tight_budget_fraction", 0.3))
 
     if ratio <= tight_fraction:
@@ -103,9 +124,7 @@ def select_context(
         for candidate in sorted(remaining_rows, key=lambda c: (-c.relevance, c.cost, c.item.source, c.item.dedupe_key)):
             if used + candidate.cost > budget:
                 continue
-            selected.append(candidate)
-            selected_keys.add(candidate.item.dedupe_key)
-            used += candidate.cost
+            selected.append(candidate); selected_keys.add(candidate.item.dedupe_key); used += candidate.cost
     else:
         mode = "facility_location"
         coverage = [0.0] * len(rows)
@@ -122,20 +141,18 @@ def select_context(
                 continue
             current = _gain(candidate, rows, coverage) / candidate.cost
             if candidate_epoch != epoch or abs(current + neg_bound) > 1e-12:
-                heapq.heappush(heap, (-current, candidate.item.dedupe_key, epoch, candidate))
-                continue
+                heapq.heappush(heap, (-current, candidate.item.dedupe_key, epoch, candidate)); continue
             if current <= 0:
                 break
-            selected.append(candidate)
-            selected_keys.add(candidate.item.dedupe_key)
-            used += candidate.cost
-            _apply(candidate, rows, coverage)
-            epoch += 1
+            selected.append(candidate); selected_keys.add(candidate.item.dedupe_key); used += candidate.cost
+            _apply(candidate, rows, coverage); epoch += 1
 
     result = [candidate.item for candidate in selected]
     return result, {
         "mode": mode,
-        "candidate_count": len(rows),
+        "candidate_count": len(all_rows),
+        "selector_candidates": len(rows),
+        "candidate_limit": candidate_limit,
         "selected_count": len(result),
         "used_chars": used,
         "budget_chars": budget,
