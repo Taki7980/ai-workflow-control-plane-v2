@@ -328,7 +328,7 @@ class WorkspaceRetrievalTests(unittest.TestCase):
             repo_budget = RepositoryBudget("repo-a", 1, 1.0, parent)
             config = default_config()
             providers = ProviderStatus(False, False, False, False, False)
-            decision = RouteDecision(Lane.ANSWER, Risk.LOW, ["test"], False, 0.9)
+            decision = RouteDecision(Lane.FULL, Risk.MEDIUM, ["test"], True, 0.9)
 
             async def fake_gather(*args, **kwargs):
                 return [ContextItem("targeted_source", "stage3 survives", 1.0, False, {"file": "api.py"})], {}
