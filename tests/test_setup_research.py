@@ -7,23 +7,28 @@ from ai_workflow.research_scout import Paper, score_paper, title_similarity
 
 
 class SetupTests(unittest.TestCase):
-    def test_setup_is_one_command_and_idempotent(self):
+    def test_setup_is_one_command_single_folder_and_idempotent(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             first = setup(root)
             self.assertEqual(first["status"], "ready")
             self.assertEqual(first["project"], root.name)
-            self.assertTrue((root / "AGENTS.md").is_file())
+            self.assertEqual(first["layout"], "workspace")
+            self.assertFalse((root / "AGENTS.md").exists())
+            self.assertFalse((root / ".ai").exists())
+            self.assertTrue((root / "ai-workspace/agents/AGENTS.md").is_file())
             self.assertTrue((root / "ai-workspace/config/control-plane.json").is_file())
-            self.assertTrue((root / ".ai/PROJECT").is_file())
+            self.assertTrue((root / "ai-workspace/config/repositories.json").is_file())
+            self.assertTrue((root / "ai-workspace/state/PROJECT").is_file())
             self.assertTrue((root / "ai-workspace/generated/index-state.json").is_file())
 
             second = setup(root)
             self.assertEqual(second["status"], "ready")
-            self.assertIn("AGENTS.md", second["preserved"])
+            self.assertIn("ai-workspace/agents/AGENTS.md", second["preserved"])
             self.assertIn("ai-workspace/config/control-plane.json", second["preserved"])
+            self.assertIn("ai-workspace/config/repositories.json", second["preserved"])
 
-    def test_setup_preserves_existing_agents_file(self):
+    def test_setup_preserves_existing_legacy_agents_file(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             agents = root / "AGENTS.md"
@@ -31,6 +36,16 @@ class SetupTests(unittest.TestCase):
             result = setup(root, "Demo")
             self.assertEqual(agents.read_text(encoding="utf-8"), "# Existing project rules\n")
             self.assertIn("AGENTS.md", result["preserved"])
+            self.assertTrue((root / "ai-workspace/agents/AGENTS.md").is_file())
+
+    def test_setup_can_emit_legacy_root_files_when_requested(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = setup(root, "Demo", legacy_root_files=True)
+            self.assertTrue((root / "AGENTS.md").is_file())
+            self.assertTrue((root / ".ai/PROJECT").is_file())
+            self.assertIn("AGENTS.md", result["created"])
+            self.assertIn(".ai/PROJECT", result["created"])
 
 
 class ResearchScoutTests(unittest.TestCase):
