@@ -21,28 +21,18 @@ class WorkflowEngineTests(unittest.TestCase):
         cfg["context"]["sufficiency"]["threshold"] = 0.95
         return cfg
 
-    def test_workspace_roots_execute_concurrently_but_diagnostics_keep_root_order(self):
+    def test_engine_executes_only_requested_repository_when_workspace_roots_exist(self):
         from ai_workflow.workflow_engine import WorkflowEngine
 
         cfg = self._config()
         cfg["workspace"]["roots"] = ["one", "two"]
         decision = RouteDecision(Lane.FULL, Risk.MEDIUM, confidence=0.9)
         budget = ContextBudget(6000, 1200, 24000, {})
-        lock = threading.Lock()
-        active = 0
-        max_active = 0
+        calls = []
 
         def base(root, query, decision, budget, config, providers, symbol, endpoint, changed):
-            nonlocal active, max_active
-            with lock:
-                active += 1
-                max_active = max(max_active, active)
-            try:
-                time.sleep(0.06)
-                return [ContextItem("lightweight_index", f"{root.name} evidence for {query}", 1.0)]
-            finally:
-                with lock:
-                    active -= 1
+            calls.append(Path(root).resolve())
+            return [ContextItem("lightweight_index", f"{root.name} evidence for {query}", 1.0)]
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -57,9 +47,11 @@ class WorkflowEngineTests(unittest.TestCase):
                 cfg,
                 ProviderStatus(False, False, False, False, False),
             )
+            expected_root = root.resolve()
 
-        self.assertGreaterEqual(max_active, 2)
-        self.assertEqual(diagnostics["providers_attempted"][:3], ["base", "workspace:one", "workspace:two"])
+        self.assertEqual(calls, [expected_root])
+        self.assertEqual(diagnostics["providers_attempted"][0], "base")
+        self.assertFalse(any(label.startswith("workspace:") for label in diagnostics["providers_attempted"]))
         self.assertEqual(diagnostics["scheduler"]["max_concurrency"], 4)
 
     def test_semantic_and_external_retrievers_execute_concurrently_in_stable_order(self):

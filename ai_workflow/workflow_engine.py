@@ -18,8 +18,7 @@ from .retrieval_scheduler import BoundedRetrievalScheduler, ScheduledCall, Sched
 from .retriever_plugins import configured_retrievers, run_retriever_result as default_external_provider
 from .semantic import semantic_result as default_semantic_provider
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
-from .workspace import workspace_roots
-from .workspace_state import workspace_fingerprint
+from .workspace_state import repository_fingerprint
 
 
 def _provenance(item: ContextItem, workspace_root: Path | None = None) -> ContextItem:
@@ -147,6 +146,8 @@ class WorkflowEngine:
         changed_files: list[str] | None = None,
         *,
         write_telemetry: bool = False,
+        workspace_root: Path | None = None,
+        repository_path: str = ".",
     ) -> tuple[list[ContextItem], dict]:
         changed = changed_files or []
         plan = classify_retrieval_intent(query, decision, symbol=symbol, endpoint=endpoint)
@@ -158,20 +159,23 @@ class WorkflowEngine:
         def remaining() -> float:
             return global_deadline - (time.perf_counter() - started)
 
-        roots = workspace_roots(root, config)
-        max_roots = max(1, int(((config.get("workspace") or {}).get("max_roots", 4))))
-        selected_roots = roots[:max_roots]
-        base_calls: list[ScheduledCall] = []
-        for index, candidate_root in enumerate(selected_roots):
-            label = "base" if index == 0 else f"workspace:{candidate_root.name}"
-            trace.providers_attempted.append(label)
-            candidate_changed = changed if index == 0 else []
-            base_calls.append(ScheduledCall(
-                label,
-                lambda candidate_root=candidate_root, candidate_changed=candidate_changed: self.base_gather(
-                    candidate_root, query, decision, budget, config, providers, symbol, endpoint, candidate_changed
-                ),
-            ))
+        roots = [Path(root).resolve()]
+        scoped_workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
+        trace.providers_attempted.append("base")
+
+        def _base_call():
+            if scoped_workspace_root is None and repository_path == ".":
+                return self.base_gather(
+                    root, query, decision, budget, config, providers, symbol, endpoint, changed
+                )
+            return self.base_gather(
+                root, query, decision, budget, config, providers, symbol, endpoint, changed,
+                workspace_root=scoped_workspace_root or Path(root).resolve(),
+                repository_path=repository_path,
+            )
+
+        selected_roots = roots
+        base_calls = [ScheduledCall("base", _base_call)]
 
         base_outcomes = await scheduler.run(base_calls, max(0.001, remaining()))
         base_items: list[ContextItem] = []
@@ -281,7 +285,7 @@ class WorkflowEngine:
 
         final_suff = evaluate_sufficiency(query, selected, structural_required=plan.use_structural, threshold=threshold)
         state = _evidence_state(decision, final_suff.sufficient)
-        snapshot = workspace_fingerprint(root, changed)
+        snapshot = repository_fingerprint(root, repository_path, changed_files=changed)
 
         trace.selected = {source: sum(1 for item in selected if item.source == source) for source in {i.source for i in selected}}
         trace.sufficiency = {
@@ -303,6 +307,7 @@ class WorkflowEngine:
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
             "workspace_roots": [str(path) for path in roots],
+            "repository_path": repository_path,
             "workspace_state": snapshot,
             "evidence_state": state,
             "sufficiency": trace.sufficiency,
@@ -326,7 +331,7 @@ class WorkflowEngine:
             decision, diagnostics, changed, len(roots), providers, config
         )
         if write_telemetry and trace_enabled(config, decision.lane.value):
-            diagnostics["trace"] = write_trace(root, trace)
+            diagnostics["trace"] = write_trace(scoped_workspace_root or root, trace)
         return selected, diagnostics
 
     def gather_detailed(self, *args, **kwargs):

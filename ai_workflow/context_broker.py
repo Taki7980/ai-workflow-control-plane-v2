@@ -85,23 +85,110 @@ def resolve_test_files(changed_files: list[str]) -> list[dict]:
             results.append({"source": f, "candidates": candidates, "dir": p.parent.as_posix()})
     return results
 
-def find_tests_for_changed(root: Path, changed_files: list[str]) -> list[ContextItem]:
-    out = []
-    state = load_state(root).get("files", {})
-    resolved = resolve_test_files(changed_files)
-    for r in resolved:
-        for cand in r["candidates"]:
-            # Check same dir
-            cand_path = (Path(r["dir"]) / cand).as_posix()
-            if cand_path in state:
-                out.append(ContextItem("test_resolver", f"Detected test file: {cand_path} (for {r['source']})", 10.0))
-                break
-            # Check tests/ directory
-            cand_test_dir = f"tests/{cand}"
-            if cand_test_dir in state:
-                out.append(ContextItem("test_resolver", f"Detected test file: {cand_test_dir} (for {r['source']})", 9.0))
-                break
-    return out
+def _accepted_child_repository_paths(workspace_root: Path, config: dict) -> tuple[str, ...]:
+    from .workspace import workspace_roots
+
+    root = Path(workspace_root).resolve()
+    paths: list[str] = []
+    for candidate in workspace_roots(root, config):
+        candidate = Path(candidate).resolve()
+        if candidate == root:
+            continue
+        try:
+            rel = candidate.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel and rel != ".":
+            paths.append(rel)
+    return tuple(sorted(set(paths)))
+
+
+def _scope_index_row(
+    row: dict,
+    repository_path: str,
+    child_repository_paths: tuple[str, ...] = (),
+) -> tuple[dict, str] | None:
+    original = str(row.get("file", "")).replace("\\", "/").lstrip("./")
+    if not original:
+        return dict(row), ""
+    repo = str(repository_path or ".").replace("\\", "/").strip("/") or "."
+    if repo == ".":
+        if any(original.startswith(path.rstrip("/") + "/") for path in child_repository_paths):
+            return None
+        local = original
+    elif repo.startswith("legacy:"):
+        return None
+    else:
+        prefix = repo.rstrip("/") + "/"
+        if not original.startswith(prefix):
+            return None
+        local = original[len(prefix):]
+        if not local:
+            return None
+    scoped = dict(row)
+    scoped["file"] = local
+    return scoped, original
+
+
+def _state_key(repository_path: str, local_path: str) -> str:
+    local = str(local_path).replace("\\", "/").lstrip("./")
+    repo = str(repository_path or ".").replace("\\", "/").strip("/") or "."
+    if repo == "." or repo.startswith("legacy:"):
+        return local
+    return f"{repo.rstrip('/')}/{local}" if local else repo
+
+
+def _scoped_row_fresh(root: Path, row: dict, original_file: str, state: dict) -> bool:
+    local = str(row.get("file", ""))
+    if not local:
+        return True
+    path = Path(root) / local
+    expected = ((state.get("files") or {}).get(original_file) or {}).get("sha256")
+    if not expected or row.get("sha256") != expected or not path.is_file():
+        return False
+    try:
+        return sha256(path) == expected
+    except OSError:
+        return False
+
+
+def _scoped_index_file_count(state: dict, repository_path: str, child_repository_paths: tuple[str, ...]) -> int:
+    count = 0
+    for file in (state.get("files") or {}):
+        scoped = _scope_index_row({"file": file}, repository_path, child_repository_paths)
+        if scoped is not None:
+            count += 1
+    return count
+
+
+def find_tests_for_changed(
+    root: Path,
+    changed_files: list[str],
+    *,
+    workspace_root: Path | None = None,
+    repository_path: str = ".",
+) -> list[ContextItem]:
+    index_root = Path(workspace_root).resolve() if workspace_root is not None else Path(root).resolve()
+    state = load_state(index_root)
+    known = state.get("files", {})
+    results = []
+    seen = set()
+    for changed in changed_files:
+        p = Path(changed)
+        stem = p.stem
+        candidates = [
+            p.with_name(f"test_{p.name}"), p.with_name(f"{stem}_test{p.suffix}"),
+            Path("tests") / f"test_{p.name}", Path("test") / f"{stem}_test{p.suffix}",
+            Path("__tests__") / f"{stem}.test{p.suffix}",
+        ]
+        for cand in candidates:
+            rel = cand.as_posix()
+            key = _state_key(repository_path, rel)
+            if (key in known or (Path(root) / rel).is_file()) and rel not in seen:
+                seen.add(rel)
+                results.append(ContextItem("test_resolver", rel, 7.0, False, {"changed_file": changed, "path": rel}))
+    return results
+
 
 def _cap_items(items: list[ContextItem], chars: int, seen_keys: set[str] | None = None, query: str = "") -> list[ContextItem]:
     out = []
@@ -149,7 +236,7 @@ def _cap_items(items: list[ContextItem], chars: int, seen_keys: set[str] | None 
         if text:
             meta = dict(item.metadata)
             if cut: meta["truncated"] = True
-            out.append(ContextItem(item.source, text, item.score, item.stale, meta))
+            out.append(ContextItem(item.source, text, item.score, item.stale, meta, dict(item.provenance)))
             used += len(text)
     return out
 
@@ -255,26 +342,47 @@ def _research_hits(root: Path, query: str, limit: int) -> list[ContextItem]:
     rows.sort(key=lambda x: -x.score)
     return rows[:limit]
 
-def lightweight(root: Path, query: str, symbol: str | None, endpoint: str | None, limit: int, min_conf: float) -> list[ContextItem]:
-    state = load_state(root)
+def lightweight(
+    root: Path,
+    query: str,
+    symbol: str | None,
+    endpoint: str | None,
+    limit: int,
+    min_conf: float,
+    *,
+    workspace_root: Path | None = None,
+    repository_path: str = ".",
+    child_repository_paths: tuple[str, ...] = (),
+) -> list[ContextItem]:
+    index_root = Path(workspace_root).resolve() if workspace_root is not None else Path(root).resolve()
+    state = load_state(index_root)
+    use_scoped_freshness = workspace_root is not None or repository_path != "." or bool(child_repository_paths)
     out: list[ContextItem] = []
-    for r in _jsonl(root / "ai-workspace" / "generated" / "symbol-index.jsonl"):
+    for raw in _jsonl(index_root / "ai-workspace/generated/symbol-index.jsonl"):
+        mapped = _scope_index_row(raw, repository_path, child_repository_paths)
+        if mapped is None:
+            continue
+        row, original = mapped
         target = symbol or query
-        s = 10 if symbol and r.get("symbol", "").lower() == symbol.lower() else _semantic_overlap_score(target, f"{r.get('symbol','')} {r.get('file','')}")
-        if s:
-            fresh = row_fresh(root, r, state)
-            if fresh:
-                out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "symbol"}))
-    for r in _jsonl(root / "ai-workspace" / "generated" / "endpoint-index.jsonl"):
+        score = 10 if symbol and row.get("symbol", "").lower() == symbol.lower() else _semantic_overlap_score(target, f"{row.get('symbol','')} {row.get('file','')}")
+        fresh = _scoped_row_fresh(root, row, original, state) if use_scoped_freshness else row_fresh(root, row, state)
+        if score and fresh:
+            out.append(ContextItem("lightweight_index", json.dumps(row, separators=(",", ":")), float(score), False, {"kind": "symbol"}))
+    for raw in _jsonl(index_root / "ai-workspace/generated/endpoint-index.jsonl"):
+        mapped = _scope_index_row(raw, repository_path, child_repository_paths)
+        if mapped is None:
+            continue
+        row, original = mapped
         target = endpoint or query
-        s = 10 if endpoint and endpoint.lower() in r.get("path", "").lower() else _semantic_overlap_score(target, f"{r.get('method','')} {r.get('path','')} {r.get('file','')}")
-        if s and row_fresh(root, r, state):
-            out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "endpoint"}))
-    out.extend(_domain_hints(root, query, limit))
-    out.extend(_research_hits(root, query, limit))
-    for m in search_memory(root, query, limit=limit, minimum_confidence=min_conf, exclude_stale=True):
-        compact = {k: m.get(k) for k in ("id","type","summary","evidence","files","confidence")}
-        out.append(ContextItem("durable_memory", json.dumps(compact, ensure_ascii=False, separators=(",", ":")), float(m.get("score", 0)), False))
+        score = 10 if endpoint and endpoint.lower() in row.get("path", "").lower() else _semantic_overlap_score(target, f"{row.get('method','')} {row.get('path','')} {row.get('file','')}")
+        fresh = _scoped_row_fresh(root, row, original, state) if use_scoped_freshness else row_fresh(root, row, state)
+        if score and fresh:
+            out.append(ContextItem("lightweight_index", json.dumps(row, separators=(",", ":")), float(score), False, {"kind": "endpoint"}))
+    out.extend(_domain_hints(index_root, query, limit))
+    out.extend(_research_hits(index_root, query, limit))
+    for memory in search_memory(index_root, query, limit=limit, minimum_confidence=min_conf, exclude_stale=True):
+        compact = {key: memory.get(key) for key in ("id", "type", "summary", "evidence", "files", "confidence")}
+        out.append(ContextItem("durable_memory", json.dumps(compact, ensure_ascii=False, separators=(",", ":")), float(memory.get("score", 0)), False))
     out.sort(key=lambda item: -item.score)
     if len(out) <= limit or not query:
         return out[:limit]
@@ -298,6 +406,7 @@ def lightweight(root: Path, query: str, symbol: str | None, endpoint: str | None
     )[:slots]
     selected_ids = {id(item) for item in selected}
     return stronger + [item for item in tied if id(item) in selected_ids]
+
 
 def _run_crg(root: Path, args: list[str], timeout: int = 8) -> str | None:
     if not shutil.which("code-review-graph"):
@@ -354,13 +463,30 @@ def targeted_source(root: Path, query: str, limit: int) -> list[ContextItem]:
         except OSError: continue
     return out
 
-def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudget, config: dict, providers: ProviderStatus, symbol: str | None = None, endpoint: str | None = None, changed_files: list[str] | None = None) -> list[ContextItem]:
+def gather(
+    root: Path,
+    query: str,
+    decision: RouteDecision,
+    budget: ContextBudget,
+    config: dict,
+    providers: ProviderStatus,
+    symbol: str | None = None,
+    endpoint: str | None = None,
+    changed_files: list[str] | None = None,
+    *,
+    workspace_root: Path | None = None,
+    repository_path: str = ".",
+) -> list[ContextItem]:
+    root = Path(root).resolve()
+    index_root = Path(workspace_root).resolve() if workspace_root is not None else root
+    child_paths = _accepted_child_repository_paths(index_root, config) if repository_path == "." else ()
     limit = int(config["context"].get("max_results_per_source", 6))
     items: list[ContextItem] = []
     seen_keys: set[str] = set()
 
     crg_cfg = config["context"]["crg"]
-    indexed_files = len(load_state(root).get("files", {}))
+    index_state = load_state(index_root)
+    indexed_files = _scoped_index_file_count(index_state, repository_path, child_paths)
     min_files = int(crg_cfg.get("min_source_files", 250))
     changed_threshold = int(crg_cfg.get("changed_files_threshold", 3))
     broad_change = len(changed_files or []) >= changed_threshold
@@ -369,41 +495,47 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
         decision.structural_context or broad_change or large_full
     )
 
-    # Step 0: Test resolver for changed files
     if changed_files:
-        test_items = find_tests_for_changed(root, changed_files)
+        test_items = find_tests_for_changed(
+            root,
+            changed_files,
+            workspace_root=index_root,
+            repository_path=repository_path,
+        )
         items += _cap_items(test_items, 600, seen_keys)
-    # Priority 0: Hot cache
-    hot = hot_cache(root, query, limit)
+    hot = hot_cache(index_root, query, limit)
     items += _cap_items(hot, budget.source_chars.get("hot_cache", 1000), seen_keys, query=query)
-    
-    # Gather only potentially useful expensive providers in parallel.
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        f_light = executor.submit(lightweight, root, query, symbol, endpoint, limit, float(config["memory"].get("minimum_confidence", 0.55)))
+        f_light = executor.submit(
+            lightweight,
+            root,
+            query,
+            symbol,
+            endpoint,
+            limit,
+            float(config["memory"].get("minimum_confidence", 0.55)),
+            workspace_root=index_root,
+            repository_path=repository_path,
+            child_repository_paths=child_paths,
+        )
         f_crg = executor.submit(crg_context, root, query, symbol, changed_files, limit) if wants_crg else None
 
-        # Priority 1: Lightweight index + domain hints + research + memory
         remaining = max(0, budget.context_chars - sum(len(i.text) for i in items))
         light_budget = budget.source_chars.get("lightweight", 2000)
         light = f_light.result()
         items += _cap_items(light, min(remaining, light_budget), seen_keys, query=query)
 
-        # Priority 2: Code Review Graph (CRG)
         crg_items = f_crg.result() if f_crg else []
         if wants_crg and crg_items:
             remaining = max(0, budget.context_chars - sum(len(i.text) for i in items))
             crg_budget = min(remaining, budget.source_chars.get("crg", 3000))
             items += _cap_items(crg_items, crg_budget, seen_keys, query=query)
 
-        # Priority 3: Targeted Source Fallback
         code_sources = {"lightweight_index", "domain_manifest", "code_review_graph"}
-        has_code_evidence = any(
-            item.source in code_sources and _score(query, item.text) > 0
-            for item in items
-        )
+        has_code_evidence = any(item.source in code_sources and _score(query, item.text) > 0 for item in items)
         needs_structural_fallback = decision.structural_context and not crg_items
         needs_mutation_fallback = decision.lane != Lane.ANSWER and not has_code_evidence
-        
         if not items or needs_structural_fallback or needs_mutation_fallback:
             remaining = max(0, budget.context_chars - sum(len(i.text) for i in items))
             if remaining > 80:
@@ -414,8 +546,6 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
                 )
                 items += _cap_items(source_items, remaining, seen_keys, query=query)
 
-
-    # Final hard limit check against total context budget
     final_items: list[ContextItem] = []
     used_chars = 0
     final_seen: set[str] = set()
@@ -431,6 +561,7 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
             meta = dict(item.metadata)
             if cut:
                 meta["truncated"] = True
-            final_items.append(ContextItem(item.source, text, item.score, item.stale, meta))
+            final_items.append(ContextItem(item.source, text, item.score, item.stale, meta, dict(item.provenance)))
             used_chars += len(text)
     return final_items
+
