@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .workspace_graph_builder import build_workspace_graph, graph_status
 from .workspace_retrieval import gather_workspace_detailed
 from .benchmark import load_tasks, run_benchmark
 from .bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
@@ -335,6 +336,26 @@ def cmd_context(args):
     )
 
 
+
+def cmd_graph_build(args):
+    root = _root(args)
+    graph, state = build_workspace_graph(root, load_config(root), force=True)
+    _json(
+        {
+            "status": "built",
+            "graph_fingerprint": state.get("graph_fingerprint", ""),
+            "node_count": len(graph.nodes),
+            "edge_count": len(graph.edges),
+            "reused": bool(state.get("reused", False)),
+        }
+    )
+
+
+def cmd_graph_status(args):
+    root = _root(args)
+    _json(graph_status(root, load_config(root)))
+
+
 def cmd_index(args):
     root = _root(args)
     if getattr(args, "incremental", False):
@@ -539,6 +560,15 @@ def build_parser():
                 default="json",
             )
         q.set_defaults(func=fn)
+
+    q = sp.add_parser("graph", help="build or inspect the workspace intelligence graph")
+    gsp = q.add_subparsers(dest="graph_command", required=True)
+
+    g = gsp.add_parser("build", help="build the deterministic workspace graph")
+    g.set_defaults(func=cmd_graph_build)
+
+    g = gsp.add_parser("status", help="inspect persisted workspace graph state")
+    g.set_defaults(func=cmd_graph_status)
 
     q = sp.add_parser("index")
     q.add_argument("--incremental", action="store_true")
