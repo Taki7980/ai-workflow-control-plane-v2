@@ -231,5 +231,148 @@ class WorkspaceRetrievalTests(unittest.TestCase):
             )
 
 
+    def test_stage4_graph_items_share_parent_budget(self):
+        from ai_workflow.workspace_graph import WorkspaceGraph
+        from ai_workflow.workspace_graph_retrieval import GraphRetrievalResult
+
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            repo = workspace / "backend"
+            repo.mkdir()
+            candidate = RepositoryCandidate(repo, "repo-a", "backend", None, "fp-a", (), False)
+            selection = RepositorySelection(candidate, 10.0, 1, True, ("identity_match",))
+            parent = ContextBudget(
+                50,
+                10,
+                120,
+                {"hot_cache": 10, "lightweight": 40, "crg": 50, "source_fallback": 20},
+            )
+            repo_budget = RepositoryBudget("repo-a", 1, 1.0, parent)
+            config = default_config()
+            providers = ProviderStatus(False, False, False, False, False)
+            decision = RouteDecision(Lane.FULL, Risk.MEDIUM, ["test"], True, 0.9)
+            seen = {}
+
+            async def fake_gather(*args, **kwargs):
+                return [
+                    ContextItem(
+                        "targeted_source",
+                        "base-stage3-evidence-" * 3,
+                        1.0,
+                        False,
+                        {"file": "api.py"},
+                    )
+                ], {"retrieval_intent": "mixed"}
+
+            def fake_graph_retrieval(graph, query, selected_repository_ids, **kwargs):
+                seen["selected"] = set(selected_repository_ids)
+                seen["max_context_chars"] = kwargs["config"]["workspace"]["graph"]["max_context_chars"]
+                return GraphRetrievalResult(
+                    (
+                        ContextItem(
+                            "workspace_graph",
+                            "graph-evidence-" * 3,
+                            9.0,
+                            False,
+                            {
+                                "repository_id": "repo-a",
+                                "repository_path": "backend",
+                                "repository_fingerprint": "fp-a",
+                                "graph_node_id": "node-a",
+                                "graph_edge_ids": [],
+                                "graph_distance": 0,
+                                "graph_fingerprint": "graph-fp",
+                            },
+                        ),
+                    ),
+                    {
+                        "enabled": True,
+                        "graph_fingerprint": "graph-fp",
+                        "seed_nodes": 1,
+                        "expanded_nodes": 1,
+                        "expanded_edges": 0,
+                        "cross_repo_edges": 0,
+                        "hops_used": 0,
+                        "repositories_reached": ["backend"],
+                        "budget": {"allocated_context_chars": 120, "used_context_chars": 45},
+                    },
+                )
+
+            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate]), \
+                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection]), \
+                 patch("ai_workflow.workspace_retrieval.allocate_repository_budgets", return_value=[repo_budget]), \
+                 patch("ai_workflow.workspace_retrieval.aggregate_workspace_fingerprint", return_value={"fingerprint": "workspace-fp"}), \
+                 patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather), \
+                 patch("ai_workflow.workspace_retrieval.build_workspace_graph", return_value=(WorkspaceGraph((), ()), {"graph_fingerprint": "graph-fp"})), \
+                 patch("ai_workflow.workspace_retrieval.retrieve_workspace_graph", side_effect=fake_graph_retrieval):
+                result = asyncio.run(
+                    gather_workspace_detailed_async(
+                        workspace, "payment handler", decision, parent, config, providers
+                    )
+                )
+
+            self.assertEqual(seen["selected"], {"repo-a"})
+            self.assertLessEqual(seen["max_context_chars"], parent.context_chars)
+            self.assertLessEqual(sum(len(item.text) for item in result.items), parent.context_chars)
+            self.assertIn("workspace_graph", {item.source for item in result.items})
+            self.assertEqual(result.diagnostics["workspace_graph"]["status"], "ok")
+
+    def test_stage4_graph_failure_fails_open_to_stage3_items(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            repo = workspace / "backend"
+            repo.mkdir()
+            candidate = RepositoryCandidate(repo, "repo-a", "backend", None, "fp-a", (), False)
+            selection = RepositorySelection(candidate, 10.0, 1, True, ("identity_match",))
+            parent = ContextBudget(100, 20, 300, {"hot_cache": 30, "lightweight": 90, "crg": 120, "source_fallback": 60})
+            repo_budget = RepositoryBudget("repo-a", 1, 1.0, parent)
+            config = default_config()
+            providers = ProviderStatus(False, False, False, False, False)
+            decision = RouteDecision(Lane.ANSWER, Risk.LOW, ["test"], False, 0.9)
+
+            async def fake_gather(*args, **kwargs):
+                return [ContextItem("targeted_source", "stage3 survives", 1.0, False, {"file": "api.py"})], {}
+
+            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate]), \
+                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection]), \
+                 patch("ai_workflow.workspace_retrieval.allocate_repository_budgets", return_value=[repo_budget]), \
+                 patch("ai_workflow.workspace_retrieval.aggregate_workspace_fingerprint", return_value={"fingerprint": "workspace-fp"}), \
+                 patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather), \
+                 patch("ai_workflow.workspace_retrieval.build_workspace_graph", side_effect=RuntimeError("broken graph")):
+                result = asyncio.run(gather_workspace_detailed_async(workspace, "task", decision, parent, config, providers))
+
+            self.assertEqual([item.text for item in result.items], ["stage3 survives"])
+            self.assertEqual(result.diagnostics["workspace_graph"]["status"], "error")
+            self.assertIn("RuntimeError", result.diagnostics["workspace_graph"]["error"])
+
+    def test_stage4_graph_disabled_never_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            repo = workspace / "backend"
+            repo.mkdir()
+            candidate = RepositoryCandidate(repo, "repo-a", "backend", None, "fp-a", (), False)
+            selection = RepositorySelection(candidate, 10.0, 1, True, ("identity_match",))
+            parent = ContextBudget(100, 20, 300, {"hot_cache": 30, "lightweight": 90, "crg": 120, "source_fallback": 60})
+            repo_budget = RepositoryBudget("repo-a", 1, 1.0, parent)
+            config = default_config()
+            config["workspace"]["graph"]["enabled"] = False
+            providers = ProviderStatus(False, False, False, False, False)
+            decision = RouteDecision(Lane.ANSWER, Risk.LOW, ["test"], False, 0.9)
+
+            async def fake_gather(*args, **kwargs):
+                return [], {}
+
+            with patch("ai_workflow.workspace_retrieval.build_repository_candidates", return_value=[candidate]), \
+                 patch("ai_workflow.workspace_retrieval.select_repositories", return_value=[selection]), \
+                 patch("ai_workflow.workspace_retrieval.allocate_repository_budgets", return_value=[repo_budget]), \
+                 patch("ai_workflow.workspace_retrieval.aggregate_workspace_fingerprint", return_value={"fingerprint": "workspace-fp"}), \
+                 patch("ai_workflow.workspace_retrieval.gather_detailed_async", new=fake_gather), \
+                 patch("ai_workflow.workspace_retrieval.build_workspace_graph") as build_graph:
+                result = asyncio.run(gather_workspace_detailed_async(workspace, "task", decision, parent, config, providers))
+
+            build_graph.assert_not_called()
+            self.assertEqual(result.diagnostics["workspace_graph"]["status"], "disabled")
+
+
 if __name__ == "__main__":
     unittest.main()
