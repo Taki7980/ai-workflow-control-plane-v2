@@ -410,6 +410,74 @@ The evaluator reports IPS and self-normalized importance weighting (SNIPS), over
 
 Promotion remains advisory: `automatic_runtime_promotion` is always false in Stage 5. The evaluator explicitly reports that its bootstrap interval is not the exact Efron-Stein confidence bound from the confident-OPE paper.
 
+Stage 6 adds contextual safe policy development on top of Stage 5 logs. New learning decisions carry a versioned categorical feature schema:
+
+```text
+retrieval-context-v1
+  lane
+  risk
+  intent
+  query_length_bucket
+  changed_files_bucket
+  workspace_roots_bucket
+```
+
+No task text or repository content is added to the feature record.
+
+Develop a contextual policy with an independent holdout:
+
+```bash
+ai-workflow learning contextual-policy \
+  --field intent \
+  --field lane \
+  --field changed_files_bucket \
+  --development-fraction 0.7 \
+  --minimum-context-events 10 \
+  --minimum-direct-exposures 3 \
+  --minimum-holdout-events 20 \
+  --minimum-effective-sample-size 10 \
+  --confidence 0.95 \
+  --output contextual-policy.json
+```
+
+Stage 6 trains a smoothed categorical direct reward model on the development split, validates that model with deterministic cross-validation, freezes the resulting contextual policy, and evaluates it with doubly robust estimation on the untouched holdout. Non-low-risk rows always map to `adaptive_math`.
+
+A policy that clears the holdout gates can be converted into a signed, shadow-only manifest. The HMAC key is supplied by an environment variable and is never written to the manifest:
+
+```bash
+export AI_WORKFLOW_POLICY_SIGNING_KEY="replace-with-a-real-secret"
+
+ai-workflow learning create-manifest \
+  --input contextual-policy.json \
+  --output policy-manifest.json \
+  --signing-key-env AI_WORKFLOW_POLICY_SIGNING_KEY
+
+ai-workflow learning verify-manifest \
+  --input policy-manifest.json \
+  --signing-key-env AI_WORKFLOW_POLICY_SIGNING_KEY
+```
+
+The manifest contains a policy ID, feature-schema version, context mapping, source evidence digest, evidence cutoff, embedded fixed reward/cost models, locked risks, and explicit rollback target `adaptive_math`. It cannot request automatic runtime activation.
+
+Shadow evaluation uses only verified outcomes recorded after the signed manifest's evidence cutoff:
+
+```bash
+ai-workflow learning shadow-evaluate \
+  --manifest policy-manifest.json \
+  --signing-key-env AI_WORKFLOW_POLICY_SIGNING_KEY \
+  --confidence 0.95 \
+  --reward-min 0 \
+  --reward-max 1 \
+  --max-importance-weight 20 \
+  --minimum-new-events 20 \
+  --safety-margin 0.0 \
+  --output shadow-report.json
+```
+
+The shadow evaluator reports both held-fixed doubly robust diagnostics and an anytime-valid conservative Hoeffding confidence sequence for the post-cutoff reward difference. It blocks manual promotion review on manifest failure, missing target-policy support, importance-weight/range violations, insufficient new evidence, a non-positive anytime lower bound, or an optional realized-cost violation.
+
+The Stage 6 confidence sequence is intentionally conservative and is not claimed to reproduce the exact betting/martingale construction from the Off-policy Confidence Sequences paper. Repeated calls recompute the same fixed-policy post-cutoff sequence, so checking again later does not turn an ordinary fixed-sample bootstrap interval into a deployment gate.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -434,6 +502,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-11-retrieval-eval-stage3.md`
 - `docs/research/2026-09-11-retrieval-eval-stage4.md`
 - `docs/research/2026-09-11-retrieval-learning-stage5.md`
+- `docs/research/2026-09-11-contextual-learning-stage6.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
