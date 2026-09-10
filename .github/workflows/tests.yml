@@ -53,6 +53,7 @@ jobs:
         run: >-
           ruff check --select E,F,UP,BLE,EXE
           ai_workflow/retrieval_contracts.py
+          ai_workflow/benchmark_protocol.py
           ai_workflow/retrieval_scheduler.py
           ai_workflow/path_policy.py
           ai_workflow/typed_config.py
@@ -68,6 +69,7 @@ jobs:
         run: >-
           mypy --follow-imports=skip
           ai_workflow/retrieval_contracts.py
+          ai_workflow/benchmark_protocol.py
           ai_workflow/path_policy.py
           ai_workflow/typed_config.py
           ai_workflow/benchmark_regression.py
