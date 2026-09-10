@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import Iterator, Protocol
 
 
 class MemoryStore(Protocol):
@@ -15,7 +19,7 @@ class MemoryStore(Protocol):
 
 
 class SQLiteMemoryStore:
-    """Transactional durable memory store with idempotent JSONL migration."""
+    """Transactional durable memory store with reversible JSONL migration."""
 
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -24,17 +28,25 @@ class SQLiteMemoryStore:
         self._initialize()
         legacy = self.root / "ai-workspace" / "memory" / "memory.jsonl"
         if legacy.exists():
-            self.import_jsonl(legacy)
+            self._migrate_legacy(legacy)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path, timeout=5.0)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _initialize(self) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS memories (
@@ -69,18 +81,47 @@ class SQLiteMemoryStore:
             json.dumps(record, ensure_ascii=False, sort_keys=True),
         )
 
+    @staticmethod
+    def _read_jsonl(path: Path) -> list[dict]:
+        records: list[dict] = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("id"):
+                records.append(record)
+        return records
+
+    def _migrate_legacy(self, legacy: Path) -> None:
+        backup = legacy.with_suffix(legacy.suffix + ".bak")
+        if not backup.exists():
+            shutil.copy2(legacy, backup)
+        expected_ids = {str(record["id"]) for record in self._read_jsonl(legacy)}
+        self.import_jsonl(legacy)
+        if expected_ids:
+            actual_ids = {str(record.get("id")) for record in self.list_records()}
+            missing = expected_ids - actual_ids
+            if missing:
+                raise RuntimeError("legacy memory migration validation failed: missing " + ", ".join(sorted(missing)))
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata(key,value) VALUES(?,?)",
+                ("legacy_jsonl_migrated", "1"),
+            )
+
     def insert(self, record: dict) -> None:
-        payload = self._payload(record)
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT INTO memories(id,type,created_at,verified_at,confidence,record_json) VALUES(?,?,?,?,?,?)",
-                payload,
+                self._payload(record),
             )
 
     def upsert(self, record: dict) -> None:
-        payload = self._payload(record)
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """
@@ -93,14 +134,12 @@ class SQLiteMemoryStore:
                     confidence=excluded.confidence,
                     record_json=excluded.record_json
                 """,
-                payload,
+                self._payload(record),
             )
 
     def list_records(self) -> list[dict]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT record_json FROM memories ORDER BY created_at ASC, id ASC"
-            ).fetchall()
+        with self._connection() as conn:
+            rows = conn.execute("SELECT record_json FROM memories ORDER BY created_at ASC, id ASC").fetchall()
         records: list[dict] = []
         for (raw,) in rows:
             try:
@@ -113,7 +152,7 @@ class SQLiteMemoryStore:
 
     def replace_all(self, records: list[dict]) -> None:
         payloads = [self._payload(record) for record in records]
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("DELETE FROM memories")
             conn.executemany(
@@ -124,26 +163,16 @@ class SQLiteMemoryStore:
     def import_jsonl(self, path: Path) -> int:
         if not path.exists():
             return 0
-        records: list[dict] = []
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict) and record.get("id"):
-                records.append(record)
+        records = self._read_jsonl(path)
         if not records:
             return 0
         inserted = 0
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             for record in records:
-                payload = self._payload(record)
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO memories(id,type,created_at,verified_at,confidence,record_json) VALUES(?,?,?,?,?,?)",
-                    payload,
+                    self._payload(record),
                 )
                 inserted += max(0, int(cursor.rowcount))
         return inserted
@@ -151,8 +180,15 @@ class SQLiteMemoryStore:
     def export_jsonl(self, path: Path) -> int:
         records = self.list_records()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
-            encoding="utf-8",
-        )
+        raw = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
         return len(records)
