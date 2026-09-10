@@ -173,3 +173,16 @@ A multi-repo fixture should include at least:
 - dirty tracked and untracked content that changes repository fingerprints;
 - legacy `workspace.roots` compatibility;
 - malicious nested folders such as `node_modules/.git` that must be skipped.
+
+
+## Stage 3 retrieval orchestration
+
+Accepted repositories are retrieval **candidates**, not repositories that are searched automatically. `brief` and `context` score the accepted candidate set deterministically and search at most three repositories by default. A strong secondary-repository signal can outrank the primary repository; unrelated accepted repositories remain skipped.
+
+All selected repositories share one parent context budget. The rank-1 repository receives the strongest allocation, per-repository slices are bounded, and the sum of allocations and final merged evidence never exceeds the parent budget. Repository retrieval runs with at most three workers under one 12-second monotonic workspace deadline by default. A timed-out or failed repository is reported and is not retried or replaced by an unselected repository.
+
+Changed files are partitioned to their owning repository before repository-local retrieval. Every merged context item carries portable `repository_id`, `repository_path`, and `repository_fingerprint` provenance; absolute checkout paths are not serialized into portable evidence. Identical evidence text from two repositories remains distinct because cross-repository deduplication includes repository identity.
+
+`ai-workflow brief` and `ai-workflow context` preserve the existing retrieval fields and add `retrieval.workspace_orchestration`. That block reports the aggregate workspace fingerprint, selected and skipped repositories with selector reasons, per-repository status, context allocation and use, and scheduler/deadline diagnostics. Human-readable briefs show selected/skipped repository paths and the aggregate repository budget only when the workspace has multiple candidates.
+
+Stage 3 intentionally does not add dependency-graph traversal, topology learning, learned routing, daemon behavior, or retry loops. Those remain later-stage work.
