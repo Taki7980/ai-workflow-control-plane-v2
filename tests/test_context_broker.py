@@ -29,16 +29,21 @@ class ContextBrokerTests(unittest.TestCase):
             self.assertEqual(rows[0].source, 'domain_manifest')
             self.assertIn('services/billing', rows[0].text)
 
-    def test_lightweight_keeps_rare_query_signal_under_generic_symbol_noise(self):
-        generic = [
-            {"symbol": f"repository_rule_{index}", "file": f"tests/repository_rule_{index}.py"}
-            for index in range(6)
+    def test_lightweight_keeps_crg_signal_over_stopword_heavy_symbol_noise(self):
+        rows = [
+            {"symbol": "test_registry_mutation_waits_for_interprocess_lock", "file": "tests/test_repository_registry.py"},
+            {"symbol": "test_superpowers_can_be_forced_for_marketplace_installs", "file": "tests/test_providers.py"},
+            {"symbol": "_spec_for_directory", "file": "ai_workflow/repository_registry.py"},
+            {"symbol": "test_spring_mapping_routes_do_not_depend_on_generic_capture_groups", "file": "tests/test_indexer_routes_and_state.py"},
+            {"symbol": "test_per_query_floor_cannot_be_hidden_by_overall_mean", "file": "tests/test_benchmark_regression_policy.py"},
+            {"symbol": "test_sample_corpus_is_broad_enough_for_regression_use", "file": "tests/test_benchmark_dataset.py"},
+            {"symbol": "test_task_text_can_be_enabled_and_redacted", "file": "tests/test_durable_state.py"},
+            {"symbol": "test_failed_crg_status_is_not_reported_ready", "file": "tests/test_doctor.py"},
         ]
-        rare = {"symbol": "crg_gate", "file": "ai_workflow/retrieval_policy.py"}
         with tempfile.TemporaryDirectory() as td, patch(
             "ai_workflow.context_broker.load_state", return_value={}
         ), patch(
-            "ai_workflow.context_broker._jsonl", side_effect=[generic + [rare], []]
+            "ai_workflow.context_broker._jsonl", side_effect=[rows, []]
         ), patch(
             "ai_workflow.context_broker.row_fresh", return_value=True
         ), patch(
@@ -53,12 +58,12 @@ class ContextBrokerTests(unittest.TestCase):
                 "Where do we decide whether CRG should be attempted for a large repository?",
                 None,
                 None,
-                limit=5,
+                limit=6,
                 min_conf=0.5,
             )
 
-        self.assertEqual(len(items), 5)
-        self.assertTrue(any('"symbol":"crg_gate"' in item.text for item in items))
+        self.assertEqual(len(items), 6)
+        self.assertTrue(any('"symbol":"test_failed_crg_status_is_not_reported_ready"' in item.text for item in items))
 
 from ai_workflow.context_broker import gather
 from ai_workflow.budget import budget_for
