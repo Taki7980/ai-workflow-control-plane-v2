@@ -52,6 +52,15 @@ _DEFAULT_CONFIG = {
             "max_workers": 3,
             "deadline_seconds": 12,
         },
+        "graph": {
+            "enabled": True,
+            "max_hops": 2,
+            "max_nodes": 24,
+            "max_edges": 40,
+            "max_context_chars": 3000,
+            "min_edge_confidence": 0.8,
+            "build_on_demand": True,
+        },
     },
     "execution": {
         "prefer_superpowers_for_full": True,
@@ -102,6 +111,9 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
         migrated["version"] = CURRENT_CONFIG_VERSION
         return migrated
     if version == CURRENT_CONFIG_VERSION:
+        workspace = raw.get("workspace")
+        if isinstance(workspace, dict) and "graph" not in workspace:
+            workspace["graph"] = copy.deepcopy(_DEFAULT_CONFIG["workspace"]["graph"])
         return raw
     if isinstance(version, int) and version > CURRENT_CONFIG_VERSION:
         raise ValueError(f"config version {version} is newer than supported version {CURRENT_CONFIG_VERSION}")
@@ -232,6 +244,29 @@ def validate_config(data: dict[str, Any]) -> None:
     deadline = retrieval.get("deadline_seconds", 12)
     if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or float(deadline) <= 0:
         raise ValueError("workspace.retrieval.deadline_seconds must be a positive number")
+    graph = data["workspace"].get("graph")
+    if not isinstance(graph, dict):
+        raise ValueError("workspace.graph must be an object")
+    if not isinstance(graph.get("enabled"), bool):
+        raise ValueError("workspace.graph.enabled must be boolean")
+    if not isinstance(graph.get("build_on_demand"), bool):
+        raise ValueError("workspace.graph.build_on_demand must be boolean")
+    graph_bounds = (
+        ("max_hops", 1, 3),
+        ("max_nodes", 1, 100),
+        ("max_edges", 1, 200),
+        ("max_context_chars", 256, 12000),
+    )
+    for key, minimum, maximum in graph_bounds:
+        value = graph.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError(
+                f"workspace.graph.{key} must be an integer between {minimum} and {maximum}"
+            )
+    _fraction(
+        graph.get("min_edge_confidence"),
+        "workspace.graph.min_edge_confidence",
+    )
     orchestration = data["execution"].get("orchestration_budget")
     if not isinstance(orchestration, dict):
         raise ValueError("missing required section: execution.orchestration_budget")
