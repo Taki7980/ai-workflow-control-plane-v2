@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "measured_from": {
+    "commit": "25b23b4027554dd0b64bd3f2adb816fb54cc3357",
+    "workflow_run": 34424455583,
+    "python": "3.14.7",
+    "runner": "ubuntu-24.04"
+  },
+  "minimum": {
+    "lane_accuracy": 0.8125,
+    "intent_accuracy": 0.75,
+    "evidence_state_accuracy": 0.75,
+    "abstention_accuracy": 0.6667
+  },
+  "maximum_regression": {
+    "mean_relevant_item_density": {
+      "baseline": 0.3107,
+      "relative_tolerance": 0.10,
+      "direction": "higher"
+    },
+    "mean_pattern_yield_per_1k_tokens": {
+      "baseline": 2.6275,
+      "relative_tolerance": 0.10,
+      "direction": "higher"
+    },
+    "mean_estimated_context_tokens": {
+      "baseline": 376.62,
+      "relative_tolerance": 0.20,
+      "direction": "lower"
+    }
+  },
+  "by_query_type": {}
+}
