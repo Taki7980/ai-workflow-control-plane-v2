@@ -237,6 +237,23 @@ ai-workflow benchmark \
 
 The bundled file demonstrates the schema against a historical frozen commit, so its snapshot may intentionally report a mismatch on newer checkouts. For publishable/reproducible runs, point cases at pinned target clones/worktrees and add `--require-frozen-snapshot`. The legacy corpus remains backward-compatible for fast regression checks.
 
+For multi-repository evaluations, set `repository_path` on each case. The benchmark runner resolves that repository as the case root and forces `workspace.max_roots=1` with legacy workspace roots cleared for the run, preventing sibling repositories from leaking into the measured context.
+
+Compare provider families on exactly the same cases with:
+
+```bash
+ai-workflow benchmark-ablate \
+  --tasks benchmarks/research-protocol-example.json \
+  --profile adaptive \
+  --profile base_only \
+  --profile base_semantic \
+  --profile base_structural
+```
+
+The ablation profiles intentionally measure provider-family contribution: `base_only` disables semantic, external, and CRG retrieval; `base_semantic` keeps the configured semantic provider but disables CRG/external retrievers; `base_structural` keeps CRG but disables semantic/external retrievers; `adaptive` preserves normal policy.
+
+Research cases may also provide `trajectory_events` inline or a benchmark-root-relative `trajectory_file`. Events use `kind: seed|explored|utilized`, `file`, and `step`. Reports then separate exploration precision/recall from utilization precision/recall, duplicate exploration, seed gold recall, and post-seed exploration.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -257,6 +274,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-adaptive-retrieval.md`
 - `docs/research/2026-09-07-v22-research.md`
 - `docs/research/2026-09-11-agent-retrieval-bench-alignment.md`
+- `docs/research/2026-09-11-retrieval-eval-stage2.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
