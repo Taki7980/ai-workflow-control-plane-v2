@@ -460,7 +460,12 @@ def learning_status(root: Path, config: dict[str, Any]) -> dict[str, Any]:
         "kill_switch_env": KILL_SWITCH_ENV,
         "baseline_arm": BASELINE_ARM,
         "safe_exploration_arms": list(SAFE_EXPLORATION_ARMS),
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "decisions": len(rows),
+        "decisions_with_current_features": sum(
+            row.get("feature_schema_version") == FEATURE_SCHEMA_VERSION
+            for row in rows
+        ),
         "observations": sum(isinstance(row.get("observation"), dict) for row in rows),
         "verified_outcomes": sum(isinstance(row.get("outcome"), dict) for row in rows),
     }
