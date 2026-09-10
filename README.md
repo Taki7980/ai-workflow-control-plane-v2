@@ -334,6 +334,82 @@ ai-workflow benchmark-policy-advisor \
 
 A candidate algorithm is recommended only when its paired bootstrap lower confidence bound clears the configured safety margin versus `adaptive_math`. High/critical-risk cases are excluded from learning and remain baseline-locked. The advisor does not perform online bandit actions and explicitly refuses off-policy claims until randomized logging or action propensities exist.
 
+Stage 5 adds an opt-in production learning foundation with logged behavior propensities and low-risk-only bounded exploration. It is disabled by default:
+
+```json
+{
+  "context": {
+    "learning": {
+      "mode": "off",
+      "kill_switch": false,
+      "exploration_probability": 0.05,
+      "allowed_risks": ["low"],
+      "eligible_arms": [
+        "adaptive_math",
+        "source_rank",
+        "bm25_rank",
+        "rrf_only",
+        "rrf_mmr_050",
+        "rrf_mmr_075",
+        "rrf_mmr_090"
+      ]
+    }
+  }
+}
+```
+
+Modes:
+
+- `off`: no learning decision or learning record is emitted;
+- `observe`: always use `adaptive_math`, but emit decision/observation records;
+- `explore`: epsilon-style exploration across ranking-only arms, and only for low-risk tasks.
+
+Medium/high-risk tasks always use `adaptive_math`. Safety-affecting Stage 3 profiles such as `selector_off`, `fixed_budget`, and `no_early_stop` cannot be configured as online exploration arms.
+
+A process-wide emergency kill switch is always available:
+
+```bash
+AI_WORKFLOW_LEARNING_KILL_SWITCH=1 ai-workflow context "..."
+```
+
+Learning status:
+
+```bash
+ai-workflow learning status
+```
+
+Each active learning decision records the chosen arm, the full behavior-policy propensity vector, task fingerprint, lane/risk/intent, and a unique immutable decision ID before retrieval executes. If an exploratory action cannot be logged, AI Workflow fails closed to `adaptive_math`.
+
+Retrieval observations are stored separately after execution. Verified outcomes may arrive later and are linked by decision ID:
+
+```bash
+ai-workflow learning record-outcome <decision-id> \
+  --success \
+  --source "verification-suite" \
+  --reward 1.0 \
+  --realized-cost 0.2
+```
+
+The outcome record preserves the original decision timestamp and verification delay.
+
+Propensity-aware offline evaluation:
+
+```bash
+ai-workflow learning evaluate \
+  --arm bm25_rank \
+  --arm rrf_only \
+  --confidence 0.95 \
+  --resamples 5000 \
+  --minimum-effective-sample-size 10 \
+  --minimum-direct-exposures 5 \
+  --safety-margin 0.0 \
+  --max-realized-cost 1.0
+```
+
+The evaluator reports IPS and self-normalized importance weighting (SNIPS), overlap/coverage, effective sample size, maximum importance weight, realized costs, and a paired bootstrap reward/cost delta versus the `adaptive_math` baseline. A candidate is promotion-eligible only when support is sufficient, its reward lower bound clears the configured margin, and optional realized-cost constraints are satisfied.
+
+Promotion remains advisory: `automatic_runtime_promotion` is always false in Stage 5. The evaluator explicitly reports that its bootstrap interval is not the exact Efron-Stein confidence bound from the confident-OPE paper.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -357,6 +433,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-11-retrieval-eval-stage2.md`
 - `docs/research/2026-09-11-retrieval-eval-stage3.md`
 - `docs/research/2026-09-11-retrieval-eval-stage4.md`
+- `docs/research/2026-09-11-retrieval-learning-stage5.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
