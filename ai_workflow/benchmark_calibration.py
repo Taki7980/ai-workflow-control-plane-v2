@@ -29,7 +29,10 @@ def _label(row: dict[str, Any]) -> int | None:
 
 
 def _case_key(row: dict[str, Any], index: int) -> str:
-    snapshot = row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
+    snapshot_value = row.get("snapshot")
+    snapshot: dict[str, Any] = (
+        snapshot_value if isinstance(snapshot_value, dict) else {}
+    )
     return "|".join(
         (
             str(index),
