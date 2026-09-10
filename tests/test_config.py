@@ -71,3 +71,17 @@ class ConfigValidationTests(unittest.TestCase):
                 config["workspace"]["graph"][key] = value
                 with self.assertRaises(ValueError):
                     validate_config(config)
+
+
+    def test_stage4_graph_defaults_are_backfilled_for_existing_v2_config(self):
+        source = Path(__file__).parents[1] / DEFAULT_RELATIVE
+        data = json.loads(source.read_text(encoding="utf-8"))
+        data["workspace"].pop("graph", None)
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.write_config(root, data)
+            loaded = load_config(root)
+
+        self.assertEqual(loaded["workspace"]["graph"]["max_hops"], 2)
+        self.assertTrue(loaded["workspace"]["graph"]["enabled"])
