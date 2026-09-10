@@ -26,7 +26,7 @@ from .budget import budget_for
 from .classifier import classify
 from .compress import compress_text
 from .config import estimate_tokens, find_project_root, load_config
-from .contextual_features import FEATURE_FIELDS
+from .contextual_features import DEFAULT_POLICY_FIELDS, FEATURE_FIELDS
 from .contextual_policy import build_contextual_policy_report
 from .context_broker import detect_changed_files
 from .doctor import run as doctor_run
@@ -564,7 +564,7 @@ def cmd_learning_contextual_policy(args):
     root = _root(args)
     result = build_contextual_policy_report(
         root,
-        context_fields=args.field or (),
+        context_fields=args.field or DEFAULT_POLICY_FIELDS,
         development_fraction=args.development_fraction,
         prior_weight=args.prior_weight,
         folds=args.folds,
