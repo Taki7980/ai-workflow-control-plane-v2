@@ -14,8 +14,12 @@ class BootstrapTests(unittest.TestCase):
             root = Path(td)
             result = bootstrap(root, "Demo")
             self.assertEqual(result["status"], "bootstrapped")
-            self.assertTrue((root / "AGENTS.md").exists())
+            self.assertFalse((root / "AGENTS.md").exists())
+            self.assertFalse((root / ".ai").exists())
+            self.assertTrue((root / "ai-workspace/agents/AGENTS.md").exists())
+            self.assertTrue((root / "ai-workspace/state/PROJECT").exists())
             self.assertTrue((root / "ai-workspace/config/control-plane.json").exists())
+            self.assertTrue((root / "ai-workspace/config/repositories.json").exists())
             self.assertEqual(load_config(root)["version"], 2)
             with self.assertRaises(FileExistsError):
                 bootstrap(root, "DemoAgain")
