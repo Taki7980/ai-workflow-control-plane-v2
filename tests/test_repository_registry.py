@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ai_workflow.repository_registry import (
     discover_repositories,
+    load_registry,
     registry_payload,
     remote_identity,
     workspace_registry_fingerprint,
@@ -75,6 +76,31 @@ class RepositoryRegistryTests(unittest.TestCase):
             self.assertEqual(roots, [root.resolve(), backend.resolve()])
             self.assertNotIn(frontend.resolve(), roots)
 
+    def test_duplicate_repository_identity_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "ai-workspace/config/repositories.json"
+            registry.parent.mkdir(parents=True)
+            duplicate = {
+                "name": "api",
+                "relative_path": "api",
+                "remote_identity": "github.com/acme/api",
+                "included": True,
+                "reason": "manual",
+            }
+            registry.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "review_required": True,
+                        "repositories": [duplicate, {**duplicate, "included": False}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(load_registry(root), [])
+
     def test_real_git_worktree_gitdir_file_is_supported_when_git_exists(self):
         if not shutil.which("git"):
             self.skipTest("git not installed")
@@ -85,6 +111,11 @@ class RepositoryRegistryTests(unittest.TestCase):
             subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
             subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "https://github.com/acme/repo.git"],
+                cwd=repo,
+                check=True,
+            )
             (repo / "file.txt").write_text("ok\n", encoding="utf-8")
             subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -96,9 +127,20 @@ class RepositoryRegistryTests(unittest.TestCase):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            expected_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
 
-            found = discover_repositories(root, max_depth=1)
-            self.assertIn("repo-wt", {repo.relative_path for repo in found})
+            found = {item.relative_path: item for item in discover_repositories(root, max_depth=1)}
+            self.assertIn("repo-wt", found)
+            worktree_spec = found["repo-wt"]
+            self.assertEqual(worktree_spec.remote_identity, "github.com/acme/repo")
+            self.assertEqual(worktree_spec.head_ref, "refs/heads/worktree-test")
+            self.assertEqual(worktree_spec.head_sha, expected_head)
 
 
 if __name__ == "__main__":
