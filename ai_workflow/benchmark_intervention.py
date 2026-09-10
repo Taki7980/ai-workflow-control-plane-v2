@@ -5,8 +5,9 @@ import json
 import statistics
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .benchmark import run_benchmark
 from .benchmark_protocol import normalize_file_path, resolve_case_root, snapshot_status
@@ -60,7 +61,7 @@ def deterministic_non_gold_sample(
     } - gold
 
     def rank(path: str) -> bytes:
-        payload = f"{key}\0{path}".encode("utf-8")
+        payload = f"{key}\0{path}".encode()
         return hashlib.sha256(payload).digest()
 
     return sorted(candidates, key=lambda path: (rank(path), path))[:limit]
