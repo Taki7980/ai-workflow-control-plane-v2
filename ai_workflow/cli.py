@@ -389,7 +389,17 @@ def cmd_verify(args):
 
 def cmd_benchmark(args):
     root = _root(args)
-    result = run_benchmark(root, load_config(root), load_tasks(Path(args.tasks)))
+    tasks = load_tasks(
+        Path(args.tasks),
+        require_research_protocol=bool(args.research_protocol),
+    )
+    result = run_benchmark(
+        root,
+        load_config(root),
+        tasks,
+        require_frozen_snapshot=bool(args.require_frozen_snapshot),
+        require_research_protocol=bool(args.research_protocol),
+    )
     if args.output:
         atomic_write_json(Path(args.output), result)
     _json(result)
@@ -527,6 +537,19 @@ def build_parser():
     q = sp.add_parser("benchmark")
     q.add_argument("--tasks", required=True)
     q.add_argument("--output")
+    q.add_argument(
+        "--research-protocol",
+        action="store_true",
+        help=(
+            "require Agent Retrieval Bench-style task types, file-level gold "
+            "labels, frozen base commits, and selective-control metadata"
+        ),
+    )
+    q.add_argument(
+        "--require-frozen-snapshot",
+        action="store_true",
+        help="fail if any declared benchmark base_commit differs from the local checkout",
+    )
     q.set_defaults(func=cmd_benchmark)
 
     q = sp.add_parser("stats")
