@@ -1,65 +1,111 @@
 name: Tests
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  compatibility:
+    name: compatibility (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
           - os: windows-latest
             python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.14"
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Run unit tests
-      run: python -m unittest discover -s tests -v
-    - name: Build index
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
-      run: python -m ai_workflow index
-    - name: Strict doctor gate
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
-      run: python -m ai_workflow doctor --strict
-    - name: Benchmark smoke gate
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
-      shell: bash
-      run: |
-        python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json --output benchmark-result.json > /dev/null
-        python - <<'PY'
-        import json
-        from pathlib import Path
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
 
-        data = json.loads(Path('benchmark-result.json').read_text())
-        summary = data['summary']
-        assert summary['cases'] >= 32, summary
-        assert len(data.get('by_query_type', {})) >= 7, data.get('by_query_type')
-        assert summary['lane_accuracy'] is not None
-        assert summary['intent_accuracy'] is not None
-        assert summary['evidence_state_accuracy'] is not None
-        assert summary['abstention_accuracy'] is not None
-        assert summary['mean_relevant_item_density'] is not None
-        assert summary['mean_pattern_yield_per_1k_tokens'] is not None
-        assert summary['mean_estimated_context_tokens'] is not None
-        assert summary['mean_budget_utilization'] is not None
-        assert summary['mean_elapsed_ms'] is not None
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install quality tools
+        run: python -m pip install -e ".[dev]"
+      - name: Compile package
+        run: python -m compileall -q ai_workflow
+      - name: Ruff focused quality gate
+        run: ruff check ai_workflow/retrieval_contracts.py ai_workflow/retrieval_scheduler.py ai_workflow/path_policy.py ai_workflow/typed_config.py ai_workflow/benchmark_regression.py scripts/check_benchmark_regression.py
+      - name: Mypy typed-boundary gate
+        run: mypy ai_workflow/retrieval_contracts.py ai_workflow/path_policy.py ai_workflow/typed_config.py ai_workflow/benchmark_regression.py
 
-        print('BENCHMARK_SUMMARY=' + json.dumps({
-            'lane_accuracy': summary['lane_accuracy'],
-            'intent_accuracy': summary['intent_accuracy'],
-            'evidence_state_accuracy': summary['evidence_state_accuracy'],
-            'abstention_accuracy': summary['abstention_accuracy'],
-            'mean_estimated_context_tokens': summary['mean_estimated_context_tokens'],
-            'mean_budget_utilization': summary['mean_budget_utilization'],
-            'mean_relevant_item_density': summary['mean_relevant_item_density'],
-            'mean_pattern_yield_per_1k_tokens': summary['mean_pattern_yield_per_1k_tokens'],
-            'sufficiency_rate': summary['sufficiency_rate'],
-            'fallback_rate': summary['fallback_rate'],
-            'mean_elapsed_ms': summary['mean_elapsed_ms'],
-        }, sort_keys=True))
-        PY
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade build pipx uv
+          python -m build
+      - name: Clean wheel smoke
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-smoke"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/wheel-smoke/bin/ai-workflow" --version
+      - name: pipx smoke
+        shell: bash
+        run: |
+          export PIPX_HOME="$RUNNER_TEMP/pipx-home"
+          export PIPX_BIN_DIR="$RUNNER_TEMP/pipx-bin"
+          pipx install dist/*.whl
+          "$PIPX_BIN_DIR/ai-workflow" --version
+      - name: uv tool smoke
+        shell: bash
+        run: |
+          export UV_TOOL_DIR="$RUNNER_TEMP/uv-tools"
+          export UV_TOOL_BIN_DIR="$RUNNER_TEMP/uv-bin"
+          uv tool install dist/*.whl
+          "$UV_TOOL_BIN_DIR/ai-workflow" --version
+
+  benchmark-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build index and validate installation contract
+        run: |
+          python -m ai_workflow index
+          python -m ai_workflow doctor --strict
+      - name: Run measured benchmark regression gate
+        shell: bash
+        run: |
+          python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json --output benchmark-result.json > /dev/null
+          python scripts/check_benchmark_regression.py benchmarks/baseline.json benchmark-result.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("benchmark-result.json").read_text())
+          print("BENCHMARK_SUMMARY=" + json.dumps(data["summary"], sort_keys=True))
+          print("BENCHMARK_BY_QUERY_TYPE=" + json.dumps(data["by_query_type"], sort_keys=True))
+          PY
