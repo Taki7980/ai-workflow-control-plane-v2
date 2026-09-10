@@ -10,6 +10,9 @@ from .adaptive_broker import gather_detailed_async
 from .budget import ContextBudget, truncate
 from .models import ContextItem, RouteDecision
 from .providers import ProviderStatus
+from .workspace_graph import load_workspace_graph
+from .workspace_graph_builder import build_workspace_graph, graph_status
+from .workspace_graph_retrieval import retrieve_workspace_graph
 from .workspace_budget import allocate_repository_budgets
 from .workspace_selector import (
     RepositoryCandidate,
@@ -90,6 +93,17 @@ def _cap_workspace_items(
         )
         used += len(text)
     return tuple(out)
+
+
+def _graph_scoped_config(config: dict, parent_context_chars: int) -> dict:
+    scoped = dict(config)
+    workspace = dict(scoped.get("workspace") or {})
+    graph = dict(workspace.get("graph") or {})
+    configured = int(graph.get("max_context_chars", 3000))
+    graph["max_context_chars"] = min(max(0, configured), parent_context_chars)
+    workspace["graph"] = graph
+    scoped["workspace"] = workspace
+    return scoped
 
 
 async def gather_workspace_detailed_async(
@@ -248,8 +262,6 @@ async def gather_workspace_detailed_async(
                 )
             )
 
-    final_items = _cap_workspace_items(entries, budget.context_chars)
-    final_used = sum(len(item.text) for item in final_items)
     aggregate = aggregate_workspace_fingerprint(workspace_root, config)
     selected_ids = {row.candidate.repository_id for row in selected}
     skipped = [
@@ -266,6 +278,82 @@ async def gather_workspace_detailed_async(
             for path in row.candidate.changed_files
         }
     )
+
+    graph_cfg = ((config.get("workspace") or {}).get("graph") or {})
+    graph_enabled = bool(graph_cfg.get("enabled", True))
+    graph_diagnostics: dict[str, Any] = {
+        "enabled": graph_enabled,
+        "status": "disabled" if not graph_enabled else "missing",
+    }
+    if graph_enabled and selected_ids:
+        try:
+            graph = None
+            graph_state: dict[str, Any] = {}
+            build_on_demand = bool(graph_cfg.get("build_on_demand", True))
+            read_only_lane = getattr(decision.lane, "value", str(decision.lane)) == "answer"
+            if build_on_demand and not read_only_lane:
+                graph, graph_state = build_workspace_graph(
+                    workspace_root,
+                    config,
+                    force=False,
+                )
+            else:
+                status = graph_status(workspace_root, config)
+                if status.get("reusable"):
+                    graph, graph_state = load_workspace_graph(workspace_root)
+                else:
+                    graph_diagnostics = {
+                        "enabled": True,
+                        "status": str(status.get("status", "missing")),
+                        "reusable": False,
+                    }
+
+            if graph is not None:
+                scoped_graph_config = _graph_scoped_config(
+                    config,
+                    budget.context_chars,
+                )
+                stage3_seed_items = tuple(row[-1] for row in entries)
+                graph_result = retrieve_workspace_graph(
+                    graph,
+                    query,
+                    selected_ids,
+                    symbol=symbol,
+                    endpoint=endpoint,
+                    changed_files=tuple(changed_detected),
+                    seed_items=stage3_seed_items,
+                    graph_fingerprint=str(
+                        graph_state.get("graph_fingerprint", "")
+                    ),
+                    config=scoped_graph_config,
+                )
+                for item in graph_result.items:
+                    graph_distance = int(item.metadata.get("graph_distance", 0))
+                    entries.append(
+                        (
+                            1 + graph_distance,
+                            -float(item.score),
+                            0,
+                            str(item.metadata.get("repository_id", "")),
+                            item.source,
+                            _source_path(item),
+                            item.dedupe_key,
+                            item,
+                        )
+                    )
+                graph_diagnostics = {
+                    "status": "ok",
+                    **graph_result.diagnostics,
+                }
+        except Exception as exc:  # noqa: BLE001 - graph acceleration is optional
+            graph_diagnostics = {
+                "enabled": True,
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    final_items = _cap_workspace_items(entries, budget.context_chars)
+    final_used = sum(len(item.text) for item in final_items)
     diagnostics: dict[str, Any] = {
         "workspace_fingerprint": aggregate.get("fingerprint", ""),
         "repository_count": len(candidates),
@@ -298,6 +386,7 @@ async def gather_workspace_detailed_async(
             "deadline_exceeded": deadline_exceeded,
         },
         "primary_retrieval": primary_retrieval,
+        "workspace_graph": graph_diagnostics,
     }
     return WorkspaceRetrievalResult(final_items, diagnostics)
 
