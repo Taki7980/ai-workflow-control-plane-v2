@@ -1,0 +1,36 @@
+name: Diagnose CRG Lightweight
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - name: Build index
+        run: python -m ai_workflow index
+      - name: Print CRG lightweight selection
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from ai_workflow.context_broker import lightweight
+
+          root = Path('.').resolve()
+          config = json.loads((root / 'ai-workspace/config/control-plane.json').read_text())
+          query = 'Where do we decide whether CRG should be attempted for a large repository?'
+          limit = int(config['context'].get('max_results_per_source', 6))
+          min_conf = float(config['memory'].get('minimum_confidence', 0.55))
+          items = lightweight(root, query, None, None, limit, min_conf)
+          print('CRG_LIMIT=' + str(limit))
+          for item in items:
+              print('CRG_ITEM=' + json.dumps({'score': item.score, 'source': item.source, 'text': item.text}, sort_keys=True))
+          PY
