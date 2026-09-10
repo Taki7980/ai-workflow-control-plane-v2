@@ -38,6 +38,18 @@ class RepositoryRegistryTests(unittest.TestCase):
         )
         return repo
 
+    def _real_git_repo(self, parent: Path, name: str, remote: str, content: str) -> Path:
+        repo = parent / name
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        subprocess.run(["git", "remote", "add", "origin", remote], cwd=repo, check=True)
+        (repo / "file.txt").write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return repo
+
     def test_remote_identity_removes_credentials_normalizes_host_and_preserves_path_case(self):
         self.assertEqual(
             remote_identity("https://token@example.com/Taki7980/Repo.git"),
@@ -204,22 +216,15 @@ class RepositoryRegistryTests(unittest.TestCase):
                     process.wait(timeout=5)
 
     def test_legacy_root_order_does_not_change_aggregate_fingerprint_when_identity_ties(self):
+        if not shutil.which("git"):
+            self.skipTest("git not installed")
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             workspace = base / "workspace"
             workspace.mkdir()
-            first = self._git_repo(
-                base / "one",
-                "api",
-                "https://example.com/Team/Repo.git",
-                head="a" * 40,
-            )
-            second = self._git_repo(
-                base / "two",
-                "api",
-                "https://example.com/Team/Repo.git",
-                head="b" * 40,
-            )
+            remote = "https://example.com/Team/Repo.git"
+            first = self._real_git_repo(base / "one", "api", remote, "one\n")
+            second = self._real_git_repo(base / "two", "api", remote, "two\n")
             forward = {
                 "workspace": {
                     "roots": [str(first), str(second)],
@@ -237,6 +242,10 @@ class RepositoryRegistryTests(unittest.TestCase):
 
             forward_state = aggregate_workspace_fingerprint(workspace, forward)
             reverse_state = aggregate_workspace_fingerprint(workspace, reverse)
+            self.assertNotEqual(
+                forward_state["repositories"][1]["fingerprint"],
+                forward_state["repositories"][2]["fingerprint"],
+            )
             self.assertEqual(forward_state["fingerprint"], reverse_state["fingerprint"])
 
     def test_real_git_worktree_gitdir_file_is_supported_when_git_exists(self):
