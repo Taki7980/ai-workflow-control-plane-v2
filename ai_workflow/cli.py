@@ -17,6 +17,9 @@ from .benchmark_intervention import (
     build_seed_intervention_manifest,
     run_seed_interventions,
 )
+from .benchmark_calibration import calibrate_sufficiency_threshold
+from .benchmark_policy_advisor import build_safe_policy_advisor
+from .benchmark_statistics import analyze_seed_report
 from .bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
 from .budget import budget_for
 from .classifier import classify
@@ -485,6 +488,55 @@ def cmd_benchmark_intervene(args):
     _json(result)
 
 
+def _load_json_object(path: str) -> dict:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("input report must be a JSON object")
+    return data
+
+
+def cmd_benchmark_statistics(args):
+    result = analyze_seed_report(
+        _load_json_object(args.input),
+        confidence=args.confidence,
+        resamples=args.resamples,
+        seed=args.seed,
+        stratify=args.stratify or [],
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
+def cmd_benchmark_calibrate(args):
+    result = calibrate_sufficiency_threshold(
+        _load_json_object(args.input),
+        calibration_fraction=args.calibration_fraction,
+        false_accept_cost=args.false_accept_cost,
+        false_reject_cost=args.false_reject_cost,
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
+def cmd_benchmark_policy_advisor(args):
+    result = build_safe_policy_advisor(
+        _load_json_object(args.input),
+        context_field=args.context_field,
+        minimum_samples=args.minimum_samples,
+        confidence=args.confidence,
+        resamples=args.resamples,
+        seed=args.seed,
+        safety_margin=args.safety_margin,
+        token_penalty=args.token_penalty,
+        latency_penalty=args.latency_penalty,
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
 def cmd_stats(args):
     root = _root(args)
     result = summarize_traces(root, args.limit)
@@ -708,6 +760,50 @@ def build_parser():
         help="environment variable name explicitly exposed to the runner",
     )
     q.set_defaults(func=cmd_benchmark_intervene)
+
+    q = sp.add_parser(
+        "benchmark-statistics",
+        help="add paired bootstrap confidence intervals to seed interventions",
+    )
+    q.add_argument("--input", required=True)
+    q.add_argument("--output")
+    q.add_argument("--confidence", type=float, default=0.95)
+    q.add_argument("--resamples", type=int, default=5000)
+    q.add_argument("--seed", type=int, default=20260911)
+    q.add_argument(
+        "--stratify",
+        action="append",
+        default=[],
+        help="result field to analyze separately; repeat as needed",
+    )
+    q.set_defaults(func=cmd_benchmark_statistics)
+
+    q = sp.add_parser(
+        "benchmark-calibrate",
+        help="calibrate an advisory sufficiency threshold on a held-out split",
+    )
+    q.add_argument("--input", required=True)
+    q.add_argument("--output")
+    q.add_argument("--calibration-fraction", type=float, default=0.7)
+    q.add_argument("--false-accept-cost", type=float, default=5.0)
+    q.add_argument("--false-reject-cost", type=float, default=1.0)
+    q.set_defaults(func=cmd_benchmark_calibrate)
+
+    q = sp.add_parser(
+        "benchmark-policy-advisor",
+        help="derive high-confidence advisory retrieval policies from ablations",
+    )
+    q.add_argument("--input", required=True)
+    q.add_argument("--output")
+    q.add_argument("--context-field", default="task_type")
+    q.add_argument("--minimum-samples", type=int, default=10)
+    q.add_argument("--confidence", type=float, default=0.95)
+    q.add_argument("--resamples", type=int, default=5000)
+    q.add_argument("--seed", type=int, default=20260911)
+    q.add_argument("--safety-margin", type=float, default=0.0)
+    q.add_argument("--token-penalty", type=float, default=0.05)
+    q.add_argument("--latency-penalty", type=float, default=0.01)
+    q.set_defaults(func=cmd_benchmark_policy_advisor)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
