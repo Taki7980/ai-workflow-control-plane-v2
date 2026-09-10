@@ -46,7 +46,11 @@ def _safe_target_action(row: dict[str, Any], target_arm: str) -> str:
     if not isinstance(propensities, dict):
         return BASELINE_ARM
     target_probability = _number(propensities.get(target_arm))
-    return target_arm if target_probability is not None and target_probability > 0 else BASELINE_ARM
+    return (
+        target_arm
+        if target_probability is not None and target_probability > 0
+        else BASELINE_ARM
+    )
 
 
 def _estimate(
