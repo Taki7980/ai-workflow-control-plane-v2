@@ -119,14 +119,31 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Build index and validate installation contract
+      - name: Prepare frozen benchmark fixture
+        shell: bash
         run: |
-          python -m ai_workflow index
-          python -m ai_workflow doctor --strict
+          BASELINE_COMMIT="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("benchmarks/baseline.json").read_text())
+          print(data["measured_from"]["commit"])
+          PY
+          )"
+          test -n "$BASELINE_COMMIT"
+          git fetch --no-tags --depth=1 origin "$BASELINE_COMMIT"
+          git worktree add --detach "$RUNNER_TEMP/benchmark-fixture" "$BASELINE_COMMIT"
+          echo "BASELINE_COMMIT=$BASELINE_COMMIT" >> "$GITHUB_ENV"
+          echo "BENCHMARK_FIXTURE=$RUNNER_TEMP/benchmark-fixture" >> "$GITHUB_ENV"
+      - name: Build frozen fixture index and validate installation contract
+        run: |
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" index
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" doctor --strict
       - name: Run measured benchmark regression gate
         shell: bash
         run: |
-          python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json --output benchmark-result.json > /dev/null
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark \
+            --tasks "$BENCHMARK_FIXTURE/benchmarks/sample-tasks.json" \
+            --output benchmark-result.json > /dev/null
           python scripts/check_benchmark_regression.py benchmarks/baseline.json benchmark-result.json
           python - <<'PY'
           import json
