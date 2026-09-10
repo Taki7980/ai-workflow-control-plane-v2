@@ -87,7 +87,9 @@ def run_ablation_suite(
     require_research_protocol: bool = False,
 ) -> dict[str, Any]:
     requested = list(profiles or PROFILE_ORDER)
-    normalized = list(dict.fromkeys(str(profile).strip().lower() for profile in requested))
+    normalized = list(
+        dict.fromkeys(str(profile).strip().lower() for profile in requested)
+    )
     if not normalized:
         raise ValueError("at least one ablation profile is required")
     for profile in normalized:
