@@ -287,11 +287,11 @@ async def gather_workspace_detailed_async(
             "disabled"
             if not graph_enabled
             else "single_repository"
-            if len(selected_ids) <= 1
+            if len(candidates) <= 1
             else "missing"
         ),
     }
-    if graph_enabled and len(selected_ids) > 1:
+    if graph_enabled and len(candidates) > 1 and selected_ids:
         try:
             graph = None
             graph_state: dict[str, Any] = {}
