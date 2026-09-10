@@ -35,7 +35,7 @@ class ControlPlaneConfig(Mapping[str, Any]):
     _data: Mapping[str, Any]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ControlPlaneConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> ControlPlaneConfig:
         if not isinstance(data, Mapping):
             raise TypeError("control-plane configuration must be a mapping")
         return cls(_freeze(dict(data)))
