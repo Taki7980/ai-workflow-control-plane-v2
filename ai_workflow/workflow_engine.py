@@ -14,6 +14,11 @@ from .orchestration import build_orchestration_contract
 from .providers import ProviderStatus
 from .retrieval_contracts import ProviderResult
 from .retrieval_policy import classify_retrieval_intent, evaluate_sufficiency
+from .retrieval_learning import (
+    apply_learning_arm,
+    prepare_learning_decision,
+    write_learning_observation,
+)
 from .retrieval_scheduler import BoundedRetrievalScheduler, ScheduledCall, SchedulerOutcome
 from .retriever_plugins import configured_retrievers, run_retriever_result as default_external_provider
 from .semantic import semantic_result as default_semantic_provider
@@ -224,6 +229,17 @@ class WorkflowEngine:
     ) -> tuple[list[ContextItem], dict]:
         changed = changed_files or []
         plan = classify_retrieval_intent(query, decision, symbol=symbol, endpoint=endpoint)
+        learning_decision, learning_path = prepare_learning_decision(
+            root,
+            query,
+            decision,
+            plan.intent.value,
+            config,
+        )
+        effective_config = apply_learning_arm(
+            config,
+            learning_decision.chosen_arm,
+        )
         trace = RetrievalTrace(query, decision.lane.value, decision.risk.value, plan.intent.value, budget_chars=budget.context_chars)
         max_concurrency, global_deadline = _scheduler_settings(config)
         scheduler = BoundedRetrievalScheduler(max_concurrency)
@@ -270,7 +286,7 @@ class WorkflowEngine:
         specialist_calls: list[ScheduledCall] = []
         specialist_kinds: list[str] = []
 
-        algorithm_policy = _algorithm_policy(config)
+        algorithm_policy = _algorithm_policy(effective_config)
         early_gate_open = (
             not suff.sufficient
             or algorithm_policy["disable_early_sufficiency_gate"]
@@ -340,7 +356,7 @@ class WorkflowEngine:
             base_items,
             specialist_items,
             limit,
-            config,
+            effective_config,
         )
         suff = evaluate_sufficiency(query, candidates, structural_required=plan.use_structural, threshold=threshold)
         adaptive_chars = _adaptive_char_limit(budget, suff.score, config)
@@ -388,6 +404,15 @@ class WorkflowEngine:
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
             "algorithm_policy": algorithm_policy,
+            "learning": {
+                **learning_decision.to_dict(),
+                "decision_logged": learning_path is not None,
+                "decision_path": (
+                    Path(learning_path).relative_to(root.resolve()).as_posix()
+                    if learning_path is not None
+                    else None
+                ),
+            },
             "workspace_roots": [str(path) for path in roots],
             "workspace_state": snapshot,
             "evidence_state": state,
@@ -411,6 +436,26 @@ class WorkflowEngine:
         diagnostics["orchestration"] = build_orchestration_contract(
             decision, diagnostics, changed, len(roots), providers, config
         )
+        if learning_path is not None:
+            try:
+                observation_path = write_learning_observation(
+                    root,
+                    learning_decision.decision_id,
+                    elapsed_ms=elapsed_ms,
+                    used_chars=trace.used_chars,
+                    fallback_count=len(trace.fallbacks),
+                    sufficiency_score=final_suff.score,
+                    evidence_state=state,
+                )
+                diagnostics["learning"]["observation_logged"] = True
+                diagnostics["learning"]["observation_path"] = (
+                    Path(observation_path)
+                    .relative_to(root.resolve())
+                    .as_posix()
+                )
+            except OSError:
+                diagnostics["learning"]["observation_logged"] = False
+                diagnostics["learning"]["observation_path"] = None
         if write_telemetry and trace_enabled(config, decision.lane.value):
             diagnostics["trace"] = write_trace(root, trace)
         return selected, diagnostics
