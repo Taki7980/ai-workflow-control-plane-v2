@@ -19,6 +19,7 @@ from .indexer import build_indexes, incremental_indexes
 from .io_utils import atomic_write_json, atomic_write_text
 from .memory import add_memory, export_memory_jsonl, list_memories, prune_stale, search_memory
 from .providers import detect, execution_provider, model_tier
+from .repository_registry import refresh_registry, registry_summary, set_repository_included
 from .telemetry import policy_recommendations, summarize_traces
 from .verify import verify
 
@@ -32,7 +33,13 @@ def _json(data):
 
 
 def cmd_setup(args):
-    index_mode = "none" if getattr(args, "no_index", False) else "full" if getattr(args, "full_index", False) else "auto"
+    index_mode = (
+        "none"
+        if getattr(args, "no_index", False)
+        else "full"
+        if getattr(args, "full_index", False)
+        else "auto"
+    )
     result = setup(
         _root(args),
         args.project_name,
@@ -75,15 +82,24 @@ def cmd_init(args):
         load_config(root)
     except FileNotFoundError as exc:
         raise SystemExit(
-            "Copy the workflow template into the project or run `ai-workflow bootstrap --project-name NAME`; config and AGENTS.md are required."
+            "Copy the workflow template into the project or run `ai-workflow bootstrap --project-name NAME`; workspace config and agent rules are required."
         ) from exc
     agents_path = agents if agents.exists() else legacy_agents
     if not agents_path.exists():
-        raise SystemExit("AGENTS template missing; run `ai-workflow setup` to recreate clean workspace files.")
+        raise SystemExit(
+            "AGENTS template missing; run `ai-workflow setup` to recreate clean workspace files."
+        )
     text = agents_path.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", args.project_name)
     atomic_write_text(root / WORKSPACE_PROJECT_RELATIVE, ".\n")
     atomic_write_text(agents_path, text)
-    _json({"status": "initialized", "project": args.project_name, "root": str(root), "index": build_indexes(root)})
+    _json(
+        {
+            "status": "initialized",
+            "project": args.project_name,
+            "root": str(root),
+            "index": build_indexes(root),
+        }
+    )
 
 
 def _decision(root: Path, task: str):
@@ -104,9 +120,51 @@ def cmd_route(args):
             "execution_provider": provider,
             "model_tier": model,
             "providers": providers.to_dict(),
-            "budget": {"estimated_context_tokens": budget.estimated_tokens, "max_output_tokens": budget.output_tokens},
+            "budget": {
+                "estimated_context_tokens": budget.estimated_tokens,
+                "max_output_tokens": budget.output_tokens,
+            },
         }
     )
+
+
+def cmd_repos_list(args):
+    root = _root(args)
+    _json(registry_summary(root, load_config(root)))
+
+
+def cmd_repos_refresh(args):
+    root = _root(args)
+    config = load_config(root)
+    discovery = ((config.get("workspace") or {}).get("discovery") or {})
+    depth = (
+        int(args.discover_depth)
+        if args.discover_depth is not None
+        else int(discovery.get("max_depth", 3))
+    )
+    try:
+        result = refresh_registry(root, max_depth=depth, config=config)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    _json(result)
+
+
+def _cmd_repos_set(args, included: bool):
+    root = _root(args)
+    config = load_config(root)
+    try:
+        result = set_repository_included(root, args.repository, included, config)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    _json(result)
+
+
+def cmd_repos_include(args):
+    _cmd_repos_set(args, True)
+
+
+def cmd_repos_exclude(args):
+    _cmd_repos_set(args, False)
 
 
 def _resolve_changed(root: Path, explicit: list[str]) -> list[str]:
@@ -156,7 +214,9 @@ def _format_brief(packet: dict, fmt: str) -> str:
     ]
     if packet.get("context"):
         lines += ["[CONTEXT_START]", ctx_text, "[CONTEXT_END]"]
-    lines.append(f"[INVARIANTS] {packet.get('invariants', 'preserve existing contracts unless task explicitly changes them')}")
+    lines.append(
+        f"[INVARIANTS] {packet.get('invariants', 'preserve existing contracts unless task explicitly changes them')}"
+    )
     return "\n".join(lines)
 
 
@@ -190,7 +250,10 @@ def cmd_brief(args):
             if decision.lane.value == "full"
             else "Answer directly; no implementation workflow."
         ),
-        "budget": {"estimated_context_tokens": budget.estimated_tokens, "max_output_tokens": budget.output_tokens},
+        "budget": {
+            "estimated_context_tokens": budget.estimated_tokens,
+            "max_output_tokens": budget.output_tokens,
+        },
         "retrieval": retrieval,
         "context": [i.to_dict() for i in items],
         "estimated_context_tokens_used": estimate_tokens("\n".join(i.text for i in items)),
@@ -239,7 +302,12 @@ def cmd_context(args):
 def cmd_index(args):
     root = _root(args)
     if getattr(args, "incremental", False):
-        _json(incremental_indexes(root, strict_hash=bool(getattr(args, "strict_hash", False))))
+        _json(
+            incremental_indexes(
+                root,
+                strict_hash=bool(getattr(args, "strict_hash", False)),
+            )
+        )
     else:
         _json(build_indexes(root))
 
@@ -261,13 +329,30 @@ def cmd_handoff(args):
 
 
 def cmd_memory_add(args):
-    _json(add_memory(_root(args), args.type, args.keywords, args.summary, args.evidence or "", args.file or [], args.confidence))
+    _json(
+        add_memory(
+            _root(args),
+            args.type,
+            args.keywords,
+            args.summary,
+            args.evidence or "",
+            args.file or [],
+            args.confidence,
+        )
+    )
 
 
 def cmd_memory_search(args):
     root = _root(args)
     cfg = load_config(root)
-    _json(search_memory(root, args.query, args.limit or int(cfg["memory"]["max_results"]), float(cfg["memory"].get("minimum_confidence", 0.55))))
+    _json(
+        search_memory(
+            root,
+            args.query,
+            args.limit or int(cfg["memory"]["max_results"]),
+            float(cfg["memory"].get("minimum_confidence", 0.55)),
+        )
+    )
 
 
 def cmd_memory_list(args):
@@ -285,7 +370,11 @@ def cmd_memory_export(args):
 
 
 def cmd_compress(args):
-    text = Path(args.file).read_text(encoding="utf-8", errors="replace") if args.file else sys.stdin.read()
+    text = (
+        Path(args.file).read_text(encoding="utf-8", errors="replace")
+        if args.file
+        else sys.stdin.read()
+    )
     sys.stdout.write(compress_text(text, args.max_lines, args.max_chars))
 
 
@@ -310,36 +399,94 @@ def cmd_stats(args):
     root = _root(args)
     result = summarize_traces(root, args.limit)
     if args.recommend:
-        result["policy_feedback"] = policy_recommendations(root, args.limit, args.minimum_runs)
+        result["policy_feedback"] = policy_recommendations(
+            root,
+            args.limit,
+            args.minimum_runs,
+        )
     _json(result)
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="ai-workflow", description="AI Workflow Efficiency Control Plane")
+    p = argparse.ArgumentParser(
+        prog="ai-workflow",
+        description="AI Workflow Efficiency Control Plane",
+    )
     p.add_argument("--root", help="project root; auto-detected by default")
     sp = p.add_subparsers(dest="command", required=True)
 
-    q = sp.add_parser("setup", help="connect AI Workflow to the current project; safe to rerun")
+    q = sp.add_parser(
+        "setup",
+        help="connect AI Workflow to the current project; safe to rerun",
+    )
     q.add_argument("--project-name")
     q.add_argument("--json", action="store_true", help="print machine-readable setup result")
-    q.add_argument("--create", action="store_true", help="explicitly create the project root when it does not exist")
-    q.add_argument("--legacy-root-files", action="store_true", help="also create root AGENTS.md and .ai/PROJECT for legacy tools")
-    q.add_argument("--no-discover-repos", action="store_true", help="skip read-only local Git repository discovery")
-    q.add_argument("--discover-depth", type=int, default=3, help="maximum folder depth for multi-repo discovery")
+    q.add_argument(
+        "--create",
+        action="store_true",
+        help="explicitly create the project root when it does not exist",
+    )
+    q.add_argument(
+        "--legacy-root-files",
+        action="store_true",
+        help="also create root AGENTS.md and .ai/PROJECT for legacy tools",
+    )
+    q.add_argument(
+        "--no-discover-repos",
+        action="store_true",
+        help="skip read-only local Git repository discovery",
+    )
+    q.add_argument(
+        "--discover-depth",
+        type=int,
+        default=3,
+        help="maximum folder depth for multi-repo discovery",
+    )
     idx = q.add_mutually_exclusive_group()
     idx.add_argument("--no-index", action="store_true", help="skip index construction during setup")
-    idx.add_argument("--full-index", action="store_true", help="force a full index rebuild instead of auto/incremental setup")
+    idx.add_argument(
+        "--full-index",
+        action="store_true",
+        help="force a full index rebuild instead of auto/incremental setup",
+    )
     q.set_defaults(func=cmd_setup)
 
     q = sp.add_parser("bootstrap")
     q.add_argument("--project-name", required=True)
     q.set_defaults(func=cmd_bootstrap)
+
     q = sp.add_parser("init")
     q.add_argument("--project-name", required=True)
     q.set_defaults(func=cmd_init)
+
     q = sp.add_parser("route")
     q.add_argument("task")
     q.set_defaults(func=cmd_route)
+
+    q = sp.add_parser("repos", help="review and manage discovered repositories")
+    rsp = q.add_subparsers(dest="repos_command", required=True)
+
+    r = rsp.add_parser("list", help="list discovered repositories and inclusion state")
+    r.set_defaults(func=cmd_repos_list)
+
+    r = rsp.add_parser(
+        "refresh",
+        help="rediscover repositories without automatically including new identities",
+    )
+    r.add_argument(
+        "--discover-depth",
+        type=int,
+        help="override configured repository discovery depth",
+    )
+    r.set_defaults(func=cmd_repos_refresh)
+
+    r = rsp.add_parser("include", help="explicitly include one discovered repository")
+    r.add_argument("repository", help="relative path, repository ID, remote identity, or unique name")
+    r.set_defaults(func=cmd_repos_include)
+
+    r = rsp.add_parser("exclude", help="exclude one discovered repository")
+    r.add_argument("repository", help="relative path, repository ID, remote identity, or unique name")
+    r.set_defaults(func=cmd_repos_exclude)
 
     for name, fn in (("brief", cmd_brief), ("context", cmd_context)):
         q = sp.add_parser(name)
@@ -350,29 +497,44 @@ def build_parser():
         q.add_argument("--trace", action="store_true")
         if name == "brief":
             q.add_argument("--write-handoff", action="store_true")
-            q.add_argument("--format", choices=["json", "markdown", "prompt"], default="json")
+            q.add_argument(
+                "--format",
+                choices=["json", "markdown", "prompt"],
+                default="json",
+            )
         q.set_defaults(func=fn)
 
     q = sp.add_parser("index")
     q.add_argument("--incremental", action="store_true")
-    q.add_argument("--strict-hash", "--verify-hashes", dest="strict_hash", action="store_true", help="hash all source files when verifying an incremental index")
+    q.add_argument(
+        "--strict-hash",
+        "--verify-hashes",
+        dest="strict_hash",
+        action="store_true",
+        help="hash all source files when verifying an incremental index",
+    )
     q.set_defaults(func=cmd_index)
+
     q = sp.add_parser("doctor")
     q.add_argument("--strict", action="store_true")
     q.set_defaults(func=cmd_doctor)
+
     q = sp.add_parser("verify")
     q.add_argument("--check", action="append", default=[])
     q.add_argument("--strict", action="store_true")
     q.set_defaults(func=cmd_verify)
+
     q = sp.add_parser("benchmark")
     q.add_argument("--tasks", required=True)
     q.add_argument("--output")
     q.set_defaults(func=cmd_benchmark)
+
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
     q.add_argument("--recommend", action="store_true")
     q.add_argument("--minimum-runs", type=int, default=20)
     q.set_defaults(func=cmd_stats)
+
     q = sp.add_parser("handoff")
     q.add_argument("action", choices=["validate"])
     q.set_defaults(func=cmd_handoff)
