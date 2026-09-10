@@ -41,24 +41,98 @@ def _provenance(item: ContextItem, workspace_root: Path | None = None) -> Contex
     return ContextItem(item.source, item.text, item.score, item.stale, metadata, provenance)
 
 
-def _hybrid_rank(query: str, base: list[ContextItem], specialist: list[ContextItem], limit: int) -> list[ContextItem]:
+def _dedupe_ranked(items: list[ContextItem]) -> list[ContextItem]:
+    out: list[ContextItem] = []
+    seen: set[str] = set()
+    for item in items:
+        if item.dedupe_key in seen:
+            continue
+        seen.add(item.dedupe_key)
+        out.append(item)
+    return out
+
+
+def _algorithm_policy(config: dict) -> dict:
+    experiments = ((config.get("context") or {}).get("experiments") or {})
+    ranker = str(experiments.get("hybrid_ranker", "adaptive")).strip().lower()
+    if ranker not in {"adaptive", "source", "bm25", "rrf", "rrf_mmr"}:
+        ranker = "adaptive"
+    try:
+        rrf_k = max(1, int(experiments.get("rrf_k", 60)))
+    except (TypeError, ValueError):
+        rrf_k = 60
+    try:
+        mmr_lambda = float(experiments.get("mmr_lambda", 0.75))
+    except (TypeError, ValueError):
+        mmr_lambda = 0.75
+    mmr_lambda = min(1.0, max(0.0, mmr_lambda))
+    return {
+        "hybrid_ranker": ranker,
+        "rrf_k": rrf_k,
+        "mmr_lambda": mmr_lambda,
+        "disable_early_sufficiency_gate": bool(
+            experiments.get("disable_early_sufficiency_gate", False)
+        ),
+    }
+
+
+def _hybrid_rank(
+    query: str,
+    base: list[ContextItem],
+    specialist: list[ContextItem],
+    limit: int,
+    config: dict,
+) -> list[ContextItem]:
     candidates = [_provenance(item) for item in [*base, *specialist]]
     if not candidates:
         return []
+
+    policy = _algorithm_policy(config)
+    mode = policy["hybrid_ranker"]
+    if mode == "adaptive" and not specialist:
+        return _dedupe_ranked(candidates)
+    if mode == "adaptive":
+        mode = "rrf_mmr"
+
+    source_rank = _dedupe_ranked(
+        sorted(candidates, key=lambda item: -item.score)
+    )
     lexical_scorer = BM25Scorer()
     lexical_scorer.fit([item.text for item in candidates], candidates)
     lexical_rank = [item for _, item in lexical_scorer.rank(query)]
-    specialist_rank = sorted(specialist, key=lambda item: -item.score)
-    source_rank = sorted(candidates, key=lambda item: -item.score)
-    fused = reciprocal_rank_fusion([source_rank, lexical_rank, specialist_rank], key=lambda item: item.dedupe_key)
+    lexical_keys = {item.dedupe_key for item in lexical_rank}
+    lexical_rank.extend(
+        item for item in source_rank if item.dedupe_key not in lexical_keys
+    )
+
+    if mode == "source":
+        return source_rank[:limit]
+    if mode == "bm25":
+        return _dedupe_ranked(lexical_rank)[:limit]
+
+    specialist_rank = _dedupe_ranked(
+        sorted(
+            (_provenance(item) for item in specialist),
+            key=lambda item: -item.score,
+        )
+    )
+    fused = reciprocal_rank_fusion(
+        [source_rank, lexical_rank, specialist_rank],
+        key=lambda item: item.dedupe_key,
+        k=int(policy["rrf_k"]),
+    )
     fused_items = [item for _, item in fused]
     fused_scores = [score for score, _ in fused]
-    if len(fused_items) <= 1:
+    if mode == "rrf" or len(fused_items) <= 1:
         return fused_items[:limit]
+
     scorer = BM25Scorer()
     scorer.fit([item.text for item in fused_items], fused_items)
     return maximal_marginal_relevance(
-        tokenize(query), scorer.docs, fused_scores, lambda_param=0.75,
+        tokenize(query),
+        scorer.docs,
+        fused_scores,
+        lambda_param=float(policy["mmr_lambda"]),
         max_items=min(limit, len(fused_items)),
     )
 
@@ -196,7 +270,12 @@ class WorkflowEngine:
         specialist_calls: list[ScheduledCall] = []
         specialist_kinds: list[str] = []
 
-        should_semantic = plan.use_semantic and not suff.sufficient
+        algorithm_policy = _algorithm_policy(config)
+        early_gate_open = (
+            not suff.sufficient
+            or algorithm_policy["disable_early_sufficiency_gate"]
+        )
+        should_semantic = plan.use_semantic and early_gate_open
         provider_limit = int(config["context"].get("max_results_per_source", 6))
         if should_semantic and providers.semantic:
             trace.providers_attempted.append("semantic")
@@ -208,7 +287,7 @@ class WorkflowEngine:
         elif plan.use_semantic:
             trace.providers_skipped["semantic"] = "provider not configured" if not providers.semantic else "base evidence sufficient"
 
-        if not suff.sufficient:
+        if early_gate_open:
             for spec in configured_retrievers(config, plan.intent.value):
                 name = str(spec.get("name", "external"))
                 label = f"external:{name}"
@@ -256,7 +335,13 @@ class WorkflowEngine:
             specialist_items.extend(_provenance(item, root) for item in result.items)
 
         limit = provider_limit * 3
-        candidates = _hybrid_rank(query, base_items, specialist_items, limit) if specialist_items else base_items
+        candidates = _hybrid_rank(
+            query,
+            base_items,
+            specialist_items,
+            limit,
+            config,
+        )
         suff = evaluate_sufficiency(query, candidates, structural_required=plan.use_structural, threshold=threshold)
         adaptive_chars = _adaptive_char_limit(budget, suff.score, config)
 
@@ -302,6 +387,7 @@ class WorkflowEngine:
         diagnostics = {
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
+            "algorithm_policy": algorithm_policy,
             "workspace_roots": [str(path) for path in roots],
             "workspace_state": snapshot,
             "evidence_state": state,
