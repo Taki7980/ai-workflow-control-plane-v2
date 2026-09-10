@@ -42,7 +42,12 @@ _DEFAULT_CONFIG = {
         "telemetry": {"mode": "mutations"},
         "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
     },
-    "workspace": {"roots": [], "max_roots": 4},
+    "workspace": {
+        "roots": [],
+        "max_roots": 4,
+        "registry": "ai-workspace/config/repositories.json",
+        "discovery": {"max_depth": 3, "require_acceptance": True},
+    },
     "execution": {
         "prefer_superpowers_for_full": True,
         "native_fallback": True,
@@ -199,6 +204,15 @@ def validate_config(data: dict[str, Any]) -> None:
     if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
         raise ValueError("workspace.roots must be an array of paths")
     _positive_int(data["workspace"].get("max_roots"), "workspace.max_roots")
+    registry = data["workspace"].get("registry", "ai-workspace/config/repositories.json")
+    if not isinstance(registry, str) or not registry.strip():
+        raise ValueError("workspace.registry must be a non-empty path")
+    discovery = data["workspace"].get("discovery", {"max_depth": 3, "require_acceptance": True})
+    if not isinstance(discovery, dict):
+        raise ValueError("workspace.discovery must be an object")
+    _nonnegative_int(discovery.get("max_depth", 3), "workspace.discovery.max_depth")
+    if not isinstance(discovery.get("require_acceptance", True), bool):
+        raise ValueError("workspace.discovery.require_acceptance must be boolean")
     orchestration = data["execution"].get("orchestration_budget")
     if not isinstance(orchestration, dict):
         raise ValueError("missing required section: execution.orchestration_budget")
@@ -222,6 +236,8 @@ def parse_typed_config(data: dict[str, Any]):
 def find_project_root(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
     for candidate in [current, *current.parents]:
+        if (candidate / DEFAULT_RELATIVE).exists():
+            return candidate
         if (candidate / "AGENTS.md").exists() and (candidate / "ai-workspace").exists():
             return candidate
     return current
@@ -237,7 +253,3 @@ def load_typed_config(root: Path):
 
 def load_config(root: Path) -> dict[str, Any]:
     return load_typed_config(root).to_dict()
-
-
-def estimate_tokens(text: str, estimator: TokenEstimator | None = None) -> int:
-    return (estimator or _DEFAULT_TOKEN_ESTIMATOR).estimate(text)
