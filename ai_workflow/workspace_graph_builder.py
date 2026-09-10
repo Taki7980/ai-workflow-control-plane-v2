@@ -30,9 +30,9 @@ _JS_IMPORT = re.compile(
     r"(?:from\s+|require\(\s*)[\"']([^\"']+)[\"']"
 )
 _HTTP_LITERAL = re.compile(r"[\"'](/api/[A-Za-z0-9_./:{}-]+)[\"']")
-_HTTP_METHOD = re.compile(r"\\bmethod\\s*:\\s*[\"\']([A-Za-z]+)[\"\']", re.I)
+_HTTP_METHOD = re.compile(r"\bmethod\s*:\s*[\"\']([A-Za-z]+)[\"\']", re.I)
 _HTTP_VERB_CLIENT = re.compile(
-    r"\\b(?:axios|client|http|api|requests)\\.(get|post|put|delete|patch)\\s*\\(",
+    r"\b(?:axios|client|http|api|requests)\.(get|post|put|delete|patch)\s*\(",
     re.I,
 )
 _PYPROJECT_NAME = re.compile(r"^\s*name\s*=\s*[\"']([^\"']+)[\"']")
