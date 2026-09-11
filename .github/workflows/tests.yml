@@ -72,6 +72,7 @@ jobs:
           ai_workflow/deployment_guardrails.py
           ai_workflow/deployment_runtime.py
           ai_workflow/production_store.py
+          ai_workflow/sqlite_runtime.py
           ai_workflow/deployment_statistics.py
           ai_workflow/observability_export.py
           ai_workflow/deployment_incident.py
@@ -108,6 +109,7 @@ jobs:
           ai_workflow/deployment_guardrails.py
           ai_workflow/deployment_runtime.py
           ai_workflow/production_store.py
+          ai_workflow/sqlite_runtime.py
           ai_workflow/deployment_statistics.py
           ai_workflow/observability_export.py
           ai_workflow/deployment_incident.py
