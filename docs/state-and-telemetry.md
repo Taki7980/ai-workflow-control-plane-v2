@@ -14,28 +14,45 @@ The JSONL export is written atomically and can be used to migrate away from SQLi
 
 ## Telemetry privacy
 
-Retrieval traces are local JSON files under `ai-workspace/generated/traces`. Raw task text is **not stored by default**. Instead, traces contain a SHA-256 task fingerprint.
+Retrieval traces are local JSON files under `ai-workspace/generated/traces`. Raw task text is **not stored by default**. Instead, traces contain a task fingerprint.
 
-Optional configuration keys under `context.telemetry`:
+Project configuration may control local trace behavior, redaction, retention, and the export timeout:
 
 ```json
 {
   "mode": "mutations",
-  "store_task_text": false,
   "retention_days": 30,
   "max_trace_files": 200,
   "redact_patterns": ["(?i)bearer\\s+\\S+", "(?i)api[_-]?key\\s*[=:]\\s*\\S+"],
-  "otlp_endpoint": "",
-  "export_timeout_seconds": 2.0,
-  "otlp_headers_env": ""
+  "export_timeout_seconds": 2.0
 }
 ```
 
-`redact_patterns` are applied before local persistence and export. Invalid regular expressions are ignored rather than breaking the workflow. If task storage is enabled, sensitive substrings can therefore still be removed before persistence.
+`redact_patterns` are applied before local persistence and export. Invalid regular expressions are ignored rather than breaking the workflow.
 
-## Optional OTLP export
+A checked-in repository is **not** an authority boundary for telemetry egress or raw prompt persistence. Repository keys such as `otlp_endpoint`, `otlp_headers_env`, `store_task_text`, and `include_task_text` do not grant those capabilities.
 
-When `otlp_endpoint` is set, the zero-dependency core sends a best-effort OTLP-compatible JSON/HTTP log envelope. Export failures never make the local workflow fail. Authentication headers can be supplied indirectly by naming an environment variable in `otlp_headers_env`; that variable should contain a JSON object of HTTP headers.
+For local correlation, the default fingerprint remains SHA-256 for compatibility. Set `AI_WORKFLOW_TELEMETRY_HMAC_KEY` from trusted runtime configuration to use an HMAC-SHA256 fingerprint instead, which prevents practical dictionary matching without possession of the local privacy key.
+
+## Trusted OTLP export
+
+External telemetry is disabled unless trusted runtime configuration supplies all required values:
+
+```bash
+export AI_WORKFLOW_OTLP_ENDPOINT="https://otel.example.com/v1/logs"
+export AI_WORKFLOW_OTLP_ALLOWED_HOSTS="otel.example.com"
+export AI_WORKFLOW_OTLP_HEADERS='{"Authorization":"Bearer ..."}'
+```
+
+The endpoint must use HTTPS, must match the explicit hostname allowlist, may not contain URL credentials, and may not target localhost or literal private, loopback, link-local, multicast, unspecified, or reserved IP addresses. Export failures remain best-effort and never make the local workflow fail.
+
+Raw task text can be persisted/exported only through an explicit trusted runtime opt-in:
+
+```bash
+export AI_WORKFLOW_TELEMETRY_STORE_TASK_TEXT=1
+```
+
+That switch should be used only when the operator has reviewed the privacy implications. Repository configuration cannot enable it.
 
 No OpenTelemetry SDK, MLflow, or other observability package is required at runtime.
 
