@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -101,7 +102,18 @@ def context_item_span(item: ContextItem) -> RetrievedSpan | None:
         return None
     start: int | None = None
     end: int | None = None
-    for container in (item.metadata, item.provenance):
+    containers: list[dict[str, Any]] = [
+        item.metadata,
+        item.provenance,
+    ]
+    try:
+        payload = json.loads(item.text)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+    if isinstance(payload, dict):
+        containers.append(payload)
+
+    for container in containers:
         if not isinstance(container, dict):
             continue
         if start is None:
