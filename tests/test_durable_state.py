@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -71,23 +72,25 @@ class TelemetryPrivacyTests(unittest.TestCase):
             root = Path(td); rel = write_trace(root, RetrievalTrace("fix secret auth token", "small", "high", "exact"), {"context": {"telemetry": {"mode": "all"}}})
             payload = json.loads((root / rel).read_text(encoding="utf-8")); self.assertNotIn("task", payload); self.assertEqual(len(payload["task_fingerprint"]), 64)
 
-    def test_task_text_can_be_enabled_and_redacted(self):
-        from ai_workflow.telemetry import RetrievalTrace, write_trace
+    def test_task_text_requires_trusted_runtime_opt_in_and_is_redacted(self):
+        from ai_workflow.telemetry import RetrievalTrace, STORE_TASK_TEXT_ENV, write_trace
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cfg = {"context": {"telemetry": {"store_task_text": True, "redact_patterns": [r"(?i)bearer\s+\S+", r"(?i)api[_-]?key\s*[=:]\s*\S+"]}}}
-            rel = write_trace(root, RetrievalTrace("Bearer abc API_KEY=secret", "full", "high", "exact"), cfg)
+            with patch.dict(os.environ, {STORE_TASK_TEXT_ENV: "1"}, clear=True):
+                rel = write_trace(root, RetrievalTrace("Bearer abc API_KEY=secret", "full", "high", "exact"), cfg)
             task = json.loads((root / rel).read_text(encoding="utf-8"))["task"]
             self.assertNotIn("abc", task); self.assertNotIn("secret", task); self.assertIn("[REDACTED]", task)
 
-    def test_write_trace_loads_project_telemetry_config_when_config_is_omitted(self):
+    def test_project_config_cannot_enable_task_text_when_config_is_omitted(self):
         from ai_workflow.config import DEFAULT_RELATIVE, default_config
         from ai_workflow.telemetry import RetrievalTrace, write_trace
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); cfg = default_config(); cfg["context"]["telemetry"]["store_task_text"] = True
             path = root / DEFAULT_RELATIVE; path.parent.mkdir(parents=True); path.write_text(json.dumps(cfg), encoding="utf-8")
-            rel = write_trace(root, RetrievalTrace("visible task", "small", "low", "exact"))
-            self.assertEqual(json.loads((root / rel).read_text())["task"], "visible task")
+            with patch.dict(os.environ, {}, clear=True):
+                rel = write_trace(root, RetrievalTrace("visible task", "small", "low", "exact"))
+            self.assertNotIn("task", json.loads((root / rel).read_text()))
 
     def test_retention_limits_local_trace_files(self):
         from ai_workflow.telemetry import RetrievalTrace, write_trace
@@ -108,11 +111,12 @@ class TelemetryPrivacyTests(unittest.TestCase):
             self.assertGreaterEqual(latency["retrieval_total_ms"]["p95"], 30.0)
             self.assertIn("semantic", latency)
 
-    def test_exporter_failure_never_breaks_local_trace(self):
+    def test_repository_otlp_endpoint_cannot_trigger_export(self):
         from ai_workflow.telemetry import RetrievalTrace, write_trace
         cfg = {"context": {"telemetry": {"otlp_endpoint": "https://collector.invalid/v1/logs", "export_timeout_seconds": 0.1}}}
-        with tempfile.TemporaryDirectory() as td, patch("ai_workflow.telemetry.urlopen", side_effect=OSError("offline")):
+        with tempfile.TemporaryDirectory() as td, patch("ai_workflow.telemetry.urlopen", side_effect=OSError("offline")) as mocked_urlopen:
             root = Path(td); rel = write_trace(root, RetrievalTrace("task", "small", "low", "exact"), cfg); self.assertTrue((root / rel).exists())
+            mocked_urlopen.assert_not_called()
 
 
 if __name__ == "__main__": unittest.main()
