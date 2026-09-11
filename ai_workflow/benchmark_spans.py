@@ -200,17 +200,39 @@ def span_retrieval_metrics(
     items: list[ContextItem],
     gold_spans: list[dict[str, Any]],
     k: int = 5,
+    *,
+    line_budget: int | None = None,
 ) -> dict[str, Any] | None:
     if not gold_spans:
         return None
     gold = normalize_gold_spans(gold_spans)
     cutoff = max(1, int(k))
     ranked: list[RetrievedSpan] = []
+    remaining_lines = (
+        max(1, int(line_budget))
+        if line_budget is not None
+        else None
+    )
     for item in items:
         span = context_item_span(item)
-        if span is not None:
-            ranked.append(span)
-        if len(ranked) >= cutoff:
+        if span is None:
+            continue
+        if remaining_lines is not None:
+            span_lines = span.end_line - span.start_line + 1
+            if remaining_lines <= 0:
+                break
+            if span_lines > remaining_lines:
+                span = RetrievedSpan(
+                    path=span.path,
+                    start_line=span.start_line,
+                    end_line=span.start_line + remaining_lines - 1,
+                    repository_id=span.repository_id,
+                )
+                remaining_lines = 0
+            else:
+                remaining_lines -= span_lines
+        ranked.append(span)
+        if len(ranked) >= cutoff or remaining_lines == 0:
             break
 
     hit_flags = [
@@ -276,4 +298,6 @@ def span_retrieval_metrics(
         "covered_gold_lines": covered_gold_lines,
         "total_gold_lines": total_gold_lines,
         "first_gold_rank": first_hit,
+        "line_budget": line_budget,
+        "retrieved_lines": total_retrieved_lines,
     }
