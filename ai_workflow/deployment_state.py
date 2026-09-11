@@ -409,11 +409,11 @@ def transition_deployment_state(
                 f"invalid deployment transition: {current} -> {target}"
             )
         if current in LIVE_STAGES:
-            gate = (
-                guardrail_report.get("gate")
-                if isinstance(guardrail_report, dict)
-                else None
-            )
+            if not isinstance(guardrail_report, dict):
+                raise ValueError(
+                    "live-stage promotion requires a passing guardrail report"
+                )
+            gate = guardrail_report.get("gate")
             if (
                 not isinstance(gate, dict)
                 or not bool(gate.get("safe_to_advance"))
