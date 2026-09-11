@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .io_utils import atomic_write_json
+from .path_policy import PathOutsideWorkspace, resolve_within_root
 
 
 _REGISTRY_VERSION = 1
@@ -59,8 +60,10 @@ def repository_id(relative_path: str, remote_identity: str | None) -> str:
 def registry_path(root: Path, config: dict | None = None) -> Path:
     workspace = ((config or {}).get("workspace") or {})
     configured = workspace.get("registry") or _DEFAULT_REGISTRY.as_posix()
-    path = Path(str(configured))
-    return path if path.is_absolute() else Path(root).resolve() / path
+    try:
+        return resolve_within_root(Path(root), str(configured))
+    except (PathOutsideWorkspace, OSError) as exc:
+        raise ValueError("workspace.registry must stay inside the project root") from exc
 
 
 @contextmanager
