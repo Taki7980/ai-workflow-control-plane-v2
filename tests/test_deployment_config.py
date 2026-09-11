@@ -23,6 +23,14 @@ class DeploymentConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_config(config)
 
+    def test_enabled_deployment_requires_automatic_rollback(self):
+        config = default_config()
+        config["context"]["deployment"]["enabled"] = True
+        config["context"]["deployment"]["auto_rollback"] = False
+
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
     def test_deployment_requires_nonempty_signing_key_env_name(self):
         config = default_config()
         config["context"]["deployment"]["signing_key_env"] = ""
