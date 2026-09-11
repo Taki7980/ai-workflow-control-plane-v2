@@ -66,7 +66,7 @@ def corpus_summary(document: dict[str, Any]) -> dict[str, Any]:
         repository_id = str(case.get("repository_id", "")).strip()
         if repository_id:
             repositories.add(repository_id)
-    return {
+    summary = {
         "schema_version": CORPUS_SCHEMA_VERSION,
         "corpus_id": document["corpus_id"],
         "split": document["split"],
@@ -77,6 +77,45 @@ def corpus_summary(document: dict[str, Any]) -> dict[str, Any]:
         "control_types": dict(sorted(controls.items())),
         "languages": dict(sorted(languages.items())),
         "repositories": len(repositories),
+    }
+    summary["publication_readiness"] = publication_readiness(summary)
+    return summary
+
+
+def publication_readiness(
+    summary: dict[str, Any],
+    *,
+    minimum_cases: int = 427,
+    minimum_repositories: int = 25,
+    minimum_languages: int = 4,
+) -> dict[str, Any]:
+    cases = int(summary.get("cases", 0))
+    repositories = int(summary.get("repositories", 0))
+    languages = summary.get("languages")
+    language_count = len(languages) if isinstance(languages, dict) else 0
+    control_types = summary.get("control_types")
+    controls = control_types if isinstance(control_types, dict) else {}
+    span_cases = int(summary.get("span_labeled_cases", 0))
+    blockers: list[str] = []
+    if cases < minimum_cases:
+        blockers.append("insufficient_cases")
+    if repositories < minimum_repositories:
+        blockers.append("insufficient_repositories")
+    if language_count < minimum_languages:
+        blockers.append("insufficient_language_diversity")
+    if int(controls.get("natural_no_gold", 0)) < 1:
+        blockers.append("missing_natural_no_gold_controls")
+    if int(controls.get("wrong_repo", 0)) < 1:
+        blockers.append("missing_wrong_repo_controls")
+    if span_cases < 1:
+        blockers.append("missing_span_labels")
+    return {
+        "ready": not blockers,
+        "reference_floor": "Agent Retrieval Bench scale floor",
+        "minimum_cases": minimum_cases,
+        "minimum_repositories": minimum_repositories,
+        "minimum_languages": minimum_languages,
+        "blockers": blockers,
     }
 
 
