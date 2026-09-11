@@ -57,3 +57,18 @@ Remote export is enabled only through trusted runtime environment configuration:
 - `AI_WORKFLOW_TELEMETRY_HMAC_KEY` — optional local secret used to create a stable HMAC-SHA256 task fingerprint.
 
 Local traces never persist raw task text. Without the HMAC key, no task fingerprint is emitted. Remote export is best-effort and fails closed when the endpoint is not HTTPS, is not exactly allowlisted, targets localhost/link-local/reserved addresses, or attempts to redirect.
+
+
+## Durable memory trust boundary
+
+Durable memory is stored outside the repository in a user-owned application-state directory, partitioned by workspace identity. Repository-local `ai-workspace/memory/memory.jsonl` files are legacy/untrusted input and are never imported automatically.
+
+Legacy memory import requires an explicit trust acknowledgement:
+
+```bash
+ai-workflow memory import --trusted ai-workspace/memory/memory.jsonl
+```
+
+Set `AI_WORKFLOW_MEMORY_HOME` only from trusted runtime configuration when a custom state location is needed. It must be an absolute path outside the repository. Runtime SQLite directories are created with restrictive permissions where the platform supports them.
+
+The repository registry is a different state class: it remains project-local, but `workspace.registry` is restricted to a relative path that resolves inside the project root. Absolute paths, parent traversal, and symlink escapes fail closed.
