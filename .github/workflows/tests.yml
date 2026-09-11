@@ -198,13 +198,6 @@ jobs:
             --repository . > "$RUNNER_TEMP/research-snapshot-after-index.json"
           cat "$RUNNER_TEMP/research-snapshot-after-index.json"
           test -z "$(git -C "$BENCHMARK_FIXTURE" status --porcelain=v1 --untracked-files=all)"
-      - name: Run measured benchmark regression gate
-        shell: bash
-        run: |
-          python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark \
-            --tasks "$BENCHMARK_FIXTURE/benchmarks/sample-tasks.json" \
-            --output benchmark-result.json > /dev/null
-          python scripts/check_benchmark_regression.py benchmarks/baseline.json benchmark-result.json
       - name: Run corpus-v2 span/frozen-content smoke
         shell: bash
         run: |
@@ -287,7 +280,21 @@ jobs:
           assert "span_retrieval" in case
           assert case["span_retrieval"]["line_recall"] > 0
           assert data["research_protocol"]["span_level_gold_supported"] is True
+          assert (
+              data["research_protocol"][
+                  "persistent_project_knowledge_isolated"
+              ]
+              is True
+          )
           PY
+          test -z "$(git -C "$BENCHMARK_FIXTURE" status --porcelain=v1 --untracked-files=all)"
+      - name: Run measured benchmark regression gate
+        shell: bash
+        run: |
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark \
+            --tasks "$BENCHMARK_FIXTURE/benchmarks/sample-tasks.json" \
+            --output benchmark-result.json > /dev/null
+          python scripts/check_benchmark_regression.py benchmarks/baseline.json benchmark-result.json
       - name: Print measured benchmark summary
         shell: bash
         run: |
