@@ -12,7 +12,7 @@ def parse_sqlite_version(value: str) -> tuple[int, int, int]:
     if len(parts) < 3:
         raise ValueError(f"invalid SQLite version: {value!r}")
     try:
-        return tuple(int(part) for part in parts[:3])  # type: ignore[return-value]
+        return (int(parts[0]), int(parts[1]), int(parts[2]))
     except ValueError as exc:
         raise ValueError(f"invalid SQLite version: {value!r}") from exc
 
