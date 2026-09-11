@@ -610,6 +610,8 @@ ai-workflow production reconcile
 
 The mirror uses WAL mode, `synchronous=FULL`, a busy timeout, immutable event IDs, and SHA-256 payload digests. `reconcile` compares the SQLite mirror with the canonical JSON files and fails when canonical events are missing or have a different digest.
 
+Before WAL mode is activated, AI Workflow verifies the linked SQLite runtime contains the 2026 WAL-reset corruption fix. Affected runtimes fail closed. Accepted lines include SQLite 3.51.3+, the 3.50.7 and 3.44.6 backports, and later fixed releases. The withdrawn 3.52.0 release is explicitly rejected rather than accepted by numeric version ordering. `ai-workflow doctor --strict` also fails when the production mirror is enabled on an affected runtime.
+
 This SQLite mode is intentionally **same-host only**. SQLite WAL relies on shared-memory coordination and is not used as a multi-host/network-filesystem consensus mechanism.
 
 ### Crash-recoverable local rollout lock
