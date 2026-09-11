@@ -478,6 +478,110 @@ The shadow evaluator reports both held-fixed doubly robust diagnostics and an an
 
 The Stage 6 confidence sequence is intentionally conservative and is not claimed to reproduce the exact betting/martingale construction from the Off-policy Confidence Sequences paper. Repeated calls recompute the same fixed-policy post-cutoff sequence, so checking again later does not turn an ordinary fixed-sample bootstrap interval into a deployment gate.
 
+Stage 7 adds controlled real-traffic deployment. It is still disabled by default:
+
+```json
+{
+  "context": {
+    "deployment": {
+      "enabled": false,
+      "state_path": "ai-workspace/generated/learning/deployment/active.json",
+      "signing_key_env": "AI_WORKFLOW_POLICY_SIGNING_KEY",
+      "auto_rollback": true
+    }
+  }
+}
+```
+
+When deployment is enabled, automatic rollback is mandatory. The existing `AI_WORKFLOW_LEARNING_KILL_SWITCH=1` emergency switch also forces Stage 7 back to `adaptive_math`.
+
+Create a signed zero-traffic deployment state only after a Stage 6 signed manifest and passing shadow report exist:
+
+```bash
+ai-workflow deployment create \
+  --manifest policy-manifest.json \
+  --shadow-report shadow-report.json \
+  --approved-by release-owner
+```
+
+The new state begins at:
+
+```text
+approved
+traffic = 0%
+```
+
+Promotion is sequential:
+
+```text
+approved
+  -> canary_1   (1%)
+  -> canary_5   (5%)
+  -> canary_10  (10%)
+  -> bounded    (default 25%, hard maximum 25%)
+```
+
+The first 1% transition requires explicit operator action:
+
+```bash
+ai-workflow deployment promote \
+  --to canary_1 \
+  --actor release-owner \
+  --expected-generation 1
+```
+
+Every later promotion requires a live guardrail report generated from the current state generation:
+
+```bash
+ai-workflow deployment guardrails --output guardrails.json
+
+ai-workflow deployment promote \
+  --to canary_5 \
+  --actor release-owner \
+  --expected-generation 2 \
+  --guardrail-report guardrails.json
+```
+
+The same pattern is used for 10% and bounded traffic. A stale generation cannot overwrite newer deployment state.
+
+For a low-risk context whose signed policy selects a non-baseline arm, Stage 7 performs a fresh randomized candidate/control assignment and records the exact candidate probability in the normal learning decision log. Stage 5 epsilon exploration does not mix with an active Stage 7 deployment. Medium/high-risk traffic and policy contexts mapped to the baseline remain on `adaptive_math`.
+
+Live guardrails include:
+
+- cumulative candidate exposure budget;
+- cumulative candidate failure budget;
+- optional cumulative realized-cost budget;
+- candidate failure-rate limit;
+- anytime reward-regression monitoring against the baseline control;
+- context-distribution total-variation drift;
+- unknown-context rate;
+- malformed reward/propensity/context inputs.
+
+The initial fixed candidate-exposure budgets are 100 / 500 / 1000 / 5000 across the 1% / 5% / 10% / bounded stages. The initial failure budgets are 5 / 20 / 40 / 100. These are conservative implementation defaults, not thresholds claimed by the cited research papers.
+
+Stage advancement is a live non-regression gate: enough verified candidate outcomes must exist and no rollback blocker may be active. Stage 6 already established offline/shadow improvement evidence; Stage 7 does not require a 1% canary to prove superiority from scratch before it may advance.
+
+If a hard guardrail trips, the runtime attempts an atomic signed transition to:
+
+```text
+rolled_back
+traffic = 0%
+rollback target = adaptive_math
+```
+
+Even if concurrent rollback state mutation cannot complete, the request that observed the failing guardrail still fails closed to the baseline.
+
+Manual rollback is always available:
+
+```bash
+ai-workflow deployment rollback \
+  --actor release-owner \
+  --expected-generation 2 \
+  --reason "manual safety stop"
+```
+
+A rolled-back deployment state is terminal. Reactivation requires creating a new approved deployment state rather than mutating the old rollback record.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -503,6 +607,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-11-retrieval-eval-stage4.md`
 - `docs/research/2026-09-11-retrieval-learning-stage5.md`
 - `docs/research/2026-09-11-contextual-learning-stage6.md`
+- `docs/research/2026-09-11-controlled-deployment-stage7.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
