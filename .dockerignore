@@ -3,7 +3,7 @@
 .ai
 .agents
 ai-workspace/generated
-ai-workspace/memory/*.sqlite3
+ai-workspace/memory
 __pycache__
 *.pyc
 .venv
