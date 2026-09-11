@@ -14,6 +14,7 @@ from ai_workflow.repository_registry import (
     discover_repositories,
     load_registry,
     refresh_registry,
+    registry_path,
     registry_payload,
     remote_identity,
     repository_id,
@@ -25,6 +26,40 @@ from ai_workflow.workspace_state import aggregate_workspace_fingerprint
 
 
 class RepositoryRegistryTests(unittest.TestCase):
+    def test_registry_path_rejects_absolute_and_parent_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            outside = root.parent / "outside.json"
+            for configured in ("../outside.json", str(outside.resolve())):
+                with self.subTest(configured=configured):
+                    config = {"workspace": {"registry": configured}}
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "workspace.registry",
+                    ):
+                        registry_path(root, config)
+
+    def test_registry_path_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            root = base / "repo"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            link = root / "registry-link"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation is unavailable")
+            config = {
+                "workspace": {
+                    "registry": "registry-link/repositories.json",
+                }
+            }
+            with self.assertRaisesRegex(ValueError, "workspace.registry"):
+                registry_path(root, config)
+
     def _git_repo(self, parent: Path, name: str, remote: str, head: str = "a" * 40) -> Path:
         repo = parent / name
         repo.mkdir(parents=True)
