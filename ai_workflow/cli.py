@@ -818,24 +818,27 @@ def cmd_deployment_rollback(args):
         isinstance(deployment_cfg, dict)
         and bool(deployment_cfg.get("incident_bundles", True))
     ):
-        incident = create_incident_bundle(
-            root,
-            updated,
-            guardrail_report,
-            signing_key,
-            reason=args.reason,
-        )
-        incident_path = write_incident_bundle(
-            root,
-            incident,
-            signing_key,
-        )
-        mirror_learning_event(
-            root,
-            config,
-            "deployment_incident",
-            incident,
-        )
+        try:
+            incident = create_incident_bundle(
+                root,
+                updated,
+                guardrail_report,
+                signing_key,
+                reason=args.reason,
+            )
+            incident_path = write_incident_bundle(
+                root,
+                incident,
+                signing_key,
+            )
+            mirror_learning_event(
+                root,
+                config,
+                "deployment_incident",
+                incident,
+            )
+        except (OSError, RuntimeError, ValueError):
+            incident_path = None
     _json({
         "updated": True,
         "policy_id": updated["policy_id"],
