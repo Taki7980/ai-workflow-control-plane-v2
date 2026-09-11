@@ -5,6 +5,7 @@ from typing import Any
 
 from .contextual_features import context_key
 from .deployment_state import LIVE_STAGES, verify_deployment_state
+from .deployment_statistics import clustered_reward_difference
 from .retrieval_learning import BASELINE_ARM, load_learning_records
 from .shadow_policy import anytime_hoeffding_sequence
 
@@ -234,6 +235,16 @@ def evaluate_live_guardrails(
         confidence=0.95,
         absolute_bound=absolute_bound,
     )
+    clustered = clustered_reward_difference(
+        live_rows,
+        cluster_field="task_fingerprint",
+        confidence=0.95,
+        resamples=max(
+            100,
+            int(guardrails.get("cluster_bootstrap_resamples", 2000)),
+        ),
+        seed=int(guardrails.get("cluster_bootstrap_seed", 20260911)),
+    )
     final = sequence.get("final")
     lower = (
         _number(final.get("lower"))
@@ -332,6 +343,19 @@ def evaluate_live_guardrails(
     ):
         rollback_blockers.append("reward_regression_confident")
 
+    minimum_clusters = max(
+        2,
+        int(guardrails.get("minimum_monitor_clusters", 5)),
+    )
+    cluster_count = int(clustered.get("clusters", 0))
+    cluster_ci_high = _number(clustered.get("ci_high"))
+    if (
+        cluster_count >= minimum_clusters
+        and cluster_ci_high is not None
+        and cluster_ci_high < -regression_margin
+    ):
+        rollback_blockers.append("clustered_reward_regression_confident")
+
     minimum_drift = max(
         1,
         int(guardrails.get("minimum_drift_samples", 50)),
@@ -356,6 +380,8 @@ def evaluate_live_guardrails(
     blockers.extend(rollback_blockers)
     if len(candidate_outcomes) < minimum_monitor:
         blockers.append("insufficient_candidate_monitor_outcomes")
+    if cluster_count < minimum_clusters:
+        blockers.append("insufficient_monitor_clusters")
     promotion_margin = float(guardrails.get("promotion_margin", 0.0))
     evidence_of_improvement = (
         lower is not None and lower > promotion_margin
@@ -385,6 +411,7 @@ def evaluate_live_guardrails(
             ),
         },
         "sequential_reward_difference": sequence,
+        "clustered_reward_difference": clustered,
         "monitoring_violations": monitoring_violations,
         "drift": {
             "window": drift_window,
@@ -400,6 +427,7 @@ def evaluate_live_guardrails(
             "rollback_blockers": rollback_blockers,
             "blockers": list(dict.fromkeys(blockers)),
             "minimum_monitor_outcomes": minimum_monitor,
+            "minimum_monitor_clusters": minimum_clusters,
             "promotion_margin": promotion_margin,
             "evidence_of_improvement": evidence_of_improvement,
             "advance_rule": (
