@@ -68,6 +68,9 @@ jobs:
           ai_workflow/contextual_policy.py
           ai_workflow/policy_manifest.py
           ai_workflow/shadow_policy.py
+          ai_workflow/deployment_state.py
+          ai_workflow/deployment_guardrails.py
+          ai_workflow/deployment_runtime.py
           ai_workflow/benchmark_trajectory.py
           ai_workflow/retrieval_scheduler.py
           ai_workflow/path_policy.py
@@ -97,6 +100,9 @@ jobs:
           ai_workflow/contextual_policy.py
           ai_workflow/policy_manifest.py
           ai_workflow/shadow_policy.py
+          ai_workflow/deployment_state.py
+          ai_workflow/deployment_guardrails.py
+          ai_workflow/deployment_runtime.py
           ai_workflow/benchmark_trajectory.py
           ai_workflow/path_policy.py
           ai_workflow/typed_config.py
