@@ -2,7 +2,11 @@
 
 ## Memory
 
-AI Workflow stores durable memory in `ai-workspace/memory/memory.sqlite3` using SQLite transactions and WAL mode. Existing `memory.jsonl` data is backed up to `memory.jsonl.bak`, imported transactionally, validated, and retained for rollback/inspection. Import is idempotent by record id.
+AI Workflow stores durable memory in `ai-workspace/memory/memory.sqlite3` using SQLite transactions and WAL mode.
+
+Runtime memory is local state, not repository content. The `ai-workspace/memory/` directory is ignored by Git except for its README and is excluded from Docker build context. A checked-in or copied `memory.jsonl` file is treated as untrusted data and is **never imported automatically** when the store starts.
+
+Legacy JSONL import is an explicit trust decision. Review the source first, then call `SQLiteMemoryStore.import_jsonl(path)` from trusted operator tooling. Import is idempotent by record id.
 
 Portable export remains available:
 
@@ -14,30 +18,15 @@ The JSONL export is written atomically and can be used to migrate away from SQLi
 
 ## Telemetry privacy
 
-Retrieval traces are local JSON files under `ai-workspace/generated/traces`. Raw task text is **not stored by default**. Instead, traces contain a SHA-256 task fingerprint.
+Retrieval traces are local JSON files under `ai-workspace/generated/traces`. Raw task text and unkeyed task fingerprints are not stored locally by default.
 
-Optional configuration keys under `context.telemetry`:
+Project configuration may control local telemetry behavior such as mode, retention, trace-count limits, redaction patterns, and bounded export timeout. It does **not** have authority to choose an external telemetry destination, select credential-bearing headers, or enable raw task export.
 
-```json
-{
-  "mode": "mutations",
-  "store_task_text": false,
-  "retention_days": 30,
-  "max_trace_files": 200,
-  "redact_patterns": ["(?i)bearer\\s+\\S+", "(?i)api[_-]?key\\s*[=:]\\s*\\S+"],
-  "otlp_endpoint": "",
-  "export_timeout_seconds": 2.0,
-  "otlp_headers_env": ""
-}
-```
+Trusted runtime configuration controls external OTLP export through environment variables. The endpoint must use HTTPS, match an explicit allowlist, and pass destination safety checks. Redirects and local/link-local/private metadata-style destinations are rejected. Raw task export requires an explicit trusted runtime opt-in and redaction is applied before export.
 
-`redact_patterns` are applied before local persistence and export. Invalid regular expressions are ignored rather than breaking the workflow. If task storage is enabled, sensitive substrings can therefore still be removed before persistence.
+A keyed telemetry fingerprint can be enabled with `AI_WORKFLOW_TELEMETRY_HMAC_KEY` when local correlation is needed without exposing a dictionary-guessable plain prompt hash.
 
-## Optional OTLP export
-
-When `otlp_endpoint` is set, the zero-dependency core sends a best-effort OTLP-compatible JSON/HTTP log envelope. Export failures never make the local workflow fail. Authentication headers can be supplied indirectly by naming an environment variable in `otlp_headers_env`; that variable should contain a JSON object of HTTP headers.
-
-No OpenTelemetry SDK, MLflow, or other observability package is required at runtime.
+Export failures remain best-effort and never make the local workflow fail. No OpenTelemetry SDK, MLflow, or other observability package is required at runtime.
 
 ## Retention and latency
 
