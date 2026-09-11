@@ -67,11 +67,18 @@ def _accuracy(rows: list[dict], key: str) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
 
 
-def _isolated_case_config(config: dict) -> dict:
+def _isolated_case_config(
+    config: dict,
+    *,
+    research_protocol: bool = False,
+) -> dict:
     out = copy.deepcopy(config)
     workspace = out.setdefault("workspace", {})
     workspace["roots"] = []
     workspace["max_roots"] = 1
+    if research_protocol:
+        context = out.setdefault("context", {})
+        context["benchmark_isolation"] = True
     return out
 
 
@@ -151,7 +158,10 @@ def run_benchmark(
     for case in tasks:
         task = str(case.get("task", "")).strip()
         case_root = resolve_case_root(root, case)
-        case_config = _isolated_case_config(config)
+        case_config = _isolated_case_config(
+            config,
+            research_protocol=require_research_protocol,
+        )
         case_providers = detect(case_root, case_config)
         snapshot = snapshot_status(root, case)
         if require_frozen_snapshot and snapshot["status"] != "match":
@@ -354,6 +364,9 @@ def run_benchmark(
             "frozen_snapshot_check_supported": True,
             "selective_controls_supported": True,
             "multi_repo_case_isolation_supported": True,
+            "persistent_project_knowledge_isolated": bool(
+                require_research_protocol
+            ),
             "trajectory_utilization_metrics_supported": True,
             "task_types": [
                 "code2test",
