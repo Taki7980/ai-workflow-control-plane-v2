@@ -184,11 +184,15 @@ def choose_learning_decision(
         if valid:
             for arm, probability in raw_propensities.items():
                 name = str(arm).strip()
-                value = _fraction(probability, -1.0)
                 if (
                     name not in SAFE_EXPLORATION_ARMS
-                    or value < 0.0
+                    or isinstance(probability, bool)
+                    or not isinstance(probability, (int, float))
                 ):
+                    valid = False
+                    break
+                value = float(probability)
+                if not math.isfinite(value) or not 0.0 <= value <= 1.0:
                     valid = False
                     break
                 parsed[name] = value
@@ -294,6 +298,16 @@ def baseline_fallback(
     source: LearningDecision,
     reason: str,
 ) -> LearningDecision:
+    deployment = (
+        dict(source.deployment)
+        if source.deployment is not None
+        else None
+    )
+    if deployment is not None:
+        deployment["assignment"] = "baseline"
+        deployment["reason"] = reason
+        deployment["candidate_probability"] = 0.0
+        deployment["chosen_probability"] = 1.0
     return LearningDecision(
         decision_id=uuid.uuid4().hex,
         policy_version=source.policy_version,
@@ -313,11 +327,7 @@ def baseline_fallback(
         feature_schema_version=source.feature_schema_version,
         context_features=dict(source.context_features),
         created_at=_utc_now(),
-        deployment=(
-            dict(source.deployment)
-            if source.deployment is not None
-            else None
-        ),
+        deployment=deployment,
     )
 
 
