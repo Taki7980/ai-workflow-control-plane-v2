@@ -226,24 +226,28 @@ def span_retrieval_metrics(
         else None
     )
     for item in items:
-        span = context_item_span(item)
-        if span is None:
+        retrieved_span = context_item_span(item)
+        if retrieved_span is None:
             continue
         if remaining_lines is not None:
-            span_lines = span.end_line - span.start_line + 1
+            span_lines = (
+                retrieved_span.end_line - retrieved_span.start_line + 1
+            )
             if remaining_lines <= 0:
                 break
             if span_lines > remaining_lines:
-                span = RetrievedSpan(
-                    path=span.path,
-                    start_line=span.start_line,
-                    end_line=span.start_line + remaining_lines - 1,
-                    repository_id=span.repository_id,
+                retrieved_span = RetrievedSpan(
+                    path=retrieved_span.path,
+                    start_line=retrieved_span.start_line,
+                    end_line=(
+                        retrieved_span.start_line + remaining_lines - 1
+                    ),
+                    repository_id=retrieved_span.repository_id,
                 )
                 remaining_lines = 0
             else:
                 remaining_lines -= span_lines
-        ranked.append(span)
+        ranked.append(retrieved_span)
         if len(ranked) >= cutoff or remaining_lines == 0:
             break
 
