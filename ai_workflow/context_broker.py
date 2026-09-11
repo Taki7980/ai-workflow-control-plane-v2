@@ -240,7 +240,15 @@ def _research_hits(root: Path, query: str, limit: int) -> list[ContextItem]:
     rows.sort(key=lambda x: -x.score)
     return rows[:limit]
 
-def lightweight(root: Path, query: str, symbol: str | None, endpoint: str | None, limit: int, min_conf: float) -> list[ContextItem]:
+def lightweight(
+    root: Path,
+    query: str,
+    symbol: str | None,
+    endpoint: str | None,
+    limit: int,
+    min_conf: float,
+    include_project_knowledge: bool = True,
+) -> list[ContextItem]:
     state = load_state(root)
     out: list[ContextItem] = []
     for r in _jsonl(root / "ai-workspace" / "generated" / "symbol-index.jsonl"):
@@ -255,11 +263,39 @@ def lightweight(root: Path, query: str, symbol: str | None, endpoint: str | None
         s = 10 if endpoint and endpoint.lower() in r.get("path", "").lower() else _score(target, f"{r.get('method','')} {r.get('path','')} {r.get('file','')}")
         if s and row_fresh(root, r, state):
             out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "endpoint"}))
-    out.extend(_domain_hints(root, query, limit))
-    out.extend(_research_hits(root, query, limit))
-    for m in search_memory(root, query, limit=limit, minimum_confidence=min_conf, exclude_stale=True):
-        compact = {k: m.get(k) for k in ("id","type","summary","evidence","files","confidence")}
-        out.append(ContextItem("durable_memory", json.dumps(compact, ensure_ascii=False, separators=(",", ":")), float(m.get("score", 0)), False))
+    if include_project_knowledge:
+        out.extend(_domain_hints(root, query, limit))
+        out.extend(_research_hits(root, query, limit))
+        for m in search_memory(
+            root,
+            query,
+            limit=limit,
+            minimum_confidence=min_conf,
+            exclude_stale=True,
+        ):
+            compact = {
+                k: m.get(k)
+                for k in (
+                    "id",
+                    "type",
+                    "summary",
+                    "evidence",
+                    "files",
+                    "confidence",
+                )
+            }
+            out.append(
+                ContextItem(
+                    "durable_memory",
+                    json.dumps(
+                        compact,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    float(m.get("score", 0)),
+                    False,
+                )
+            )
     out.sort(key=lambda item: -item.score)
     if len(out) <= limit or not query:
         return out[:limit]
@@ -341,6 +377,9 @@ def targeted_source(root: Path, query: str, limit: int) -> list[ContextItem]:
 
 def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudget, config: dict, providers: ProviderStatus, symbol: str | None = None, endpoint: str | None = None, changed_files: list[str] | None = None) -> list[ContextItem]:
     limit = int(config["context"].get("max_results_per_source", 6))
+    benchmark_isolation = bool(
+        config["context"].get("benchmark_isolation", False)
+    )
     items: list[ContextItem] = []
     seen_keys: set[str] = set()
 
@@ -358,13 +397,28 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
     if changed_files:
         test_items = find_tests_for_changed(root, changed_files)
         items += _cap_items(test_items, 600, seen_keys)
-    # Priority 0: Hot cache
-    hot = hot_cache(root, query, limit)
-    items += _cap_items(hot, budget.source_chars.get("hot_cache", 1000), seen_keys, query=query)
-    
+    # Priority 0: Hot cache. Research benchmarks isolate project-generated
+    # knowledge so repository retrieval is not contaminated by prior runs.
+    hot = [] if benchmark_isolation else hot_cache(root, query, limit)
+    items += _cap_items(
+        hot,
+        budget.source_chars.get("hot_cache", 1000),
+        seen_keys,
+        query=query,
+    )
+
     # Gather only potentially useful expensive providers in parallel.
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        f_light = executor.submit(lightweight, root, query, symbol, endpoint, limit, float(config["memory"].get("minimum_confidence", 0.55)))
+        f_light = executor.submit(
+            lightweight,
+            root,
+            query,
+            symbol,
+            endpoint,
+            limit,
+            float(config["memory"].get("minimum_confidence", 0.55)),
+            not benchmark_isolation,
+        )
         f_crg = executor.submit(crg_context, root, query, symbol, changed_files, limit) if wants_crg else None
 
         # Priority 1: Lightweight index + domain hints + research + memory
