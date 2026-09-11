@@ -56,6 +56,8 @@ jobs:
           ruff check --select E,F,UP,BLE,EXE
           ai_workflow/retrieval_contracts.py
           ai_workflow/benchmark_protocol.py
+          ai_workflow/benchmark_spans.py
+          ai_workflow/benchmark_corpus.py
           ai_workflow/benchmark_ablation.py
           ai_workflow/benchmark_algorithm_ablation.py
           ai_workflow/benchmark_intervention.py
@@ -93,6 +95,8 @@ jobs:
           mypy --follow-imports=skip
           ai_workflow/retrieval_contracts.py
           ai_workflow/benchmark_protocol.py
+          ai_workflow/benchmark_spans.py
+          ai_workflow/benchmark_corpus.py
           ai_workflow/benchmark_ablation.py
           ai_workflow/benchmark_algorithm_ablation.py
           ai_workflow/benchmark_intervention.py
@@ -178,6 +182,11 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/benchmark-fixture" "$BASELINE_COMMIT"
           echo "BASELINE_COMMIT=$BASELINE_COMMIT" >> "$GITHUB_ENV"
           echo "BENCHMARK_FIXTURE=$RUNNER_TEMP/benchmark-fixture" >> "$GITHUB_ENV"
+      - name: Capture clean corpus-v2 snapshot identity
+        shell: bash
+        run: |
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark-corpus snapshot \
+            --repository . --strict > "$RUNNER_TEMP/research-snapshot.json"
       - name: Build frozen fixture index and validate installation contract
         run: |
           python -m ai_workflow --root "$BENCHMARK_FIXTURE" index
@@ -189,6 +198,92 @@ jobs:
             --tasks "$BENCHMARK_FIXTURE/benchmarks/sample-tasks.json" \
             --output benchmark-result.json > /dev/null
           python scripts/check_benchmark_regression.py benchmarks/baseline.json benchmark-result.json
+      - name: Run corpus-v2 span/frozen-content smoke
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          fixture = Path(os.environ["BENCHMARK_FIXTURE"])
+          snapshot = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "research-snapshot.json").read_text()
+          )
+          source = fixture / "ai_workflow" / "math_retrieval.py"
+          lines = source.read_text(encoding="utf-8").splitlines()
+          start = next(
+              index
+              for index, line in enumerate(lines, 1)
+              if "class BM25Scorer" in line
+          )
+          document = {
+              "schema_version": 2,
+              "corpus_id": "ci-research-smoke",
+              "source": {
+                  "name": "AI Workflow frozen CI fixture",
+                  "url": "https://github.com/Taki7980/ai-workflow-control-plane-v2",
+                  "license": "repository license",
+              },
+              "split": "ci",
+              "cases": [
+                  {
+                      "schema_version": 2,
+                      "case_id": "ci-comment2context-bm25",
+                      "task": "Explain how BM25Scorer ranks documents",
+                      "task_type": "comment2context",
+                      "control_type": "positive",
+                      "repository_id": "ci-fixture",
+                      "repository_path": ".",
+                      "base_commit": snapshot["actual_head"],
+                      "content_manifest_sha256": snapshot[
+                          "content_manifest_sha256"
+                      ],
+                      "symbol": "BM25Scorer",
+                      "gold_files": ["ai_workflow/math_retrieval.py"],
+                      "gold_spans": [
+                          {
+                              "path": "ai_workflow/math_retrieval.py",
+                              "start_line": start,
+                              "end_line": min(start + 25, len(lines)),
+                          }
+                      ],
+                      "language": "python",
+                      "label_source": "deterministic_ci_fixture",
+                      "labeler_count": 1,
+                      "budget_tokens": 1200,
+                      "budget_lines": 80,
+                      "retrieval_k": 5,
+                  }
+              ],
+          }
+          Path("research-smoke-v2.json").write_text(
+              json.dumps(document, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python -m ai_workflow benchmark-corpus validate \
+            --input research-smoke-v2.json > /dev/null
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark \
+            --tasks research-smoke-v2.json \
+            --research-protocol \
+            --require-frozen-snapshot \
+            --output research-smoke-result.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("research-smoke-result.json").read_text())
+          case = data["cases"][0]
+          assert case["snapshot"]["match"] is True
+          assert case["snapshot"]["worktree_clean"] is True
+          assert "span_retrieval" in case
+          assert case["span_retrieval"]["line_recall"] > 0
+          assert data["research_protocol"]["span_level_gold_supported"] is True
+          PY
+      - name: Print measured benchmark summary
+        shell: bash
+        run: |
           python - <<'PY'
           import json
           from pathlib import Path
