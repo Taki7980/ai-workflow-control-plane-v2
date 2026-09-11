@@ -191,6 +191,13 @@ jobs:
         run: |
           python -m ai_workflow --root "$BENCHMARK_FIXTURE" index
           python -m ai_workflow --root "$BENCHMARK_FIXTURE" doctor --strict
+      - name: Verify fixture remains clean after index
+        shell: bash
+        run: |
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark-corpus snapshot \
+            --repository . > "$RUNNER_TEMP/research-snapshot-after-index.json"
+          cat "$RUNNER_TEMP/research-snapshot-after-index.json"
+          test -z "$(git -C "$BENCHMARK_FIXTURE" status --porcelain=v1 --untracked-files=all)"
       - name: Run measured benchmark regression gate
         shell: bash
         run: |
