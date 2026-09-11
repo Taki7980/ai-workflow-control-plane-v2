@@ -4,6 +4,7 @@ from pathlib import Path
 from .providers import detect
 from .indexer import load_state, sha256
 from .handoff import validate as validate_handoff
+from .sqlite_runtime import sqlite_wal_runtime_status
 
 DOCTOR_SCHEMA_VERSION = 1
 
@@ -50,7 +51,28 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
         recommendations.append("Code Review Graph is installed but no healthy graph was detected; run `code-review-graph build`")
     if not status.superpowers:
         recommendations.append("Superpowers not detected; Full lane will use native Plan -> Build -> Review")
-    core_ok = config.get("version") == 2 and bool(state) and not handoff_errors and stale == 0
+    production_cfg = (
+        config.get("context", {}).get("production", {})
+        if isinstance(config.get("context"), dict)
+        else {}
+    )
+    production_enabled = (
+        isinstance(production_cfg, dict)
+        and bool(production_cfg.get("enabled", False))
+    )
+    sqlite_wal = sqlite_wal_runtime_status()
+    if production_enabled and not sqlite_wal["safe_for_wal"]:
+        recommendations.append(
+            "Production WAL mirror is enabled on an SQLite runtime affected "
+            "by the WAL-reset corruption bug; upgrade SQLite before use"
+        )
+    core_ok = (
+        config.get("version") == 2
+        and bool(state)
+        and not handoff_errors
+        and stale == 0
+        and (not production_enabled or sqlite_wal["safe_for_wal"])
+    )
     optional_capabilities = {
         "ripgrep": bool(status.ripgrep),
         "rtk": bool(status.rtk),
@@ -66,6 +88,10 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
         "optional_capabilities": optional_capabilities,
         "code_review_graph_health": crg_health,
         "config_version": config.get("version"),
+        "sqlite_wal_runtime": {
+            **sqlite_wal,
+            "production_mirror_enabled": production_enabled,
+        },
         "index": {"present": bool(state), "tracked_files": tracked, "stale_files": stale},
         "handoff_errors": handoff_errors,
         "recommendations": recommendations,
