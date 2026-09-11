@@ -8,6 +8,7 @@ from typing import Callable
 from .budget import ContextBudget, truncate
 from .context_broker import gather as default_base_gather
 from .context_selection import select_context
+from .deployment_runtime import resolve_runtime_deployment
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .models import ContextItem, Lane, RouteDecision
 from .orchestration import build_orchestration_contract
@@ -235,6 +236,15 @@ class WorkflowEngine:
             endpoint=endpoint,
         )
         roots = workspace_roots(root, config)
+        deployment_assignment = resolve_runtime_deployment(
+            root,
+            query,
+            decision,
+            plan.intent.value,
+            config,
+            changed_files_count=len(changed),
+            workspace_roots_count=len(roots),
+        )
         learning_decision, learning_path = prepare_learning_decision(
             root,
             query,
@@ -243,6 +253,7 @@ class WorkflowEngine:
             config,
             changed_files_count=len(changed),
             workspace_roots_count=len(roots),
+            deployment_assignment=deployment_assignment,
         )
         effective_config = apply_learning_arm(
             config,
