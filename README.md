@@ -582,6 +582,101 @@ ai-workflow deployment rollback \
 
 A rolled-back deployment state is terminal. Reactivation requires creating a new approved deployment state rather than mutating the old rollback record.
 
+Stage 8 hardens the rollout for production operation without increasing policy autonomy.
+
+### Same-host WAL evidence mirror
+
+Canonical immutable JSON decision, observation, and outcome records remain the safety source of truth. An optional SQLite WAL mirror can be enabled for higher-volume same-host querying and reconciliation:
+
+```json
+{
+  "context": {
+    "production": {
+      "enabled": true,
+      "sqlite_path": "ai-workspace/generated/learning/production/events.sqlite3",
+      "busy_timeout_ms": 5000
+    }
+  }
+}
+```
+
+Existing learning records can be backfilled idempotently:
+
+```bash
+ai-workflow production sync
+ai-workflow production status
+ai-workflow production reconcile
+```
+
+The mirror uses WAL mode, `synchronous=FULL`, a busy timeout, immutable event IDs, and SHA-256 payload digests. `reconcile` compares the SQLite mirror with the canonical JSON files and fails when canonical events are missing or have a different digest.
+
+This SQLite mode is intentionally **same-host only**. SQLite WAL relies on shared-memory coordination and is not used as a multi-host/network-filesystem consensus mechanism.
+
+### Crash-recoverable local rollout lock
+
+Deployment-state mutation still uses a very small local critical section. Stage 8 adds owner metadata, a random ownership token, and bounded stale-lock recovery so a process crash cannot leave the rollout permanently locked.
+
+This is a local-filesystem lock. It is not a distributed lock and does not claim cross-host mutual exclusion.
+
+### Correlation-aware rollout diagnostics
+
+Live rollout reports now include a cluster bootstrap grouped by `task_fingerprint`. Repeated observations of the same task fingerprint stay in the same resampled cluster instead of being treated as independent evidence.
+
+Promotion requires both the normal verified-outcome minimum and a minimum number of task clusters. A confidently negative cluster-bootstrap upper bound can independently request rollback.
+
+Defaults:
+
+```text
+minimum_monitor_clusters = 5
+cluster_bootstrap_resamples = 2000
+cluster_bootstrap_seed = 20260911
+```
+
+These are implementation defaults, not guarantees from the bootstrap literature.
+
+### Low-cardinality observability snapshot
+
+Export the current rollout metrics:
+
+```bash
+ai-workflow deployment metrics --output deployment-metrics.json
+```
+
+The Stage 8 export uses namespaced metric identifiers such as:
+
+```text
+ai_workflow.deployment.candidate.exposure
+ai_workflow.deployment.candidate.failure_ratio
+ai_workflow.deployment.context.tv_distance
+ai_workflow.deployment.guardrail.rollback_required
+ai_workflow.deployment.cluster.reward_difference
+```
+
+Only `policy_id` and rollout `stage` are exported as metric attributes. Per-request decision IDs, task fingerprints, repository paths, raw task text, and repository content are deliberately excluded.
+
+The file is an observability interchange contract inspired by OpenTelemetry metric conventions; it is not a native OTLP exporter.
+
+### Signed rollback incident bundles
+
+Automatic and manual rollbacks can emit an immutable signed incident bundle under:
+
+```text
+ai-workspace/generated/learning/deployment/incidents/
+```
+
+The bundle contains state/guardrail digests, the rollout generation/stage, the rollback reason, aggregate evidence counts, outcome-source counts, and a short list of decision IDs for local investigation. It does not embed task text, repository content, environment variables, or the signing key.
+
+Verify a bundle with:
+
+```bash
+ai-workflow deployment verify-incident \
+  --input ai-workspace/generated/learning/deployment/incidents/<id>.json
+```
+
+Incident capture is secondary to rollback. A failed incident write never cancels or reverses a successful rollback.
+
+Stage 8 deliberately does **not** add fake multi-approver controls. Real separation of duties requires independently authenticated actors/credentials; adding two strings to the same local command would not provide that property.
+
 These are routing/retrieval metrics. They do not prove downstream patch correctness or billed-token savings.
 
 ## Verification
@@ -608,6 +703,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-11-retrieval-learning-stage5.md`
 - `docs/research/2026-09-11-contextual-learning-stage6.md`
 - `docs/research/2026-09-11-controlled-deployment-stage7.md`
+- `docs/research/2026-09-11-production-hardening-stage8.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
