@@ -218,6 +218,28 @@ Mutation/Full workflows can write atomic local traces under `ai-workspace/genera
 
 ## Benchmarking
 
+Stage 9 separates the legacy regression smoke set from research-scale evidence. The
+new corpus-v2 contract adds clean-content snapshots, repository identity, span/line
+gold, fixed benchmark budgets, control provenance, and explicit source/licensing
+metadata.
+
+Author and validate research data with:
+
+```bash
+ai-workflow benchmark-corpus snapshot --repository . --strict
+ai-workflow benchmark-corpus validate --input corpus-v2.json
+ai-workflow benchmark-corpus validate --input corpus-v2.json --require-ready
+```
+
+Corpus-v2 documents can be passed directly to `ai-workflow benchmark`. Strict
+frozen execution now requires the expected Git HEAD **and** a clean worktree; v2
+research cases additionally bind to a tracked-tree SHA-256 manifest.
+
+Span-labelled cases report span Precision/Recall/F1, line precision/recall, first
+gold rank, and gold-line yield under optional fixed line budgets. The bundled
+`sample-tasks.json` remains a regression smoke suite and is not claimed to be an
+ARB-scale research corpus.
+
 The built-in corpus contains exact, semantic, structural, mutation, high-risk, path, mixed, and no-gold controls. Metrics include:
 
 - lane and retrieval-intent accuracy;
@@ -706,6 +728,7 @@ Research/design rationale and formulas are documented in:
 - `docs/research/2026-09-11-contextual-learning-stage6.md`
 - `docs/research/2026-09-11-controlled-deployment-stage7.md`
 - `docs/research/2026-09-11-production-hardening-stage8.md`
+- `docs/research/2026-09-11-benchmark-corpus-v2-stage9.md`
 - `docs/superpowers/specs/2026-09-07-v22-agentic-orchestration-design.md`
 
 ## Design principles
