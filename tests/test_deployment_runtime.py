@@ -313,6 +313,16 @@ class DeploymentRuntimeTests(unittest.TestCase):
                 changed_files_count=1,
             )
             current = load_deployment_state(root / "active.json")
+            incidents = list(
+                (
+                    root
+                    / "ai-workspace"
+                    / "generated"
+                    / "learning"
+                    / "deployment"
+                    / "incidents"
+                ).glob("*.json")
+            )
 
         self.assertEqual(assignment["chosen_arm"], BASELINE_ARM)
         self.assertEqual(
@@ -322,6 +332,7 @@ class DeploymentRuntimeTests(unittest.TestCase):
         self.assertEqual(current["stage"], "rolled_back")
         self.assertEqual(current["traffic_fraction"], 0.0)
         self.assertTrue(current["rollback"]["automatic"])
+        self.assertEqual(len(incidents), 1)
 
 
 if __name__ == "__main__":
