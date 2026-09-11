@@ -176,12 +176,11 @@ def choose_learning_decision(
             deployment_assignment.get("chosen_arm", BASELINE_ARM)
         ).strip()
         raw_propensities = deployment_assignment.get("arm_propensities")
-        valid = (
-            raw_arm in SAFE_EXPLORATION_ARMS
-            and isinstance(raw_propensities, dict)
-        )
+        valid = raw_arm in SAFE_EXPLORATION_ARMS
         parsed: dict[str, float] = {}
-        if valid:
+        if not isinstance(raw_propensities, dict):
+            valid = False
+        elif valid:
             for arm, probability in raw_propensities.items():
                 name = str(arm).strip()
                 if (
