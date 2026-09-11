@@ -367,14 +367,29 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> str:
     return path.as_posix()
 
 
+def _mirror_production_event(
+    root: Path,
+    config: dict[str, Any] | None,
+    event_type: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    from .production_store import mirror_learning_event
+
+    return mirror_learning_event(root, config, event_type, payload)
+
+
 def write_learning_decision(
     root: Path,
     decision: LearningDecision,
+    config: dict[str, Any] | None = None,
 ) -> str:
-    return _write_immutable(
+    payload = decision.to_dict()
+    path = _write_immutable(
         _record_path(root, "decisions", decision.decision_id),
-        decision.to_dict(),
+        payload,
     )
+    _mirror_production_event(root, config, "decision", payload)
+    return path
 
 
 def prepare_learning_decision(
@@ -402,13 +417,13 @@ def prepare_learning_decision(
     if selected.mode == "off":
         return selected, None
     try:
-        return selected, write_learning_decision(root, selected)
+        return selected, write_learning_decision(root, selected, config)
     except OSError:
         if selected.chosen_arm == BASELINE_ARM:
             return selected, None
         fallback = baseline_fallback(selected, "decision_log_failure")
         try:
-            return fallback, write_learning_decision(root, fallback)
+            return fallback, write_learning_decision(root, fallback, config)
         except OSError:
             return fallback, None
 
@@ -422,6 +437,7 @@ def write_learning_observation(
     fallback_count: int,
     sufficiency_score: float,
     evidence_state: str,
+    config: dict[str, Any] | None = None,
 ) -> str:
     payload = {
         "decision_id": decision_id,
@@ -435,10 +451,12 @@ def write_learning_observation(
         ),
         "evidence_state": str(evidence_state),
     }
-    return _write_immutable(
+    path = _write_immutable(
         _record_path(root, "observations", decision_id),
         payload,
     )
+    _mirror_production_event(root, config, "observation", payload)
+    return path
 
 
 def record_verified_outcome(
@@ -450,6 +468,7 @@ def record_verified_outcome(
     reward: float | None = None,
     realized_cost: float = 0.0,
     metadata: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> str:
     decision_path = _record_path(root, "decisions", decision_id)
     if not decision_path.exists():
@@ -505,10 +524,12 @@ def record_verified_outcome(
         ),
         "metadata": dict(metadata or {}),
     }
-    return _write_immutable(
+    path = _write_immutable(
         _record_path(root, "outcomes", decision_id),
         payload,
     )
+    _mirror_production_event(root, config, "outcome", payload)
+    return path
 
 
 def _read_records(directory: Path) -> dict[str, dict[str, Any]]:
