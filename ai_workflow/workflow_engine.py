@@ -480,7 +480,7 @@ class WorkflowEngine:
                 diagnostics["learning"]["observation_logged"] = False
                 diagnostics["learning"]["observation_path"] = None
         if write_telemetry and trace_enabled(config, decision.lane.value):
-            diagnostics["trace"] = write_trace(root, trace)
+            diagnostics["trace"] = write_trace(root, trace, config)
         return selected, diagnostics
 
     def gather_detailed(self, *args, **kwargs):
