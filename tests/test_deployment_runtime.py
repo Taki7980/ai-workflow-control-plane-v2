@@ -211,6 +211,35 @@ class DeploymentRuntimeTests(unittest.TestCase):
             {BASELINE_ARM: 1.0},
         )
 
+    @patch.dict(
+        "os.environ",
+        {
+            "STAGE7_KEY": "secret-key",
+            "AI_WORKFLOW_LEARNING_KILL_SWITCH": "1",
+        },
+        clear=False,
+    )
+    def test_global_learning_kill_switch_stops_canary(self):
+        key = b"secret-key"
+        config = deployment_config()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._state(root, key)
+            assignment = resolve_runtime_deployment(
+                root,
+                "find exact payment helper now",
+                RouteDecision(Lane.SMALL, Risk.LOW),
+                "exact",
+                config,
+                changed_files_count=1,
+            )
+
+        self.assertEqual(assignment["chosen_arm"], BASELINE_ARM)
+        self.assertEqual(
+            assignment["safety_reason"],
+            "deployment_global_kill_switch",
+        )
+
     def test_missing_signing_key_fails_closed_even_if_learning_explores(self):
         config = deployment_config()
         with tempfile.TemporaryDirectory() as temp:
