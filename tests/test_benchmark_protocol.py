@@ -109,7 +109,11 @@ class BenchmarkProtocolTests(unittest.TestCase):
 
     @patch("ai_workflow.benchmark_protocol.subprocess.run")
     def test_snapshot_status_matches_declared_head(self, run):
-        run.return_value = Mock(returncode=0, stdout=("c" * 40) + "\n")
+        run.side_effect = [
+            Mock(returncode=0, stdout=(("c" * 40) + "\n").encode()),
+            Mock(returncode=0, stdout=b""),
+            Mock(returncode=0, stdout=b"100644 blob file.py\x00"),
+        ]
         status = snapshot_status(
             Path("."),
             {
@@ -119,6 +123,45 @@ class BenchmarkProtocolTests(unittest.TestCase):
         )
         self.assertEqual(status["status"], "match")
         self.assertTrue(status["match"])
+        self.assertTrue(status["worktree_clean"])
+        self.assertEqual(len(status["content_manifest_sha256"]), 64)
+
+    @patch("ai_workflow.benchmark_protocol.subprocess.run")
+    def test_snapshot_status_rejects_dirty_worktree(self, run):
+        run.side_effect = [
+            Mock(returncode=0, stdout=(("d" * 40) + "\n").encode()),
+            Mock(returncode=0, stdout=b" M ai_workflow/benchmark.py\x00"),
+            Mock(returncode=0, stdout=b"100644 blob file.py\x00"),
+        ]
+
+        status = snapshot_status(
+            Path("."),
+            {"repository_path": ".", "base_commit": "d" * 40},
+        )
+
+        self.assertEqual(status["status"], "dirty_worktree")
+        self.assertFalse(status["match"])
+
+    def test_schema_v2_positive_requires_span_and_content_manifest(self):
+        case = {
+            "schema_version": 2,
+            "case_id": "v2-1",
+            "task": "find test",
+            "task_type": "code2test",
+            "control_type": "positive",
+            "repository_id": "repo-a",
+            "base_commit": "a" * 40,
+            "gold_files": ["src/a.py"],
+            "language": "python",
+            "label_source": "human",
+            "labeler_count": 1,
+        }
+
+        with self.assertRaises(ValueError):
+            validate_benchmark_cases(
+                [case],
+                require_research_protocol=True,
+            )
 
 
 if __name__ == "__main__":
