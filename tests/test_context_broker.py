@@ -4,6 +4,40 @@ from unittest.mock import patch
 from ai_workflow.context_broker import _domain_hints, _score, lightweight
 
 class ContextBrokerTests(unittest.TestCase):
+    def test_lightweight_can_exclude_project_knowledge_without_memory_migration(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            legacy = root / "ai-workspace" / "memory" / "memory.jsonl"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text(
+                '{"id":"mem-1","type":"pattern","created_at":"2026-01-01T00:00:00+00:00","verified_at":"2026-01-01T00:00:00+00:00","keywords":["bm25"],"summary":"prior project knowledge","evidence":"","files":[],"source_hashes":{},"confidence":1.0}\n',
+                encoding="utf-8",
+            )
+            with patch(
+                "ai_workflow.context_broker.load_state",
+                return_value={},
+            ), patch(
+                "ai_workflow.context_broker._jsonl",
+                side_effect=[[], []],
+            ), patch(
+                "ai_workflow.context_broker.search_memory",
+            ) as memory_search:
+                items = lightweight(
+                    root,
+                    "bm25",
+                    None,
+                    None,
+                    limit=5,
+                    min_conf=0.5,
+                    include_project_knowledge=False,
+                )
+
+            self.assertEqual(items, [])
+            memory_search.assert_not_called()
+            self.assertFalse(
+                (root / "ai-workspace" / "memory" / "memory.sqlite3").exists()
+            )
+
     def test_score_uses_tokens_not_substrings(self):
         self.assertEqual(_score("auth", "author guide"), 0)
         self.assertEqual(_score("ProcessPayment", "def ProcessPayment():"), 3)
