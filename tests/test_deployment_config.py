@@ -31,6 +31,26 @@ class DeploymentConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_config(config)
 
+    def test_default_production_store_is_disabled(self):
+        config = default_config()
+
+        self.assertFalse(config["context"]["production"]["enabled"])
+        validate_config(config)
+
+    def test_production_store_path_cannot_escape_project_root(self):
+        config = default_config()
+        config["context"]["production"]["sqlite_path"] = "../events.sqlite3"
+
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_incident_bundle_flag_must_be_boolean(self):
+        config = default_config()
+        config["context"]["deployment"]["incident_bundles"] = "yes"
+
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
     def test_deployment_requires_nonempty_signing_key_env_name(self):
         config = default_config()
         config["context"]["deployment"]["signing_key_env"] = ""
