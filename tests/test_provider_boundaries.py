@@ -205,6 +205,43 @@ class ProviderBoundaryContractTests(unittest.TestCase):
             finally:
                 external.unlink(missing_ok=True)
 
+    def test_trusted_provider_does_not_run_from_repository_cwd(self):
+        runner = self._module("ai_workflow.provider_runner")
+        contracts = self._module("ai_workflow.retrieval_contracts")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root_cwd = root.resolve()
+            code = (
+                "import json,os,sys;"
+                "sys.stdin.read();"
+                "print(json.dumps({'items':[{'text':os.getcwd(),'score':1.0}]}))"
+            )
+            spec = runner.CommandProviderSpec(
+                name="trusted-cwd",
+                command=(sys.executable, "-c", code),
+                timeout_seconds=2,
+                max_output_bytes=4096,
+                executable_trust="trusted_registry_digest",
+            )
+            result = runner.run_command_provider(
+                spec,
+                contracts.RetrievalRequest(
+                    "q",
+                    root,
+                    1,
+                    "semantic",
+                    2,
+                ),
+                source="external:trusted-cwd",
+            )
+            self.assertIsNone(result.error)
+            actual_cwd = Path(result.items[0].text).resolve()
+            self.assertNotEqual(actual_cwd, root_cwd)
+            self.assertEqual(
+                actual_cwd,
+                Path(sys.executable).resolve().parent,
+            )
+
     def test_command_runner_returns_success_with_bounded_typed_result(self):
         runner = self._module("ai_workflow.provider_runner")
         contracts = self._module("ai_workflow.retrieval_contracts")
