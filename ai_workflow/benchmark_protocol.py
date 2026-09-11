@@ -294,6 +294,10 @@ def validate_benchmark_cases(
                 raise ValueError(
                     f"benchmark case {index} schema v2 requires case_id"
                 )
+            if not str(case.get("repository_id", "")).strip():
+                raise ValueError(
+                    f"benchmark case {index} schema v2 requires repository_id"
+                )
             if not str(case.get("language", "")).strip():
                 raise ValueError(
                     f"benchmark case {index} schema v2 requires language"
@@ -312,6 +316,14 @@ def validate_benchmark_cases(
                 raise ValueError(
                     f"benchmark case {index} schema v2 requires "
                     "labeler_count >= 1"
+                )
+            if (
+                control_type != "positive"
+                and not str(case.get("control_source", "")).strip()
+            ):
+                raise ValueError(
+                    f"benchmark case {index} schema v2 selective controls "
+                    "require control_source provenance"
                 )
             for budget_field in ("budget_tokens", "budget_lines"):
                 if case.get(budget_field) is None:
