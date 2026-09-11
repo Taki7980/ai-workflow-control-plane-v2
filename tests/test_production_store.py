@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_workflow.config import default_config
 from ai_workflow.models import Lane, Risk, RouteDecision
@@ -31,6 +32,14 @@ def production_config():
 
 
 class ProductionStoreTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch(
+            "ai_workflow.production_store.require_safe_sqlite_wal_runtime",
+            return_value={"safe_for_wal": True, "version": "test"},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_mirrors_learning_lifecycle_and_reconciles(self):
         config = production_config()
         with tempfile.TemporaryDirectory() as temp:
