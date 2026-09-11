@@ -8,6 +8,10 @@ from pathlib import Path
 
 from .adaptive_broker import gather_detailed
 from .benchmark import load_tasks, run_benchmark
+from .benchmark_corpus import (
+    corpus_summary,
+    load_corpus_document,
+)
 from .benchmark_ablation import PROFILE_ORDER, run_ablation_suite
 from .benchmark_algorithm_ablation import (
     ALGORITHM_PROFILE_ORDER,
@@ -20,6 +24,7 @@ from .benchmark_intervention import (
 )
 from .benchmark_calibration import calibrate_sufficiency_threshold
 from .benchmark_policy_advisor import build_safe_policy_advisor
+from .benchmark_protocol import capture_repository_snapshot
 from .benchmark_statistics import analyze_seed_report
 from .bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
 from .budget import budget_for
@@ -434,6 +439,33 @@ def cmd_verify(args):
     result = verify(root, args.check or [], int(cfg["handoff"].get("max_lines", 30)))
     _json(result)
     if args.strict and not result["ok"]:
+        raise SystemExit(1)
+
+
+def cmd_benchmark_corpus_validate(args):
+    document = load_corpus_document(Path(args.input))
+    summary = corpus_summary(document)
+    _json(summary)
+    if args.require_ready and not summary["publication_readiness"]["ready"]:
+        raise SystemExit(1)
+
+
+def cmd_benchmark_corpus_snapshot(args):
+    root = _root(args)
+    candidate = (root / args.repository).resolve()
+    if not candidate.is_relative_to(root):
+        raise SystemExit("benchmark repository must stay inside project root")
+    if not candidate.is_dir():
+        raise SystemExit(
+            f"benchmark repository does not exist: {args.repository}"
+        )
+    snapshot = capture_repository_snapshot(candidate)
+    snapshot["repository_path"] = candidate.relative_to(root).as_posix() or "."
+    _json(snapshot)
+    if args.strict and (
+        snapshot.get("status") != "captured"
+        or not snapshot.get("worktree_clean")
+    ):
         raise SystemExit(1)
 
 
@@ -1083,6 +1115,36 @@ def build_parser():
     q.add_argument("--strict", action="store_true")
     q.set_defaults(func=cmd_verify)
 
+    q = sp.add_parser(
+        "benchmark-corpus",
+        help="author and validate research-grade benchmark corpus v2 data",
+    )
+    bcsp = q.add_subparsers(dest="benchmark_corpus_command", required=True)
+
+    bc = bcsp.add_parser(
+        "validate",
+        help="validate corpus-v2 schema and report publication readiness",
+    )
+    bc.add_argument("--input", required=True)
+    bc.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="exit nonzero unless the corpus clears the research-scale floor",
+    )
+    bc.set_defaults(func=cmd_benchmark_corpus_validate)
+
+    bc = bcsp.add_parser(
+        "snapshot",
+        help="capture Git HEAD, cleanliness, and tracked-tree manifest",
+    )
+    bc.add_argument("--repository", default=".")
+    bc.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit nonzero unless the repository is clean and capturable",
+    )
+    bc.set_defaults(func=cmd_benchmark_corpus_snapshot)
+
     q = sp.add_parser("benchmark")
     q.add_argument("--tasks", required=True)
     q.add_argument("--output")
@@ -1090,14 +1152,17 @@ def build_parser():
         "--research-protocol",
         action="store_true",
         help=(
-            "require Agent Retrieval Bench-style task types, file-level gold "
-            "labels, frozen base commits, and selective-control metadata"
+            "require research task types, file/span gold labels, clean "
+            "frozen contents, and selective-control provenance"
         ),
     )
     q.add_argument(
         "--require-frozen-snapshot",
         action="store_true",
-        help="fail if any declared benchmark base_commit differs from the local checkout",
+        help=(
+            "fail unless declared base commit, clean worktree, and optional "
+            "content manifest all match"
+        ),
     )
     q.set_defaults(func=cmd_benchmark)
 
