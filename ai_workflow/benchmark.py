@@ -9,6 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .adaptive_broker import gather_detailed
+from .benchmark_corpus import canonical_cases
 from .benchmark_protocol import (
     file_retrieval_metrics,
     repository_control_metrics,
@@ -472,9 +473,14 @@ def load_tasks(
     require_research_protocol: bool = False,
 ) -> list[dict]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise ValueError("benchmark task file must be a JSON array")
-    tasks = [x for x in data if isinstance(x, dict)]
+    if isinstance(data, dict):
+        tasks = canonical_cases(data)
+    elif isinstance(data, list):
+        tasks = [x for x in data if isinstance(x, dict)]
+    else:
+        raise ValueError(
+            "benchmark task file must be a JSON array or corpus-v2 object"
+        )
     return validate_benchmark_cases(
         tasks,
         require_research_protocol=require_research_protocol,
