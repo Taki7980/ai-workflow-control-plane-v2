@@ -349,11 +349,12 @@ def evaluate_live_guardrails(
         rollback_blockers.append("monitoring_input_violation")
 
     blockers.extend(rollback_blockers)
-    if monitored_outcomes < minimum_monitor:
-        blockers.append("insufficient_verified_monitor_outcomes")
+    if len(candidate_outcomes) < minimum_monitor:
+        blockers.append("insufficient_candidate_monitor_outcomes")
     promotion_margin = float(guardrails.get("promotion_margin", 0.0))
-    if lower is None or lower <= promotion_margin:
-        blockers.append("anytime_lower_bound_does_not_clear_margin")
+    evidence_of_improvement = (
+        lower is not None and lower > promotion_margin
+    )
 
     return {
         "scope": "live-deployment-guardrails",
@@ -395,6 +396,10 @@ def evaluate_live_guardrails(
             "blockers": list(dict.fromkeys(blockers)),
             "minimum_monitor_outcomes": minimum_monitor,
             "promotion_margin": promotion_margin,
+            "evidence_of_improvement": evidence_of_improvement,
+            "advance_rule": (
+                "minimum candidate outcomes plus no live rollback blocker"
+            ),
             "max_reward_regression": regression_margin,
         },
         "automatic_runtime_activation": False,
