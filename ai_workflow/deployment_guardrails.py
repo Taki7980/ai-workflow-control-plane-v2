@@ -247,7 +247,12 @@ def evaluate_live_guardrails(
     )
 
     drift_window = max(1, int(guardrails.get("drift_window", 200)))
-    recent = live_rows[-drift_window:]
+    drift_rows = [
+        row
+        for row in live_rows
+        if str(row.get("risk", "")).lower() == "low"
+    ]
+    recent = drift_rows[-drift_window:]
     current_distribution, drift_samples, invalid_contexts = (
         _context_distribution(recent, fields)
     )
