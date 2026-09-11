@@ -1,3 +1,5 @@
+import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +7,7 @@ from unittest.mock import patch
 
 from ai_workflow.config import default_config
 from ai_workflow.models import Lane, Risk, RouteDecision
+from ai_workflow.outcome_verification import TRUSTED_OUTCOME_SOURCES_ENV
 from ai_workflow.retrieval_learning import (
     BASELINE_ARM,
     apply_learning_arm,
@@ -35,6 +38,21 @@ class RetrievalLearningTests(unittest.TestCase):
             "eligible_arms": ["adaptive_math", "bm25_rank"],
         }
         return config
+
+    @staticmethod
+    def _evidence_digest(label: str = "unit-test-evidence") -> str:
+        digest = hashlib.sha256(label.encode("utf-8")).hexdigest()
+        return f"sha256:{digest}"
+
+    def _decision(self):
+        config = self._config()
+        config["context"]["learning"]["mode"] = "observe"
+        return choose_learning_decision(
+            "find helper",
+            RouteDecision(Lane.SMALL, Risk.LOW),
+            "exact",
+            config,
+        )
 
     def test_low_risk_exploration_logs_exact_propensity(self):
         decision = RouteDecision(Lane.SMALL, Risk.LOW)
@@ -128,15 +146,8 @@ class RetrievalLearningTests(unittest.TestCase):
         self.assertEqual(selected.safety_reason, "decision_log_failure")
         self.assertIsNone(path)
 
-    def test_delayed_verified_outcome_links_to_decision(self):
-        config = self._config()
-        config["context"]["learning"]["mode"] = "observe"
-        decision = choose_learning_decision(
-            "find helper",
-            RouteDecision(Lane.SMALL, Risk.LOW),
-            "exact",
-            config,
-        )
+    def test_delayed_verified_outcome_links_to_decision_with_evidence(self):
+        decision = self._decision()
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -145,7 +156,9 @@ class RetrievalLearningTests(unittest.TestCase):
                 root,
                 decision.decision_id,
                 success=True,
-                source="unit-test",
+                source="local:test-suite",
+                verifier_identity="unittest:RetrievalLearningTests",
+                evidence_digest=self._evidence_digest(),
                 reward=0.9,
                 realized_cost=0.1,
             )
@@ -155,6 +168,14 @@ class RetrievalLearningTests(unittest.TestCase):
         self.assertEqual(rows[0]["decision_id"], decision.decision_id)
         self.assertTrue(rows[0]["outcome"]["verified"])
         self.assertEqual(rows[0]["outcome"]["reward"], 0.9)
+        self.assertEqual(
+            rows[0]["outcome"]["verifier_identity"],
+            "unittest:RetrievalLearningTests",
+        )
+        self.assertEqual(
+            rows[0]["outcome"]["evidence_digest"],
+            self._evidence_digest(),
+        )
         self.assertIsNotNone(
             rows[0]["outcome"]["verification_delay_seconds"]
         )
@@ -166,8 +187,88 @@ class RetrievalLearningTests(unittest.TestCase):
                     Path(temp),
                     "a" * 32,
                     success=False,
-                    source="unit-test",
+                    source="local:test-suite",
+                    verifier_identity="unittest",
+                    evidence_digest=self._evidence_digest(),
                 )
+
+    def test_untrusted_outcome_source_is_rejected(self):
+        decision = self._decision()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_learning_decision(root, decision)
+            with self.assertRaisesRegex(ValueError, "not trusted"):
+                record_verified_outcome(
+                    root,
+                    decision.decision_id,
+                    success=True,
+                    source="repository:claims-success",
+                    verifier_identity="repo-config",
+                    evidence_digest=self._evidence_digest(),
+                )
+
+    def test_outcome_requires_verifier_identity_and_sha256_evidence(self):
+        decision = self._decision()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_learning_decision(root, decision)
+            with self.assertRaisesRegex(ValueError, "verifier_identity"):
+                record_verified_outcome(
+                    root,
+                    decision.decision_id,
+                    success=True,
+                    source="local:test-suite",
+                    verifier_identity="",
+                    evidence_digest=self._evidence_digest(),
+                )
+            with self.assertRaisesRegex(ValueError, "sha256"):
+                record_verified_outcome(
+                    root,
+                    decision.decision_id,
+                    success=True,
+                    source="local:test-suite",
+                    verifier_identity="unittest",
+                    evidence_digest="result-passed",
+                )
+
+    def test_reward_is_bounded_to_verified_schema(self):
+        decision = self._decision()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_learning_decision(root, decision)
+            for reward in (-0.01, 1.01, float("inf")):
+                with self.subTest(reward=reward):
+                    with self.assertRaisesRegex(ValueError, "between 0.0 and 1.0"):
+                        record_verified_outcome(
+                            root,
+                            decision.decision_id,
+                            success=True,
+                            source="local:test-suite",
+                            verifier_identity="unittest",
+                            evidence_digest=self._evidence_digest(),
+                            reward=reward,
+                        )
+
+    def test_runtime_policy_can_add_trusted_verifier_without_repo_config(self):
+        decision = self._decision()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_learning_decision(root, decision)
+            with patch.dict(
+                os.environ,
+                {TRUSTED_OUTCOME_SOURCES_ENV: "ci:custom-verifier"},
+                clear=False,
+            ):
+                record_verified_outcome(
+                    root,
+                    decision.decision_id,
+                    success=True,
+                    source="ci:custom-verifier",
+                    verifier_identity="build-123/check-456",
+                    evidence_digest=self._evidence_digest("custom-ci"),
+                )
+            rows = load_learning_records(root)
+        self.assertEqual(rows[0]["outcome"]["source"], "ci:custom-verifier")
 
     def test_learning_arm_only_changes_ranking_experiment(self):
         config = default_config()
