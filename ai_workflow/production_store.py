@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
-
-from .retrieval_learning import learning_root
+from typing import Any
 
 
 STORE_SCHEMA_VERSION = "ai-workflow-production-store-v1"
@@ -26,6 +24,11 @@ EVENT_KINDS = frozenset(
     }
 )
 
+
+
+
+def _learning_root(root: Path) -> Path:
+    return root.resolve() / "ai-workspace" / "generated" / "learning"
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -336,7 +339,7 @@ def sync_learning_store(
 ) -> dict[str, Any]:
     if not production_store_enabled(config):
         raise ValueError("context.production.enabled must be true")
-    base = learning_root(root)
+    base = _learning_root(root)
     store = production_store_path(root, config)
     counters = {
         "scanned": 0,
@@ -432,7 +435,7 @@ def reconcile_learning_store(
             "digest_mismatches": [],
         }
     expected: dict[str, str] = {}
-    base = learning_root(root)
+    base = _learning_root(root)
     for directory, event_type in (
         ("decisions", "decision"),
         ("observations", "observation"),
