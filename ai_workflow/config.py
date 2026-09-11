@@ -55,6 +55,14 @@ _DEFAULT_CONFIG = {
                 "rrf_mmr_090",
             ],
         },
+        "deployment": {
+            "enabled": False,
+            "state_path": (
+                "ai-workspace/generated/learning/deployment/active.json"
+            ),
+            "signing_key_env": "AI_WORKFLOW_POLICY_SIGNING_KEY",
+            "auto_rollback": True,
+        },
         "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
     },
     "workspace": {
@@ -255,6 +263,41 @@ def validate_config(data: dict[str, Any]) -> None:
         if "adaptive_math" not in eligible_arms:
             raise ValueError(
                 "context.learning.eligible_arms must include adaptive_math"
+            )
+
+    deployment = data["context"].get("deployment")
+    if deployment is not None:
+        if not isinstance(deployment, dict):
+            raise ValueError("context.deployment must be an object")
+        if not isinstance(deployment.get("enabled", False), bool):
+            raise ValueError("context.deployment.enabled must be boolean")
+        if not isinstance(deployment.get("auto_rollback", True), bool):
+            raise ValueError(
+                "context.deployment.auto_rollback must be boolean"
+            )
+        state_path = deployment.get(
+            "state_path",
+            "ai-workspace/generated/learning/deployment/active.json",
+        )
+        if not isinstance(state_path, str) or not state_path.strip():
+            raise ValueError(
+                "context.deployment.state_path must be a relative path"
+            )
+        candidate = Path(state_path)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(
+                "context.deployment.state_path must stay inside project root"
+            )
+        signing_key_env = deployment.get(
+            "signing_key_env",
+            "AI_WORKFLOW_POLICY_SIGNING_KEY",
+        )
+        if (
+            not isinstance(signing_key_env, str)
+            or not signing_key_env.strip()
+        ):
+            raise ValueError(
+                "context.deployment.signing_key_env must be non-empty"
             )
 
     roots = data["workspace"].get("roots", [])
