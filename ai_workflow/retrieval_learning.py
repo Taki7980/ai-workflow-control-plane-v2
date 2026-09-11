@@ -53,6 +53,7 @@ class LearningDecision:
     feature_schema_version: str
     context_features: dict[str, str]
     created_at: str
+    deployment: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -155,6 +156,7 @@ def choose_learning_decision(
     *,
     changed_files_count: int = 0,
     workspace_roots_count: int = 1,
+    deployment_assignment: dict[str, Any] | None = None,
     rng: random.Random | None = None,
 ) -> LearningDecision:
     mode = learning_mode(config)
@@ -166,8 +168,79 @@ def choose_learning_decision(
     chosen = BASELINE_ARM
     propensities = {BASELINE_ARM: 1.0}
     explored = False
+    deployment: dict[str, Any] | None = None
+    policy_version = "safe-epsilon-v1"
 
-    if mode == "observe":
+    if deployment_assignment is not None:
+        raw_arm = str(
+            deployment_assignment.get("chosen_arm", BASELINE_ARM)
+        ).strip()
+        raw_propensities = deployment_assignment.get("arm_propensities")
+        valid = (
+            raw_arm in SAFE_EXPLORATION_ARMS
+            and isinstance(raw_propensities, dict)
+        )
+        parsed: dict[str, float] = {}
+        if valid:
+            for arm, probability in raw_propensities.items():
+                name = str(arm).strip()
+                value = _fraction(probability, -1.0)
+                if (
+                    name not in SAFE_EXPLORATION_ARMS
+                    or value < 0.0
+                ):
+                    valid = False
+                    break
+                parsed[name] = value
+            if (
+                not parsed
+                or abs(sum(parsed.values()) - 1.0) > 1e-9
+                or raw_arm not in parsed
+                or parsed[raw_arm] <= 0.0
+            ):
+                valid = False
+        if raw_arm != BASELINE_ARM and risk != "low":
+            valid = False
+
+        if valid:
+            chosen = raw_arm
+            propensities = parsed
+            mode = str(deployment_assignment.get("mode", "canary"))
+            safety_reason = str(
+                deployment_assignment.get(
+                    "safety_reason",
+                    "deployment_canary",
+                )
+            )
+            deployment_raw = deployment_assignment.get("deployment")
+            deployment = (
+                dict(deployment_raw)
+                if isinstance(deployment_raw, dict)
+                else {}
+            )
+            explored = chosen != BASELINE_ARM
+            epsilon = _fraction(
+                deployment.get("candidate_probability", 0.0),
+                0.0,
+            )
+            policy_id = str(deployment.get("policy_id", "")).strip()
+            policy_version = (
+                f"deployment:{policy_id}"
+                if policy_id
+                else "deployment:fail-closed"
+            )
+        else:
+            mode = "canary"
+            safety_reason = "deployment_assignment_invalid"
+            deployment = {
+                "assignment": "baseline",
+                "reason": "deployment_assignment_invalid",
+                "source": "stage7_deployment",
+            }
+            chosen = BASELINE_ARM
+            propensities = {BASELINE_ARM: 1.0}
+            epsilon = 0.0
+    elif mode == "observe":
         safety_reason = "observe_only"
     elif mode == "explore":
         if learning_kill_switch(config):
@@ -193,7 +266,7 @@ def choose_learning_decision(
     )
     return LearningDecision(
         decision_id=uuid.uuid4().hex,
-        policy_version="safe-epsilon-v1",
+        policy_version=policy_version,
         mode=mode,
         baseline_arm=BASELINE_ARM,
         eligible_arms=tuple(propensities),
@@ -213,6 +286,7 @@ def choose_learning_decision(
         feature_schema_version=FEATURE_SCHEMA_VERSION,
         context_features=features.to_dict(),
         created_at=_utc_now(),
+        deployment=deployment,
     )
 
 
@@ -239,6 +313,11 @@ def baseline_fallback(
         feature_schema_version=source.feature_schema_version,
         context_features=dict(source.context_features),
         created_at=_utc_now(),
+        deployment=(
+            dict(source.deployment)
+            if source.deployment is not None
+            else None
+        ),
     )
 
 
@@ -298,6 +377,7 @@ def prepare_learning_decision(
     *,
     changed_files_count: int = 0,
     workspace_roots_count: int = 1,
+    deployment_assignment: dict[str, Any] | None = None,
     rng: random.Random | None = None,
 ) -> tuple[LearningDecision, str | None]:
     selected = choose_learning_decision(
@@ -307,6 +387,7 @@ def prepare_learning_decision(
         config,
         changed_files_count=changed_files_count,
         workspace_roots_count=workspace_roots_count,
+        deployment_assignment=deployment_assignment,
         rng=rng,
     )
     if selected.mode == "off":
