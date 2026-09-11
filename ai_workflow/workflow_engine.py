@@ -468,6 +468,7 @@ class WorkflowEngine:
                     fallback_count=len(trace.fallbacks),
                     sufficiency_score=final_suff.score,
                     evidence_state=state,
+                    config=config,
                 )
                 diagnostics["learning"]["observation_logged"] = True
                 diagnostics["learning"]["observation_path"] = (
