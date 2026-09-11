@@ -50,7 +50,14 @@ from .observability_export import (
     build_deployment_metrics,
     write_deployment_metrics,
 )
-from .memory import add_memory, export_memory_jsonl, list_memories, prune_stale, search_memory
+from .memory import (
+    add_memory,
+    export_memory_jsonl,
+    import_memory_jsonl,
+    list_memories,
+    prune_stale,
+    search_memory,
+)
 from .learning_ope import evaluate_learning_policies
 from .policy_manifest import (
     create_policy_manifest,
@@ -417,6 +424,31 @@ def cmd_memory_export(args):
     destination = Path(args.output).resolve()
     count = export_memory_jsonl(_root(args), destination)
     _json({"format": "jsonl", "output": str(destination), "records": count})
+
+
+def cmd_memory_import(args):
+    if not bool(args.trusted):
+        raise SystemExit(
+            "memory import requires --trusted because imported content becomes "
+            "durable retrieval context"
+        )
+    source = Path(args.path).expanduser()
+    try:
+        count = import_memory_jsonl(
+            _root(args),
+            source,
+            trusted=True,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    _json(
+        {
+            "format": "jsonl",
+            "input": str(source.resolve()),
+            "records": count,
+            "trusted": True,
+        }
+    )
 
 
 def cmd_compress(args):
@@ -1499,6 +1531,14 @@ def build_parser():
     m.set_defaults(func=cmd_memory_list)
     m = msp.add_parser("prune")
     m.set_defaults(func=cmd_memory_prune)
+    m = msp.add_parser("import")
+    m.add_argument("path")
+    m.add_argument(
+        "--trusted",
+        action="store_true",
+        help="acknowledge that imported content becomes durable retrieval context",
+    )
+    m.set_defaults(func=cmd_memory_import)
     m = msp.add_parser("export")
     m.add_argument("--format", choices=["jsonl"], default="jsonl")
     m.add_argument("--output", required=True)
