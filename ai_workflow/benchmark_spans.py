@@ -26,7 +26,7 @@ class GoldSpan:
     content_sha256: str | None = None
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "GoldSpan":
+    def from_dict(cls, value: dict[str, Any]) -> GoldSpan:
         path = normalize_file_path(str(value.get("path", "")))
         if not path:
             raise ValueError("gold span path must not be blank")
