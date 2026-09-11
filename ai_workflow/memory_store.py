@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
 import tempfile
 import threading
@@ -24,7 +23,12 @@ class MemoryStore(Protocol):
 
 
 class SQLiteMemoryStore:
-    """Transactional durable memory store with reversible JSONL migration."""
+    """Transactional durable memory store.
+
+    Repository-local legacy JSONL is never imported implicitly. Import is an
+    explicit trust decision performed by calling ``import_jsonl`` with a path
+    selected by the operator.
+    """
 
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -35,9 +39,6 @@ class SQLiteMemoryStore:
         # ordinary busy_timeout handling applies consistently on Windows.
         with _INITIALIZE_LOCK:
             self._initialize()
-            legacy = self.root / "ai-workspace" / "memory" / "memory.jsonl"
-            if legacy.exists():
-                self._migrate_legacy(legacy)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -118,23 +119,6 @@ class SQLiteMemoryStore:
                 records.append(record)
         return records
 
-    def _migrate_legacy(self, legacy: Path) -> None:
-        backup = legacy.with_suffix(legacy.suffix + ".bak")
-        if not backup.exists():
-            shutil.copy2(legacy, backup)
-        expected_ids = {str(record["id"]) for record in self._read_jsonl(legacy)}
-        self.import_jsonl(legacy)
-        if expected_ids:
-            actual_ids = {str(record.get("id")) for record in self.list_records()}
-            missing = expected_ids - actual_ids
-            if missing:
-                raise RuntimeError("legacy memory migration validation failed: missing " + ", ".join(sorted(missing)))
-        with self._connection() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO metadata(key,value) VALUES(?,?)",
-                ("legacy_jsonl_migrated", "1"),
-            )
-
     def insert(self, record: dict) -> None:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -184,9 +168,17 @@ class SQLiteMemoryStore:
             )
 
     def import_jsonl(self, path: Path) -> int:
-        if not path.exists():
+        """Explicitly import operator-selected JSONL into durable memory.
+
+        This API intentionally performs no repository discovery and is never
+        called from store initialization. Callers must decide that the source is
+        trusted before invoking it.
+        """
+
+        source = Path(path).expanduser().resolve()
+        if not source.exists():
             return 0
-        records = self._read_jsonl(path)
+        records = self._read_jsonl(source)
         if not records:
             return 0
         inserted = 0
