@@ -1,7 +1,7 @@
 from __future__ import annotations
 import copy
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .token_estimator import CharacterTokenEstimator, TokenEstimator
@@ -395,6 +395,18 @@ def validate_config(data: dict[str, Any]) -> None:
     registry = data["workspace"].get("registry", "ai-workspace/config/repositories.json")
     if not isinstance(registry, str) or not registry.strip():
         raise ValueError("workspace.registry must be a non-empty path")
+    registry_path_value = Path(registry)
+    registry_windows = PureWindowsPath(registry)
+    if (
+        registry_path_value.is_absolute()
+        or registry_windows.is_absolute()
+        or registry_windows.drive
+        or ".." in registry_path_value.parts
+        or ".." in registry_windows.parts
+    ):
+        raise ValueError(
+            "workspace.registry must be a relative path inside the project root"
+        )
     discovery = data["workspace"].get("discovery", {"max_depth": 3, "require_acceptance": True})
     if not isinstance(discovery, dict):
         raise ValueError("workspace.discovery must be an object")
