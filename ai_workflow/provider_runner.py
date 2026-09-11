@@ -221,6 +221,7 @@ def _context_items(
     source: str,
     limit: int,
     provider_name: str,
+    provider_trust: str,
     metadata_defaults: Mapping[str, Any] | None,
 ) -> tuple[ContextItem, ...]:
     items: list[ContextItem] = []
@@ -249,7 +250,7 @@ def _context_items(
                 metadata[key] = record[key]
         metadata.update(defaults)
         metadata["provider"] = provider_name
-        metadata["provider_trust"] = "configured_local_executable"
+        metadata["provider_trust"] = provider_trust
         metadata["trust"] = "untrusted_repository_content"
         metadata = confine_metadata_paths(root, metadata)
         provenance = (
@@ -309,6 +310,7 @@ def _result_from_bytes(
             source,
             request.limit,
             spec.name,
+            spec.executable_trust,
             metadata_defaults,
         ),
         latency_ms=latency_ms,
