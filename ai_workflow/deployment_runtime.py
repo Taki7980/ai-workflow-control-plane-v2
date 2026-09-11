@@ -17,7 +17,11 @@ from .deployment_state import (
     verify_deployment_state,
 )
 from .models import RouteDecision
-from .retrieval_learning import BASELINE_ARM, SAFE_EXPLORATION_ARMS
+from .retrieval_learning import (
+    BASELINE_ARM,
+    SAFE_EXPLORATION_ARMS,
+    learning_kill_switch,
+)
 
 
 def _deployment_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +190,8 @@ def resolve_runtime_deployment(
 ) -> dict[str, Any] | None:
     if not deployment_enabled(config):
         return None
+    if learning_kill_switch(config):
+        return _baseline_assignment("deployment_global_kill_switch")
 
     try:
         path = _state_path(root, config)
