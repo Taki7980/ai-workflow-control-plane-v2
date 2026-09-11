@@ -275,6 +275,13 @@ def validate_config(data: dict[str, Any]) -> None:
             raise ValueError(
                 "context.deployment.auto_rollback must be boolean"
             )
+        if (
+            deployment.get("enabled", False)
+            and not deployment.get("auto_rollback", True)
+        ):
+            raise ValueError(
+                "enabled deployment requires automatic rollback"
+            )
         state_path = deployment.get(
             "state_path",
             "ai-workspace/generated/learning/deployment/active.json",
