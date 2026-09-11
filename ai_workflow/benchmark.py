@@ -156,9 +156,14 @@ def run_benchmark(
         snapshot = snapshot_status(root, case)
         if require_frozen_snapshot and snapshot["status"] != "match":
             raise ValueError(
-                "benchmark snapshot does not match frozen base commit: "
-                f"{snapshot['repository_path']} expected={snapshot['expected_head']} "
-                f"actual={snapshot['actual_head']}"
+                "benchmark snapshot is not frozen-clean: "
+                f"{snapshot['repository_path']} "
+                f"status={snapshot['status']} "
+                f"expected={snapshot['expected_head']} "
+                f"actual={snapshot['actual_head']} "
+                f"worktree_clean={snapshot.get('worktree_clean')} "
+                "content_manifest_match="
+                f"{snapshot.get('content_manifest_match')}"
             )
 
         start = time.perf_counter()
