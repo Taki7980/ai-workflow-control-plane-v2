@@ -79,24 +79,67 @@ Default stdout limit: `8 MiB` (`8388608` bytes).
 
 If a process exceeds the stdout limit it is terminated and the provider result is marked `output_limit`.
 
+## Trusted provider registry
+
+Repository configuration no longer grants executable authority by default. A project selects a provider by opaque `provider_id`:
+
+```json
+{
+  "context": {
+    "semantic": {
+      "mode": "auto",
+      "provider_id": "semantic-local",
+      "timeout_seconds": 8,
+      "max_results": 6,
+      "max_output_bytes": 8388608
+    },
+    "external_retrievers": [
+      {
+        "name": "private-docs",
+        "provider_id": "private-docs-v1",
+        "intents": ["semantic", "mixed"],
+        "timeout_seconds": 5,
+        "max_output_bytes": 4194304
+      }
+    ]
+  }
+}
+```
+
+Executable authority lives in a separate user/admin-owned JSON file outside the repository. Set its absolute path with `AI_WORKFLOW_PROVIDER_REGISTRY`; otherwise the platform user configuration directory is used.
+
+```json
+{
+  "providers": {
+    "semantic-local": {
+      "command": ["/opt/ai-workflow/providers/semantic-provider"],
+      "sha256": "<64-lowercase-hex-digest>",
+      "timeout_seconds": 8,
+      "max_output_bytes": 8388608,
+      "env_allowlist": ["SEMANTIC_PROVIDER_TOKEN"],
+      "semantics": {
+        "deterministic": true,
+        "cacheable": true,
+        "side_effect_free": true
+      }
+    }
+  }
+}
+```
+
+The registry must be outside the repository. Its executable must be an absolute regular-file path outside the repository and its SHA-256 digest must match before launch. Repository configuration can tighten timeout/output limits and choose intents, but it cannot provide an executable, digest, environment allowlist, or execution semantics. This prevents a malicious repository from converting data/configuration authority into local-code or credential authority.
+
+A digest-pinned interpreter is also prevented from being pointed at an existing repository-owned script path. If a trusted provider needs a helper script, register it with an absolute path outside the project and treat that helper as part of the trusted provider installation.
+
 ## Environment policy
 
 A small platform/runtime environment is inherited so executables can start (`PATH`, Windows system variables, home/temp variables, locale, and Python UTF-8 variables).
 
-Credentials and arbitrary process variables are **not inherited by default**. A provider that genuinely needs a variable must opt in by name:
+Credentials and arbitrary process variables are **not inherited by default**. Environment variables required by a provider must be named only in the trusted provider registry's `env_allowlist`. Checked-in project configuration cannot expand this list.
 
-```json
-{
-  "name": "private-docs",
-  "command": ["python", "tools/private_docs_provider.py"],
-  "intents": ["semantic"],
-  "timeout_seconds": 8,
-  "max_output_bytes": 2097152,
-  "env_allowlist": ["PRIVATE_DOCS_TOKEN"]
-}
-```
+## Unsafe legacy compatibility
 
-Only the named variable is copied from the parent process. The configuration stores the variable name, not its secret value.
+Direct `command` fields remain parseable for migration, but runtime execution is disabled by default. `AI_WORKFLOW_ALLOW_REPO_PROVIDER_COMMANDS=1` explicitly restores the old behavior for trusted legacy repositories. Do not enable that flag when opening or operating on an untrusted repository.
 
 ## Structured failures
 
@@ -125,48 +168,13 @@ The adaptive broker exposes attempted-provider failures under `diagnostics.provi
 
 The existing `semantic_context(...)` and `run_retriever(...)` list-returning APIs remain available for compatibility. New orchestration code should prefer the typed result APIs when it needs failure information.
 
-## Semantic provider configuration
+## Configuration examples
 
-```json
-{
-  "context": {
-    "semantic": {
-      "mode": "auto",
-      "command": ["python", "tools/semantic_provider.py"],
-      "timeout_seconds": 8,
-      "max_results": 6,
-      "max_output_bytes": 8388608,
-      "env_allowlist": []
-    }
-  }
-}
-```
-
-String commands remain supported for compatibility. An argv array is preferred where quoting/paths may differ across operating systems.
-
-## External retriever configuration
-
-```json
-{
-  "context": {
-    "external_retrievers": [
-      {
-        "name": "docs",
-        "command": ["python", "tools/docs_provider.py"],
-        "intents": ["semantic", "mixed"],
-        "timeout_seconds": 5,
-        "max_output_bytes": 4194304,
-        "env_allowlist": []
-      }
-    ]
-  }
-}
-```
-
-Valid intents remain `exact`, `semantic`, `structural`, `mixed`, and `all`.
+Use `provider_id` in repository configuration and keep executable authority in the trusted provider registry described above.
 
 ## Compatibility and migration
 
-Existing configurations that only specify `command`, `intents`, and `timeout_seconds` continue to work. Missing `max_output_bytes` defaults to 8 MiB and missing `env_allowlist` defaults to an empty list.
+Migrate every repository-defined semantic/external provider `command` to a trusted registry entry. Replace the checked-in `command`, `env_allowlist`, and execution semantics with only `provider_id` plus non-authority controls such as intents and tighter timeout/output limits.
 
-One intentional behavior change is that provider processes no longer inherit arbitrary environment variables. If a provider relied on implicit credential inheritance, add only the required variable names to `env_allowlist`.
+The legacy command path is intentionally fail-closed unless `AI_WORKFLOW_ALLOW_REPO_PROVIDER_COMMANDS=1` is set.
+

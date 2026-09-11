@@ -221,6 +221,7 @@ def _context_items(
     source: str,
     limit: int,
     provider_name: str,
+    provider_trust: str,
     metadata_defaults: Mapping[str, Any] | None,
 ) -> tuple[ContextItem, ...]:
     items: list[ContextItem] = []
@@ -249,7 +250,7 @@ def _context_items(
                 metadata[key] = record[key]
         metadata.update(defaults)
         metadata["provider"] = provider_name
-        metadata["provider_trust"] = "configured_local_executable"
+        metadata["provider_trust"] = provider_trust
         metadata["trust"] = "untrusted_repository_content"
         metadata = confine_metadata_paths(root, metadata)
         provenance = (
@@ -309,11 +310,23 @@ def _result_from_bytes(
             source,
             request.limit,
             spec.name,
+            spec.executable_trust,
             metadata_defaults,
         ),
         latency_ms=latency_ms,
         returncode=returncode,
     )
+
+
+def _provider_cwd(spec: CommandProviderSpec, request: RetrievalRequest) -> Path:
+    """Choose a cwd that cannot turn repository files into provider code."""
+
+    if spec.executable_trust == "trusted_registry_digest":
+        try:
+            return Path(spec.command[0]).resolve(strict=True).parent
+        except OSError:
+            return Path(spec.command[0]).expanduser().resolve().parent
+    return request.root
 
 
 def run_command_provider(
@@ -333,7 +346,7 @@ def run_command_provider(
     try:
         proc = subprocess.Popen(
             spec.command,
-            cwd=request.root,
+            cwd=_provider_cwd(spec, request),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -441,7 +454,7 @@ async def run_command_provider_async(
     try:
         proc = await asyncio.create_subprocess_exec(
             *spec.command,
-            cwd=request.root,
+            cwd=_provider_cwd(spec, request),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

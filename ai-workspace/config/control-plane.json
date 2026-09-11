@@ -21,7 +21,7 @@
       "min_source_files": 250,
       "changed_files_threshold": 3
     },
-    "semantic": {"mode": "auto", "command": "", "timeout_seconds": 8, "max_results": 6},
+    "semantic": {"mode": "auto", "provider_id": "", "command": "", "timeout_seconds": 8, "max_results": 6},
     "external_retrievers": [],
     "sufficiency": {"threshold": 0.72},
     "adaptive_budget": {

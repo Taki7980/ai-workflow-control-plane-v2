@@ -67,8 +67,8 @@ class WorkflowEngineTests(unittest.TestCase):
 
         cfg = self._config()
         cfg["context"]["external_retrievers"] = [
-            {"name": "a", "command": "unused", "intents": ["semantic"], "timeout_seconds": 1},
-            {"name": "b", "command": "unused", "intents": ["semantic"], "timeout_seconds": 1},
+            {"name": "a", "provider_id": "a-v1", "intents": ["semantic"], "timeout_seconds": 1},
+            {"name": "b", "provider_id": "b-v1", "intents": ["semantic"], "timeout_seconds": 1},
         ]
         decision = RouteDecision(Lane.ANSWER, Risk.LOW, confidence=0.9)
         budget = ContextBudget(1200, 400, 4800, {})

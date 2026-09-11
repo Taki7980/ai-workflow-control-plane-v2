@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -7,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class ProviderBoundaryContractTests(unittest.TestCase):
@@ -77,6 +79,168 @@ class ProviderBoundaryContractTests(unittest.TestCase):
                 os.environ.pop("AI_WORKFLOW_TEST_SECRET", None)
             else:
                 os.environ["AI_WORKFLOW_TEST_SECRET"] = old
+
+    def test_repository_provider_command_is_rejected_by_default(self):
+        registry = self._module("ai_workflow.provider_registry")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("AI_WORKFLOW_ALLOW_REPO_PROVIDER_COMMANDS", None)
+                with self.assertRaisesRegex(ValueError, "repository-defined provider commands are disabled"):
+                    registry.resolve_project_provider(
+                        root,
+                        {
+                            "name": "malicious",
+                            "command": [sys.executable, "-c", "print('owned')"],
+                            "env_allowlist": ["AWS_SECRET_ACCESS_KEY"],
+                        },
+                        default_name="malicious",
+                    )
+
+    def test_trusted_registry_resolves_digest_pinned_provider_and_owns_env_policy(self):
+        registry = self._module("ai_workflow.provider_registry")
+        with tempfile.TemporaryDirectory() as repo_td, tempfile.TemporaryDirectory() as config_td:
+            root = Path(repo_td)
+            registry_path = Path(config_td) / "providers.json"
+            executable = Path(sys.executable).resolve()
+            digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "providers": {
+                            "semantic-local": {
+                                "command": [str(executable), "-c", "import json,sys; print(json.dumps({'items': []}))"],
+                                "sha256": digest,
+                                "env_allowlist": ["SEMANTIC_PROVIDER_TOKEN"],
+                                "timeout_seconds": 9,
+                                "max_output_bytes": 8192,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"AI_WORKFLOW_PROVIDER_REGISTRY": str(registry_path)},
+                clear=False,
+            ):
+                spec = registry.resolve_project_provider(
+                    root,
+                    {
+                        "name": "semantic",
+                        "provider_id": "semantic-local",
+                        "timeout_seconds": 2,
+                        "max_output_bytes": 4096,
+                        "intents": ["semantic"],
+                    },
+                    default_name="semantic",
+                )
+
+            self.assertEqual(spec.name, "semantic")
+            self.assertEqual(spec.command[0], str(executable))
+            self.assertEqual(spec.timeout_seconds, 2)
+            self.assertEqual(spec.max_output_bytes, 4096)
+            self.assertEqual(spec.env_allowlist, ("SEMANTIC_PROVIDER_TOKEN",))
+            self.assertEqual(spec.executable_trust, "trusted_registry_digest")
+
+    def test_trusted_registry_rejects_registry_inside_repo_and_digest_mismatch(self):
+        registry = self._module("ai_workflow.provider_registry")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            executable = Path(sys.executable).resolve()
+            registry_path = root / "providers.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "providers": {
+                            "semantic-local": {
+                                "command": [str(executable), "-c", "print('ok')"],
+                                "sha256": "0" * 64,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"AI_WORKFLOW_PROVIDER_REGISTRY": str(registry_path)},
+                clear=False,
+            ):
+                with self.assertRaisesRegex(ValueError, "outside the repository"):
+                    registry.resolve_project_provider(
+                        root,
+                        {"provider_id": "semantic-local"},
+                        default_name="semantic",
+                    )
+
+            external = root.parent / f"{root.name}-providers.json"
+            try:
+                external.write_text(
+                    json.dumps(
+                        {
+                            "providers": {
+                                "semantic-local": {
+                                    "command": [str(executable), "-c", "print('ok')"],
+                                    "sha256": "0" * 64,
+                                }
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with patch.dict(
+                    os.environ,
+                    {"AI_WORKFLOW_PROVIDER_REGISTRY": str(external)},
+                    clear=False,
+                ):
+                    with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                        registry.resolve_project_provider(
+                            root,
+                            {"provider_id": "semantic-local"},
+                            default_name="semantic",
+                        )
+            finally:
+                external.unlink(missing_ok=True)
+
+    def test_trusted_provider_does_not_run_from_repository_cwd(self):
+        runner = self._module("ai_workflow.provider_runner")
+        contracts = self._module("ai_workflow.retrieval_contracts")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root_cwd = root.resolve()
+            code = (
+                "import json,os,sys;"
+                "sys.stdin.read();"
+                "print(json.dumps({'items':[{'text':os.getcwd(),'score':1.0}]}))"
+            )
+            spec = runner.CommandProviderSpec(
+                name="trusted-cwd",
+                command=(sys.executable, "-c", code),
+                timeout_seconds=2,
+                max_output_bytes=4096,
+                executable_trust="trusted_registry_digest",
+            )
+            result = runner.run_command_provider(
+                spec,
+                contracts.RetrievalRequest(
+                    "q",
+                    root,
+                    1,
+                    "semantic",
+                    2,
+                ),
+                source="external:trusted-cwd",
+            )
+            self.assertIsNone(result.error)
+            actual_cwd = Path(result.items[0].text).resolve()
+            self.assertNotEqual(actual_cwd, root_cwd)
+            self.assertEqual(
+                actual_cwd,
+                Path(sys.executable).resolve().parent,
+            )
 
     def test_command_runner_returns_success_with_bounded_typed_result(self):
         runner = self._module("ai_workflow.provider_runner")
@@ -230,13 +394,17 @@ class ProviderBoundaryContractTests(unittest.TestCase):
 
         cfg["context"]["external_retrievers"] = [{
             "name": "docs",
-            "command": [sys.executable, "provider.py"],
+            "provider_id": "docs-local",
             "intents": ["all"],
             "timeout_seconds": 2,
             "max_output_bytes": 4096,
-            "env_allowlist": ["DOCS_TOKEN"],
         }]
         validate_config(cfg)
+
+        cfg["context"]["external_retrievers"][0]["command"] = [sys.executable, "provider.py"]
+        with self.assertRaises(ValueError):
+            validate_config(cfg)
+        cfg["context"]["external_retrievers"][0].pop("command")
 
         cfg["context"]["external_retrievers"][0]["max_output_bytes"] = 0
         with self.assertRaises(ValueError):
