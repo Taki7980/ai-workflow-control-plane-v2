@@ -210,10 +210,18 @@ def create_deployment_state(
     if not manifest_check["valid"]:
         raise ValueError("policy manifest verification failed")
     shadow_gate = shadow_report.get("shadow_gate")
+    shadow_manifest_check = shadow_report.get("manifest_verification")
+    shadow_execution = shadow_report.get("execution")
     if (
         shadow_report.get("policy_id") != manifest.get("policy_id")
+        or shadow_report.get("evidence_cutoff")
+        != manifest.get("evidence_cutoff")
         or not isinstance(shadow_gate, dict)
         or not bool(shadow_gate.get("eligible_for_manual_promotion_review"))
+        or not isinstance(shadow_manifest_check, dict)
+        or not bool(shadow_manifest_check.get("valid"))
+        or not isinstance(shadow_execution, dict)
+        or bool(shadow_execution.get("policy_received_runtime_traffic"))
     ):
         raise ValueError(
             "shadow report is not eligible for deployment approval"
