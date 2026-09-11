@@ -5,6 +5,10 @@ import hmac
 import json
 import math
 import os
+import secrets
+import shutil
+import socket
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -55,6 +59,8 @@ DEFAULT_STAGE_FAILURE_BUDGETS = {
     "canary_10": 40,
     "bounded": 100,
 }
+
+STATE_LOCK_LEASE_SECONDS = 300.0
 
 
 def _utc_now() -> str:
@@ -205,6 +211,9 @@ def create_deployment_state(
     max_unknown_context_rate: float = 0.20,
     minimum_drift_samples: int = 50,
     drift_window: int = 200,
+    minimum_monitor_clusters: int = 5,
+    cluster_bootstrap_resamples: int = 2000,
+    cluster_bootstrap_seed: int = 20260911,
     max_cumulative_realized_cost: float | None = None,
 ) -> dict[str, Any]:
     manifest_check = verify_policy_manifest(manifest, signing_key)
@@ -249,6 +258,15 @@ def create_deployment_state(
         raise ValueError("max_context_tv_distance must be between 0 and 1")
     if not 0.0 <= max_unknown_context_rate <= 1.0:
         raise ValueError("max_unknown_context_rate must be between 0 and 1")
+    if minimum_monitor_clusters < 2:
+        raise ValueError("minimum_monitor_clusters must be at least 2")
+    if cluster_bootstrap_resamples < 100:
+        raise ValueError("cluster_bootstrap_resamples must be at least 100")
+    if isinstance(cluster_bootstrap_seed, bool) or not isinstance(
+        cluster_bootstrap_seed,
+        int,
+    ):
+        raise ValueError("cluster_bootstrap_seed must be an integer")
     if max_cumulative_realized_cost is not None:
         if (
             not math.isfinite(max_cumulative_realized_cost)
@@ -287,6 +305,9 @@ def create_deployment_state(
             "max_unknown_context_rate": float(max_unknown_context_rate),
             "minimum_drift_samples": max(1, int(minimum_drift_samples)),
             "drift_window": max(1, int(drift_window)),
+            "minimum_monitor_clusters": int(minimum_monitor_clusters),
+            "cluster_bootstrap_resamples": int(cluster_bootstrap_resamples),
+            "cluster_bootstrap_seed": int(cluster_bootstrap_seed),
             "stage_budgets": _stage_budgets(max_cumulative_realized_cost),
         },
         "rollback": {
@@ -483,22 +504,71 @@ def load_deployment_state(path: Path) -> dict[str, Any]:
     return data
 
 
+def _read_lock_owner(lock: Path) -> dict[str, Any]:
+    owner_path = lock / "owner.json"
+    try:
+        value = json.loads(owner_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _recover_stale_lock(lock: Path) -> bool:
+    try:
+        age = max(0.0, time.time() - lock.stat().st_mtime)
+    except OSError:
+        return False
+    if age <= STATE_LOCK_LEASE_SECONDS:
+        return False
+    stale = lock.with_name(
+        f"{lock.name}.stale-{secrets.token_hex(6)}"
+    )
+    try:
+        lock.rename(stale)
+    except OSError:
+        return False
+    shutil.rmtree(stale, ignore_errors=True)
+    return True
+
+
 @contextmanager
 def _state_lock(path: Path) -> Iterator[None]:
     lock = path.with_name(path.name + ".lock")
-    try:
-        lock.mkdir(parents=False, exist_ok=False)
-    except FileExistsError as exc:
-        raise RuntimeError(
-            f"deployment state is locked: {lock}"
-        ) from exc
+    token = secrets.token_hex(16)
+    acquired = False
+    for attempt in range(2):
+        try:
+            lock.mkdir(parents=False, exist_ok=False)
+            acquired = True
+            break
+        except FileExistsError as exc:
+            if attempt == 0 and _recover_stale_lock(lock):
+                continue
+            raise RuntimeError(
+                f"deployment state is locked: {lock}"
+            ) from exc
+    if not acquired:
+        raise RuntimeError(f"failed to acquire deployment state lock: {lock}")
+
+    host = socket.gethostname().encode()
+    owner = {
+        "token": token,
+        "pid": os.getpid(),
+        "host_fingerprint": hashlib.sha256(host).hexdigest()[:16],
+        "acquired_at": _utc_now(),
+        "lease_seconds": STATE_LOCK_LEASE_SECONDS,
+    }
+    owner_path = lock / "owner.json"
+    owner_path.write_text(
+        json.dumps(owner, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     try:
         yield
     finally:
-        try:
-            lock.rmdir()
-        except OSError:
-            pass
+        current = _read_lock_owner(lock)
+        if current.get("token") == token:
+            shutil.rmtree(lock, ignore_errors=True)
 
 
 def _write_audit_event(path: Path, state: dict[str, Any]) -> None:
