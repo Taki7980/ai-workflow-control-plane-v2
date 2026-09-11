@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import ipaddress
 import json
 import os
 import re
@@ -11,7 +13,119 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+
+OTLP_ENDPOINT_ENV = "AI_WORKFLOW_OTLP_ENDPOINT"
+OTLP_ALLOWED_HOSTS_ENV = "AI_WORKFLOW_OTLP_ALLOWED_HOSTS"
+OTLP_HEADERS_JSON_ENV = "AI_WORKFLOW_OTLP_HEADERS_JSON"
+OTLP_TIMEOUT_ENV = "AI_WORKFLOW_OTLP_TIMEOUT_SECONDS"
+OTLP_INCLUDE_TASK_ENV = "AI_WORKFLOW_OTLP_INCLUDE_TASK_TEXT"
+TELEMETRY_HMAC_KEY_ENV = "AI_WORKFLOW_TELEMETRY_HMAC_KEY"
+
+
+@dataclass(frozen=True)
+class TrustedOtlpSettings:
+    endpoint: str
+    timeout_seconds: float
+    headers: dict[str, str]
+    include_task_text: bool
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _trusted_headers() -> dict[str, str]:
+    raw = os.getenv(OTLP_HEADERS_JSON_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in parsed.items()
+        if str(key).strip()
+    }
+
+
+def _unsafe_destination(hostname: str) -> bool:
+    host = hostname.rstrip(".").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(
+        (
+            address.is_loopback,
+            address.is_link_local,
+            address.is_multicast,
+            address.is_unspecified,
+            address.is_reserved,
+        )
+    )
+
+
+def _trusted_otlp_settings() -> TrustedOtlpSettings | None:
+    endpoint = os.getenv(OTLP_ENDPOINT_ENV, "").strip()
+    if not endpoint:
+        return None
+
+    try:
+        parsed = urlparse(endpoint)
+    except ValueError:
+        return None
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if parsed.scheme.lower() != "https" or not hostname:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    if _unsafe_destination(hostname):
+        return None
+
+    allowed_hosts = {
+        host.strip().rstrip(".").lower()
+        for host in os.getenv(OTLP_ALLOWED_HOSTS_ENV, "").split(",")
+        if host.strip()
+    }
+    if hostname not in allowed_hosts:
+        return None
+
+    try:
+        timeout_seconds = float(os.getenv(OTLP_TIMEOUT_ENV, "2.0"))
+    except (TypeError, ValueError):
+        timeout_seconds = 2.0
+    timeout_seconds = min(10.0, max(0.05, timeout_seconds))
+
+    return TrustedOtlpSettings(
+        endpoint=endpoint,
+        timeout_seconds=timeout_seconds,
+        headers=_trusted_headers(),
+        include_task_text=_truthy_env(OTLP_INCLUDE_TASK_ENV),
+    )
+
+
+def _task_fingerprint(task: str) -> str | None:
+    key = os.getenv(TELEMETRY_HMAC_KEY_ENV, "")
+    if not key:
+        return None
+    return hmac.new(
+        key.encode("utf-8"),
+        task.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 @dataclass
@@ -71,7 +185,8 @@ class OtlpHttpSink:
     def emit(self, payload: dict[str, Any]) -> None:
         body = json.dumps({"resourceLogs": [{"scopeLogs": [{"logRecords": [{"body": payload}]}]}]}, ensure_ascii=False).encode("utf-8")
         request = Request(self.endpoint, data=body, headers={"Content-Type": "application/json", **self.headers}, method="POST")
-        with urlopen(request, timeout=self.timeout_seconds) as response:
+        opener = build_opener(_NoRedirectHandler())
+        with opener.open(request, timeout=self.timeout_seconds) as response:
             response.read(1)
 
 
@@ -98,16 +213,6 @@ def _telemetry_config(config: dict | None) -> dict[str, Any]:
     return dict((((config or {}).get("context") or {}).get("telemetry") or {}))
 
 
-def _headers_from_env(name: str) -> dict[str, str]:
-    if not name: return {}
-    raw = os.getenv(name, "").strip()
-    if not raw: return {}
-    try: parsed = json.loads(raw)
-    except json.JSONDecodeError: return {}
-    if not isinstance(parsed, dict): return {}
-    return {str(k): str(v) for k, v in parsed.items() if str(k).strip()}
-
-
 def _redact(value: str, patterns: list[str]) -> str:
     out = value
     for pattern in patterns:
@@ -123,13 +228,21 @@ def _redact_tree(value: Any, patterns: list[str]) -> Any:
     return value
 
 
-def _privacy_payload(trace: RetrievalTrace, config: dict | None) -> dict[str, Any]:
+def _privacy_payload(
+    trace: RetrievalTrace,
+    config: dict | None,
+    *,
+    include_task_text: bool = False,
+) -> dict[str, Any]:
     cfg = _telemetry_config(config)
-    payload = trace.to_dict(); task = str(payload.pop("task", ""))
-    payload["task_fingerprint"] = hashlib.sha256(task.encode("utf-8")).hexdigest()
+    payload = trace.to_dict()
+    task = str(payload.pop("task", ""))
+    fingerprint = _task_fingerprint(task)
+    if fingerprint:
+        payload["task_fingerprint"] = fingerprint
     patterns = [str(x) for x in (cfg.get("redact_patterns") or []) if str(x)]
-    store_task = bool(cfg.get("store_task_text", cfg.get("include_task_text", False)))
-    if store_task: payload["task"] = _redact(task, patterns)
+    if include_task_text:
+        payload["task"] = _redact(task, patterns)
     return _redact_tree(payload, patterns)
 
 
@@ -152,16 +265,39 @@ def _prune_traces(root: Path, config: dict | None) -> None:
         except OSError: pass
 
 
-def write_trace(root: Path, trace: RetrievalTrace, config: dict | None = None) -> str:
-    resolved = _resolve_config(root, config); payload = _privacy_payload(trace, resolved)
-    local = LocalJsonSink(root); local.emit(payload); _prune_traces(root, resolved)
-    cfg = _telemetry_config(resolved); endpoint = str(cfg.get("otlp_endpoint", "")).strip()
-    if endpoint:
+def write_trace(
+    root: Path,
+    trace: RetrievalTrace,
+    config: dict | None = None,
+) -> str:
+    resolved = _resolve_config(root, config)
+
+    local_payload = _privacy_payload(
+        trace,
+        resolved,
+        include_task_text=False,
+    )
+    local = LocalJsonSink(root)
+    local.emit(local_payload)
+    _prune_traces(root, resolved)
+
+    trusted = _trusted_otlp_settings()
+    if trusted is not None:
+        export_payload = _privacy_payload(
+            trace,
+            resolved,
+            include_task_text=trusted.include_task_text,
+        )
         try:
-            OtlpHttpSink(endpoint, timeout_seconds=float(cfg.get("export_timeout_seconds", 2.0)), headers=_headers_from_env(str(cfg.get("otlp_headers_env", "")))).emit(payload)
+            OtlpHttpSink(
+                trusted.endpoint,
+                timeout_seconds=trusted.timeout_seconds,
+                headers=trusted.headers,
+            ).emit(export_payload)
         except Exception:
             pass
-    return str(payload["_local_path"])
+
+    return str(local_payload["_local_path"])
 
 
 def _read_traces(root: Path, limit: int) -> list[dict[str, Any]]:
