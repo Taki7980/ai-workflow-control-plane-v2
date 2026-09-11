@@ -6,6 +6,7 @@ All notable repository changes are summarized here. The project follows semantic
 
 ### Added
 
+- Stage-8 production rollout hardening with an opt-in same-host SQLite WAL evidence mirror and reconciliation, crash-recoverable local rollout locks, task-cluster bootstrap diagnostics, low-cardinality observability exports, and signed privacy-minimized rollback incident bundles.
 - Stage-7 controlled contextual-policy deployment with signed generation-checked rollout state, randomized 1%/5%/10%/bounded canaries, cumulative safety budgets, live drift/reward guardrails, mandatory automatic rollback, and global kill-switch coverage.
 - Stage-6 contextual safe policy learning with a stable feature schema, independent holdout doubly robust evaluation, HMAC-signed shadow-only manifests, and anytime-valid post-cutoff confidence gates.
 - Stage-5 opt-in safe retrieval learning with low-risk bounded exploration, propensity logging, delayed verified outcomes, IPS/SNIPS OPE, and conservative promotion gates.
