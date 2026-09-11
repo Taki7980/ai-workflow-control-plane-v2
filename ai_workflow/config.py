@@ -32,7 +32,8 @@ _DEFAULT_CONFIG = {
             "min_source_files": 250, "changed_files_threshold": 3,
         },
         "semantic": {
-            "mode": "auto", "command": "", "timeout_seconds": 8, "max_results": 6,
+            "mode": "auto", "provider_id": "", "command": "",
+            "timeout_seconds": 8, "max_results": 6,
             "max_output_bytes": 8388608, "env_allowlist": [],
         },
         "external_retrievers": [],
@@ -198,8 +199,22 @@ def validate_config(data: dict[str, Any]) -> None:
     for index, spec in enumerate(retrievers):
         prefix = f"context.external_retrievers[{index}]"
         if not isinstance(spec, dict) or not str(spec.get("name", "")).strip():
-            raise ValueError(f"{prefix} requires name and command")
-        _provider_command(spec.get("command"), f"{prefix}.command")
+            raise ValueError(f"{prefix} requires a non-empty name")
+        provider_id = str(spec.get("provider_id") or "").strip()
+        command = spec.get("command")
+        has_command = command not in (None, "", [])
+        if not provider_id and not has_command:
+            raise ValueError(f"{prefix} requires provider_id")
+        if provider_id and has_command:
+            raise ValueError(
+                f"{prefix} may not combine provider_id with repository command"
+            )
+        if provider_id and spec.get("env_allowlist") not in (None, [], ()):
+            raise ValueError(
+                f"{prefix} may not define env_allowlist with provider_id"
+            )
+        if has_command:
+            _provider_command(command, f"{prefix}.command")
         intents = _string_list(spec.get("intents", ["all"]), f"{prefix}.intents")
         if not {str(x).lower() for x in intents}.issubset({"exact", "semantic", "structural", "mixed", "all"}):
             raise ValueError(f"{prefix}.intents contains unsupported values")
@@ -210,8 +225,19 @@ def validate_config(data: dict[str, Any]) -> None:
     semantic = data["context"]["semantic"]
     if semantic.get("mode", "auto") not in {"auto", "on", "off"}:
         raise ValueError("context.semantic.mode must be auto, on, or off")
-    if semantic.get("command") not in (None, ""):
-        _provider_command(semantic.get("command"), "context.semantic.command")
+    semantic_provider_id = str(semantic.get("provider_id") or "").strip()
+    semantic_command = semantic.get("command")
+    has_semantic_command = semantic_command not in (None, "", [])
+    if semantic_provider_id and has_semantic_command:
+        raise ValueError(
+            "context.semantic may not combine provider_id with repository command"
+        )
+    if semantic_provider_id and semantic.get("env_allowlist") not in (None, [], ()):
+        raise ValueError(
+            "context.semantic may not define env_allowlist with provider_id"
+        )
+    if has_semantic_command:
+        _provider_command(semantic_command, "context.semantic.command")
     _positive_int(int(semantic.get("timeout_seconds", 0)), "context.semantic.timeout_seconds")
     _positive_int(int(semantic.get("max_results", 0)), "context.semantic.max_results")
     _positive_int(int(semantic.get("max_output_bytes", 8388608)), "context.semantic.max_output_bytes")
