@@ -12,12 +12,16 @@ Include the affected version/commit, impact, prerequisites, reproduction steps, 
 
 ## Security boundaries
 
-AI Workflow treats configured provider executables and provider-returned content as separate trust domains. A provider executable is explicitly configured local software; its returned repository/context text remains untrusted data.
+AI Workflow treats provider executable authority, repository configuration, and provider-returned content as separate trust domains. Repository configuration may request a trusted `provider_id`, but executable paths, executable digests, provider environment access, and provider execution semantics must come from a user/admin-owned provider registry outside the repository. Provider-returned repository/context text remains untrusted data.
 
 The control plane therefore:
 
+- rejects repository-defined provider commands by default;
+- resolves provider executable authority from a registry outside the repository;
+- verifies the registered executable with SHA-256 before launch;
+- prevents a digest-pinned interpreter from being pointed at a repository-owned script path;
 - executes command providers without a shell;
-- inherits only a small runtime environment plus explicitly allowlisted variable names;
+- inherits only a small runtime environment plus variable names allowlisted by the trusted registry;
 - bounds provider stdout and execution time;
 - confines provider file metadata to the workspace;
 - keeps hard safety routing deterministic for high-risk mutations;
@@ -30,4 +34,6 @@ Repository content can contain prompt injection or misleading instructions. Retr
 
 ## Secrets
 
-Do not commit provider tokens, PyPI tokens, cloud credentials, private keys, or production configuration containing secret values. Provider configuration may name environment variables in `env_allowlist`; it must not store their secret values. PyPI publishing is designed for Trusted Publishing and does not require a stored PyPI upload token.
+Do not commit provider tokens, PyPI tokens, cloud credentials, private keys, or production configuration containing secret values. Checked-in project configuration must not name secret-bearing environment variables. Put a provider's `env_allowlist` only in the trusted provider registry outside the repository; store variable names there, never secret values. PyPI publishing is designed for Trusted Publishing and does not require a stored PyPI upload token.
+
+Legacy repository-defined provider commands are available only through the explicit `AI_WORKFLOW_ALLOW_REPO_PROVIDER_COMMANDS=1` compatibility escape hatch. Treat that flag as unsafe for untrusted repositories.
