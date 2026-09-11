@@ -16,6 +16,7 @@ from .benchmark_protocol import (
     snapshot_status,
     validate_benchmark_cases,
 )
+from .benchmark_spans import span_retrieval_metrics
 from .benchmark_trajectory import load_trajectory_events, trajectory_metrics
 from .budget import budget_for
 from .classifier import classify
@@ -76,6 +77,7 @@ def _isolated_case_config(config: dict) -> dict:
 def _group_summary(group: list[dict]) -> dict:
     pattern_rows = [r["retrieval"] for r in group if "retrieval" in r]
     file_rows = [r["file_retrieval"] for r in group if "file_retrieval" in r]
+    span_rows = [r["span_retrieval"] for r in group if "span_retrieval" in r]
     trajectory_rows = [r["trajectory"] for r in group if "trajectory" in r]
     return {
         "cases": len(group),
@@ -96,6 +98,18 @@ def _group_summary(group: list[dict]) -> dict:
         "mean_file_f1": _mean(file_rows, "file_f1"),
         "mean_file_yield_per_1k_tokens": _mean(
             file_rows, "matched_gold_files_per_1k_tokens"
+        ),
+        "mean_span_precision_at_k": _mean(
+            span_rows, "span_precision_at_k"
+        ),
+        "mean_span_recall_at_k": _mean(
+            span_rows, "span_recall_at_k"
+        ),
+        "mean_span_f1": _mean(span_rows, "span_f1"),
+        "mean_line_precision": _mean(span_rows, "line_precision"),
+        "mean_line_recall": _mean(span_rows, "line_recall"),
+        "mean_gold_line_yield_per_1k_tokens": _mean(
+            span_rows, "covered_gold_lines_per_1k_tokens"
         ),
         "mean_exploration_precision": _mean(
             trajectory_rows, "exploration_precision"
@@ -148,6 +162,11 @@ def run_benchmark(
 
         start = time.perf_counter()
         decision = classify(task, case_config)
+        case_budget_tokens = case.get("budget_tokens")
+        if case_budget_tokens is not None:
+            case_config["budgets"][decision.lane.value][
+                "estimated_tokens"
+            ] = int(case_budget_tokens)
         budget = budget_for(decision.lane, case_config)
         items, retrieval = gather_detailed(
             case_root,
@@ -172,6 +191,10 @@ def run_benchmark(
             "query_type": case.get("query_type", "unclassified"),
             "control_type": control_type,
             "repository_path": str(case.get("repository_path", ".")).strip() or ".",
+            "repository_id": case.get("repository_id"),
+            "case_id": case.get("case_id"),
+            "language": case.get("language"),
+            "label_source": case.get("label_source"),
             "snapshot": snapshot,
             "lane": decision.lane.value,
             "risk": decision.risk.value,
@@ -254,6 +277,23 @@ def run_benchmark(
             )
             row["file_retrieval"] = file_metrics
 
+        span_metrics = span_retrieval_metrics(
+            items,
+            case.get("gold_spans") or [],
+            retrieval_k,
+            line_budget=(
+                int(case["budget_lines"])
+                if case.get("budget_lines") is not None
+                else None
+            ),
+        )
+        if span_metrics:
+            span_metrics["covered_gold_lines_per_1k_tokens"] = round(
+                span_metrics["covered_gold_lines"] * 1000 / max(1, used),
+                4,
+            )
+            row["span_retrieval"] = span_metrics
+
         repository_control = repository_control_metrics(
             items,
             case.get("forbidden_repositories") or [],
@@ -279,6 +319,7 @@ def run_benchmark(
     control_rows = [r for r in rows if "selective_control_correct" in r]
     retrieval_rows = [r["retrieval"] for r in rows if "retrieval" in r]
     file_rows = [r["file_retrieval"] for r in rows if "file_retrieval" in r]
+    span_rows = [r["span_retrieval"] for r in rows if "span_retrieval" in r]
     trajectory_rows = [r["trajectory"] for r in rows if "trajectory" in r]
     frozen_rows = [r for r in rows if r["snapshot"]["match"] is not None]
 
@@ -301,6 +342,9 @@ def run_benchmark(
         "scope": "routing-and-context-only",
         "research_protocol": {
             "file_level_gold_supported": True,
+            "span_level_gold_supported": True,
+            "fixed_line_budget_scoring_supported": True,
+            "clean_content_snapshot_check_supported": True,
             "frozen_snapshot_check_supported": True,
             "selective_controls_supported": True,
             "multi_repo_case_isolation_supported": True,
@@ -315,8 +359,8 @@ def run_benchmark(
         },
         "warning": (
             "Estimated context tokens are not provider-billed tokens. "
-            "Retrieval metrics measure supplied gold patterns/files and do not "
-            "prove downstream task correctness."
+            "Retrieval metrics measure supplied gold patterns/files/spans and "
+            "do not prove downstream task correctness."
         ),
         "providers": providers.to_dict(),
         "cases": rows,
@@ -365,6 +409,18 @@ def run_benchmark(
             "mean_file_f1": _mean(file_rows, "file_f1"),
             "mean_file_yield_per_1k_tokens": _mean(
                 file_rows, "matched_gold_files_per_1k_tokens"
+            ),
+            "mean_span_precision_at_k": _mean(
+                span_rows, "span_precision_at_k"
+            ),
+            "mean_span_recall_at_k": _mean(
+                span_rows, "span_recall_at_k"
+            ),
+            "mean_span_f1": _mean(span_rows, "span_f1"),
+            "mean_line_precision": _mean(span_rows, "line_precision"),
+            "mean_line_recall": _mean(span_rows, "line_recall"),
+            "mean_gold_line_yield_per_1k_tokens": _mean(
+                span_rows, "covered_gold_lines_per_1k_tokens"
             ),
             "mean_exploration_precision": _mean(
                 trajectory_rows, "exploration_precision"
