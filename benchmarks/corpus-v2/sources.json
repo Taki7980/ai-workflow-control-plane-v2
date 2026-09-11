@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "id": "agent-retrieval-bench",
+      "paper": "https://arxiv.org/abs/2607.24882",
+      "repository": "https://github.com/eyuansu62/agent-retrieval-bench",
+      "integration_status": "source-registered-not-vendored",
+      "license_note": "Verify benchmark metadata and every referenced repository license before redistribution."
+    },
+    {
+      "id": "contextbench",
+      "paper": "https://arxiv.org/abs/2602.05892",
+      "repository": "https://github.com/EuniAI/ContextBench",
+      "integration_status": "source-registered-not-vendored",
+      "license_note": "Use upstream data under its published terms; do not infer redistribution rights."
+    },
+    {
+      "id": "swe-explore",
+      "paper": "https://arxiv.org/abs/2606.07297",
+      "repository": "https://github.com/Qiushao-E/SWE-Explore-Bench",
+      "integration_status": "source-registered-not-vendored",
+      "license_note": "Use upstream data under its published terms; preserve line-level labels and source provenance."
+    },
+    {
+      "id": "core-bench",
+      "paper": "https://arxiv.org/abs/2606.11864",
+      "integration_status": "source-registered-not-vendored",
+      "license_note": "Verify upstream dataset and repository licenses before materialization."
+    }
+  ]
+}
