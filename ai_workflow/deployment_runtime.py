@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import math
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -97,15 +98,15 @@ def _baseline_assignment(
 def _assignment_fraction(
     signing_key: bytes,
     policy_id: str,
-    task_fingerprint: str,
-) -> float:
+) -> tuple[float, str]:
+    nonce = secrets.token_hex(16)
     digest = hmac.new(
         signing_key,
-        f"{policy_id}:{task_fingerprint}".encode(),
+        f"{policy_id}:{nonce}".encode(),
         hashlib.sha256,
     ).digest()
     numerator = int.from_bytes(digest[:8], "big")
-    return numerator / float(2**64)
+    return numerator / float(2**64), nonce
 
 
 def _target_arm(
@@ -261,11 +262,9 @@ def resolve_runtime_deployment(
             target_arm=target_arm,
         )
 
-    fingerprint = hashlib.sha256(query.encode()).hexdigest()
-    bucket = _assignment_fraction(
+    bucket, nonce = _assignment_fraction(
         signing_key,
         str(state.get("policy_id", "")),
-        fingerprint,
     )
     candidate = bucket < probability
     chosen = target_arm if candidate else BASELINE_ARM
@@ -286,6 +285,7 @@ def resolve_runtime_deployment(
         "target_arm": target_arm,
         "context_key": key,
         "assignment_bucket": round(bucket, 12),
+        "assignment_nonce": nonce,
         "source": "stage7_deployment",
     }
     return {
