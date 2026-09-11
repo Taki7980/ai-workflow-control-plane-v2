@@ -318,6 +318,17 @@ def _result_from_bytes(
     )
 
 
+def _provider_cwd(spec: CommandProviderSpec, request: RetrievalRequest) -> Path:
+    """Choose a cwd that cannot turn repository files into provider code."""
+
+    if spec.executable_trust == "trusted_registry_digest":
+        try:
+            return Path(spec.command[0]).resolve(strict=True).parent
+        except OSError:
+            return Path(spec.command[0]).expanduser().resolve().parent
+    return request.root
+
+
 def run_command_provider(
     spec: CommandProviderSpec,
     request: RetrievalRequest,
@@ -335,7 +346,7 @@ def run_command_provider(
     try:
         proc = subprocess.Popen(
             spec.command,
-            cwd=request.root,
+            cwd=_provider_cwd(spec, request),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -443,7 +454,7 @@ async def run_command_provider_async(
     try:
         proc = await asyncio.create_subprocess_exec(
             *spec.command,
-            cwd=request.root,
+            cwd=_provider_cwd(spec, request),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
