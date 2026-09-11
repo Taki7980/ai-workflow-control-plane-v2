@@ -62,6 +62,14 @@ _DEFAULT_CONFIG = {
             ),
             "signing_key_env": "AI_WORKFLOW_POLICY_SIGNING_KEY",
             "auto_rollback": True,
+            "incident_bundles": True,
+        },
+        "production": {
+            "enabled": False,
+            "sqlite_path": (
+                "ai-workspace/generated/learning/production/events.sqlite3"
+            ),
+            "busy_timeout_ms": 5000,
         },
         "targeted_search": {"max_matches": 12, "max_file_bytes": 500000},
     },
@@ -275,6 +283,13 @@ def validate_config(data: dict[str, Any]) -> None:
             raise ValueError(
                 "context.deployment.auto_rollback must be boolean"
             )
+        if not isinstance(
+            deployment.get("incident_bundles", True),
+            bool,
+        ):
+            raise ValueError(
+                "context.deployment.incident_bundles must be boolean"
+            )
         if (
             deployment.get("enabled", False)
             and not deployment.get("auto_rollback", True)
@@ -306,6 +321,30 @@ def validate_config(data: dict[str, Any]) -> None:
             raise ValueError(
                 "context.deployment.signing_key_env must be non-empty"
             )
+
+    production = data["context"].get("production")
+    if production is not None:
+        if not isinstance(production, dict):
+            raise ValueError("context.production must be an object")
+        if not isinstance(production.get("enabled", False), bool):
+            raise ValueError("context.production.enabled must be boolean")
+        sqlite_path = production.get(
+            "sqlite_path",
+            "ai-workspace/generated/learning/production/events.sqlite3",
+        )
+        if not isinstance(sqlite_path, str) or not sqlite_path.strip():
+            raise ValueError(
+                "context.production.sqlite_path must be a relative path"
+            )
+        sqlite_candidate = Path(sqlite_path)
+        if sqlite_candidate.is_absolute() or ".." in sqlite_candidate.parts:
+            raise ValueError(
+                "context.production.sqlite_path must stay inside project root"
+            )
+        _positive_int(
+            production.get("busy_timeout_ms", 5000),
+            "context.production.busy_timeout_ms",
+        )
 
     roots = data["workspace"].get("roots", [])
     if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
