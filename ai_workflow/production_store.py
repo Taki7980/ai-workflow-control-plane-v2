@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .sqlite_runtime import require_safe_sqlite_wal_runtime
+
 
 STORE_SCHEMA_VERSION = "ai-workflow-production-store-v1"
 DEFAULT_STORE_RELATIVE = (
@@ -148,6 +150,7 @@ def open_production_store(
     *,
     busy_timeout_ms: int = 5000,
 ) -> Iterator[sqlite3.Connection]:
+    require_safe_sqlite_wal_runtime()
     path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     timeout_ms = min(max(1, int(busy_timeout_ms)), 60000)
