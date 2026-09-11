@@ -29,6 +29,14 @@ from .config import estimate_tokens, find_project_root, load_config
 from .contextual_features import DEFAULT_POLICY_FIELDS, FEATURE_FIELDS
 from .contextual_policy import build_contextual_policy_report
 from .context_broker import detect_changed_files
+from .deployment_guardrails import evaluate_live_guardrails
+from .deployment_state import (
+    create_deployment_state,
+    load_deployment_state,
+    update_deployment_state_file,
+    verify_deployment_state,
+    write_new_deployment_state,
+)
 from .doctor import run as doctor_run
 from .handoff import handoff_path, render as render_handoff, validate as validate_handoff
 from .indexer import build_indexes, incremental_indexes
@@ -635,6 +643,138 @@ def cmd_learning_shadow_evaluate(args):
     _json(result)
 
 
+def _deployment_state_path(root: Path, value: str) -> Path:
+    candidate = Path(value)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (root / candidate).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError("deployment state path must stay inside project root")
+    return resolved
+
+
+def cmd_deployment_create(args):
+    root = _root(args)
+    signing_key = _signing_key_from_env(args.signing_key_env)
+    state = create_deployment_state(
+        root,
+        _load_json_object(args.manifest),
+        _load_json_object(args.shadow_report),
+        signing_key,
+        approved_by=args.approved_by,
+        bounded_traffic_fraction=args.bounded_traffic,
+        reward_min=args.reward_min,
+        reward_max=args.reward_max,
+        max_importance_weight=args.max_importance_weight,
+        minimum_monitor_outcomes=args.minimum_monitor_outcomes,
+        promotion_margin=args.promotion_margin,
+        max_reward_regression=args.max_reward_regression,
+        max_failure_rate=args.max_failure_rate,
+        max_context_tv_distance=args.max_context_tv_distance,
+        max_unknown_context_rate=args.max_unknown_context_rate,
+        minimum_drift_samples=args.minimum_drift_samples,
+        drift_window=args.drift_window,
+        max_cumulative_realized_cost=args.max_cumulative_realized_cost,
+    )
+    path = _deployment_state_path(root, args.state)
+    write_new_deployment_state(path, state, signing_key)
+    _json({
+        "created": True,
+        "policy_id": state["policy_id"],
+        "stage": state["stage"],
+        "generation": state["generation"],
+        "traffic_fraction": state["traffic_fraction"],
+        "state": path.relative_to(root).as_posix(),
+    })
+
+
+def cmd_deployment_status(args):
+    root = _root(args)
+    path = _deployment_state_path(root, args.state)
+    state = load_deployment_state(path)
+    verification = verify_deployment_state(
+        state,
+        _signing_key_from_env(args.signing_key_env),
+    )
+    _json({
+        **verification,
+        "state": path.relative_to(root).as_posix(),
+        "history_tail": (
+            state.get("history", [])[-1]
+            if isinstance(state.get("history"), list)
+            and state.get("history")
+            else None
+        ),
+        "guardrails": state.get("guardrails"),
+    })
+    if not verification["valid"]:
+        raise SystemExit(1)
+
+
+def cmd_deployment_guardrails(args):
+    root = _root(args)
+    path = _deployment_state_path(root, args.state)
+    state = load_deployment_state(path)
+    result = evaluate_live_guardrails(
+        root,
+        state,
+        _signing_key_from_env(args.signing_key_env),
+    )
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    _json(result)
+
+
+def cmd_deployment_promote(args):
+    root = _root(args)
+    path = _deployment_state_path(root, args.state)
+    guardrail_report = (
+        _load_json_object(args.guardrail_report)
+        if args.guardrail_report
+        else None
+    )
+    updated = update_deployment_state_file(
+        path,
+        _signing_key_from_env(args.signing_key_env),
+        to_stage=args.to,
+        actor=args.actor,
+        expected_generation=args.expected_generation,
+        guardrail_report=guardrail_report,
+        reason=args.reason,
+    )
+    _json({
+        "updated": True,
+        "policy_id": updated["policy_id"],
+        "stage": updated["stage"],
+        "generation": updated["generation"],
+        "traffic_fraction": updated["traffic_fraction"],
+        "state": path.relative_to(root).as_posix(),
+    })
+
+
+def cmd_deployment_rollback(args):
+    root = _root(args)
+    path = _deployment_state_path(root, args.state)
+    updated = update_deployment_state_file(
+        path,
+        _signing_key_from_env(args.signing_key_env),
+        to_stage="rolled_back",
+        actor=args.actor,
+        expected_generation=args.expected_generation,
+        reason=args.reason,
+    )
+    _json({
+        "updated": True,
+        "policy_id": updated["policy_id"],
+        "stage": updated["stage"],
+        "generation": updated["generation"],
+        "traffic_fraction": updated["traffic_fraction"],
+        "rollback": updated.get("rollback"),
+        "state": path.relative_to(root).as_posix(),
+    })
+
+
 def cmd_learning_status(args):
     root = _root(args)
     _json(learning_status(root, load_config(root)))
@@ -1057,6 +1197,96 @@ def build_parser():
     l.add_argument("--max-realized-cost", type=float)
     l.add_argument("--output")
     l.set_defaults(func=cmd_learning_evaluate)
+
+    q = sp.add_parser(
+        "deployment",
+        help="manage signed staged rollout of a contextual retrieval policy",
+    )
+    dsp = q.add_subparsers(dest="deployment_command", required=True)
+    default_state = (
+        "ai-workspace/generated/learning/deployment/active.json"
+    )
+
+    d = dsp.add_parser(
+        "create",
+        help="approve signed shadow evidence and create a zero-traffic state",
+    )
+    d.add_argument("--manifest", required=True)
+    d.add_argument("--shadow-report", required=True)
+    d.add_argument("--state", default=default_state)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.add_argument("--approved-by", required=True)
+    d.add_argument("--bounded-traffic", type=float, default=0.25)
+    d.add_argument("--reward-min", type=float, default=0.0)
+    d.add_argument("--reward-max", type=float, default=1.0)
+    d.add_argument("--max-importance-weight", type=float, default=100.0)
+    d.add_argument("--minimum-monitor-outcomes", type=int, default=20)
+    d.add_argument("--promotion-margin", type=float, default=0.0)
+    d.add_argument("--max-reward-regression", type=float, default=0.05)
+    d.add_argument("--max-failure-rate", type=float, default=0.10)
+    d.add_argument("--max-context-tv-distance", type=float, default=0.30)
+    d.add_argument("--max-unknown-context-rate", type=float, default=0.20)
+    d.add_argument("--minimum-drift-samples", type=int, default=50)
+    d.add_argument("--drift-window", type=int, default=200)
+    d.add_argument("--max-cumulative-realized-cost", type=float)
+    d.set_defaults(func=cmd_deployment_create)
+
+    d = dsp.add_parser("status", help="verify and inspect deployment state")
+    d.add_argument("--state", default=default_state)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.set_defaults(func=cmd_deployment_status)
+
+    d = dsp.add_parser(
+        "guardrails",
+        help="evaluate cumulative live canary safety and drift signals",
+    )
+    d.add_argument("--state", default=default_state)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.add_argument("--output")
+    d.set_defaults(func=cmd_deployment_guardrails)
+
+    d = dsp.add_parser(
+        "promote",
+        help="manually advance one rollout stage after required evidence",
+    )
+    d.add_argument("--state", default=default_state)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.add_argument(
+        "--to",
+        required=True,
+        choices=["canary_1", "canary_5", "canary_10", "bounded"],
+    )
+    d.add_argument("--actor", required=True)
+    d.add_argument("--expected-generation", type=int, required=True)
+    d.add_argument("--guardrail-report")
+    d.add_argument("--reason")
+    d.set_defaults(func=cmd_deployment_promote)
+
+    d = dsp.add_parser(
+        "rollback",
+        help="manually terminate canary traffic and return to adaptive_math",
+    )
+    d.add_argument("--state", default=default_state)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.add_argument("--actor", required=True)
+    d.add_argument("--expected-generation", type=int, required=True)
+    d.add_argument("--reason", required=True)
+    d.set_defaults(func=cmd_deployment_rollback)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
