@@ -116,7 +116,27 @@ Every v2 case records repository ID, language, label source, and labeler count.
 The source registry under `benchmarks/corpus-v2/sources.json` intentionally links
 primary datasets instead of vendoring them.
 
-### 6. Explicit readiness gate
+### 6. Persistent-project-knowledge isolation
+
+Research-protocol runs explicitly exclude project-generated context channels:
+
+- hot/incident caches;
+- domain-manifest hints;
+- research notes;
+- durable memory.
+
+Repository indexes, source search, configured structural retrieval, and explicitly
+configured semantic/external retrieval remain available.
+
+This prevents two confounders:
+
+1. prior project knowledge leaking answers into a repository-retrieval benchmark;
+2. read-time memory migration mutating an otherwise frozen benchmark worktree.
+
+The legacy regression suite retains historical behavior for backward-compatible trend
+tracking and is not used as publication-scale evidence.
+
+### 7. Explicit readiness gate
 
 A syntactically valid corpus is not necessarily research ready.
 
