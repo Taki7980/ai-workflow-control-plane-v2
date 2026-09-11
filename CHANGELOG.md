@@ -6,6 +6,7 @@ All notable repository changes are summarized here. The project follows semantic
 
 ### Added
 
+- Stage-9 benchmark corpus v2 with clean tracked-content snapshot manifests, repository-qualified span/line gold, fixed benchmark token/line budgets, control/source provenance, external-corpus source registry, and publication-readiness validation.
 - Stage-8 production rollout hardening with an opt-in same-host SQLite WAL evidence mirror and reconciliation, crash-recoverable local rollout locks, task-cluster bootstrap diagnostics, low-cardinality observability exports, and signed privacy-minimized rollback incident bundles.
 - Stage-7 controlled contextual-policy deployment with signed generation-checked rollout state, randomized 1%/5%/10%/bounded canaries, cumulative safety budgets, live drift/reward guardrails, mandatory automatic rollback, and global kill-switch coverage.
 - Stage-6 contextual safe policy learning with a stable feature schema, independent holdout doubly robust evaluation, HMAC-signed shadow-only manifests, and anytime-valid post-cutoff confidence gates.
