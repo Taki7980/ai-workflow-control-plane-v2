@@ -17,6 +17,7 @@ from .contextual_features import (
     build_context_features,
 )
 from .models import RouteDecision
+from .outcome_verification import validate_verified_outcome
 
 
 BASELINE_ARM = "adaptive_math"
@@ -465,6 +466,8 @@ def record_verified_outcome(
     *,
     success: bool,
     source: str,
+    verifier_identity: str,
+    evidence_digest: str,
     reward: float | None = None,
     realized_cost: float = 0.0,
     metadata: dict[str, Any] | None = None,
@@ -483,15 +486,15 @@ def record_verified_outcome(
         ) from exc
     if not isinstance(decision_record, dict):
         raise ValueError(f"learning decision is invalid: {decision_id}")
-    if not str(source).strip():
-        raise ValueError("outcome source must not be blank")
+
     value = float(success) if reward is None else float(reward)
-    cost = float(realized_cost)
-    if not math.isfinite(value) or not math.isfinite(cost) or cost < 0:
-        raise ValueError(
-            "reward must be finite and realized_cost must be "
-            "finite/non-negative"
-        )
+    evidence = validate_verified_outcome(
+        source=source,
+        verifier_identity=verifier_identity,
+        evidence_digest=evidence_digest,
+        reward=value,
+        realized_cost=realized_cost,
+    )
 
     recorded_at = _utc_now()
     created_at = str(decision_record.get("created_at", "")).strip()
@@ -512,9 +515,11 @@ def record_verified_outcome(
         "decision_id": decision_id,
         "verified": True,
         "success": bool(success),
-        "reward": value,
-        "realized_cost": cost,
-        "source": str(source).strip(),
+        "reward": evidence.reward,
+        "realized_cost": evidence.realized_cost,
+        "source": evidence.source,
+        "verifier_identity": evidence.verifier_identity,
+        "evidence_digest": evidence.evidence_digest,
         "recorded_at": recorded_at,
         "decision_created_at": created_at or None,
         "verification_delay_seconds": (
