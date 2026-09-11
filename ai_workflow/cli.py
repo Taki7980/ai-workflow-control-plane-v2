@@ -30,6 +30,11 @@ from .contextual_features import DEFAULT_POLICY_FIELDS, FEATURE_FIELDS
 from .contextual_policy import build_contextual_policy_report
 from .context_broker import detect_changed_files
 from .deployment_guardrails import evaluate_live_guardrails
+from .deployment_incident import (
+    create_incident_bundle,
+    verify_incident_bundle,
+    write_incident_bundle,
+)
 from .deployment_state import (
     create_deployment_state,
     load_deployment_state,
@@ -41,11 +46,21 @@ from .doctor import run as doctor_run
 from .handoff import handoff_path, render as render_handoff, validate as validate_handoff
 from .indexer import build_indexes, incremental_indexes
 from .io_utils import atomic_write_json, atomic_write_text
+from .observability_export import (
+    build_deployment_metrics,
+    write_deployment_metrics,
+)
 from .memory import add_memory, export_memory_jsonl, list_memories, prune_stale, search_memory
 from .learning_ope import evaluate_learning_policies
 from .policy_manifest import (
     create_policy_manifest,
     verify_policy_manifest,
+)
+from .production_store import (
+    mirror_learning_event,
+    production_store_status,
+    reconcile_learning_store,
+    sync_learning_store,
 )
 from .retrieval_learning import (
     SAFE_EXPLORATION_ARMS,
@@ -675,10 +690,19 @@ def cmd_deployment_create(args):
         max_unknown_context_rate=args.max_unknown_context_rate,
         minimum_drift_samples=args.minimum_drift_samples,
         drift_window=args.drift_window,
+        minimum_monitor_clusters=args.minimum_monitor_clusters,
+        cluster_bootstrap_resamples=args.cluster_bootstrap_resamples,
+        cluster_bootstrap_seed=args.cluster_bootstrap_seed,
         max_cumulative_realized_cost=args.max_cumulative_realized_cost,
     )
     path = _deployment_state_path(root, args.state)
     write_new_deployment_state(path, state, signing_key)
+    mirror_learning_event(
+        root,
+        load_config(root),
+        "deployment_state",
+        state,
+    )
     _json({
         "created": True,
         "policy_id": state["policy_id"],
@@ -743,6 +767,12 @@ def cmd_deployment_promote(args):
         guardrail_report=guardrail_report,
         reason=args.reason,
     )
+    mirror_learning_event(
+        root,
+        load_config(root),
+        "deployment_state",
+        updated,
+    )
     _json({
         "updated": True,
         "policy_id": updated["policy_id"],
@@ -756,14 +786,56 @@ def cmd_deployment_promote(args):
 def cmd_deployment_rollback(args):
     root = _root(args)
     path = _deployment_state_path(root, args.state)
+    signing_key = _signing_key_from_env(args.signing_key_env)
+    current = load_deployment_state(path)
+    guardrail_report = evaluate_live_guardrails(
+        root,
+        current,
+        signing_key,
+    )
     updated = update_deployment_state_file(
         path,
-        _signing_key_from_env(args.signing_key_env),
+        signing_key,
         to_stage="rolled_back",
         actor=args.actor,
         expected_generation=args.expected_generation,
         reason=args.reason,
     )
+    config = load_config(root)
+    mirror_learning_event(
+        root,
+        config,
+        "deployment_state",
+        updated,
+    )
+    incident_path = None
+    deployment_cfg = (
+        config.get("context", {}).get("deployment", {})
+        if isinstance(config.get("context"), dict)
+        else {}
+    )
+    if (
+        isinstance(deployment_cfg, dict)
+        and bool(deployment_cfg.get("incident_bundles", True))
+    ):
+        incident = create_incident_bundle(
+            root,
+            updated,
+            guardrail_report,
+            signing_key,
+            reason=args.reason,
+        )
+        incident_path = write_incident_bundle(
+            root,
+            incident,
+            signing_key,
+        )
+        mirror_learning_event(
+            root,
+            config,
+            "deployment_incident",
+            incident,
+        )
     _json({
         "updated": True,
         "policy_id": updated["policy_id"],
@@ -771,8 +843,57 @@ def cmd_deployment_rollback(args):
         "generation": updated["generation"],
         "traffic_fraction": updated["traffic_fraction"],
         "rollback": updated.get("rollback"),
+        "incident_bundle": (
+            Path(incident_path).relative_to(root.resolve()).as_posix()
+            if incident_path is not None
+            else None
+        ),
         "state": path.relative_to(root).as_posix(),
     })
+
+
+def cmd_deployment_metrics(args):
+    root = _root(args)
+    path = _deployment_state_path(root, args.state)
+    state = load_deployment_state(path)
+    report = evaluate_live_guardrails(
+        root,
+        state,
+        _signing_key_from_env(args.signing_key_env),
+    )
+    payload = build_deployment_metrics(report)
+    if args.output:
+        write_deployment_metrics(Path(args.output), report)
+    _json(payload)
+
+
+def cmd_deployment_verify_incident(args):
+    payload = _load_json_object(args.input)
+    result = verify_incident_bundle(
+        payload,
+        _signing_key_from_env(args.signing_key_env),
+    )
+    _json(result)
+    if not result["valid"]:
+        raise SystemExit(1)
+
+
+def cmd_production_status(args):
+    root = _root(args)
+    _json(production_store_status(root, load_config(root)))
+
+
+def cmd_production_sync(args):
+    root = _root(args)
+    _json(sync_learning_store(root, load_config(root)))
+
+
+def cmd_production_reconcile(args):
+    root = _root(args)
+    result = reconcile_learning_store(root, load_config(root))
+    _json(result)
+    if not result["consistent"]:
+        raise SystemExit(1)
 
 
 def cmd_learning_status(args):
@@ -789,6 +910,7 @@ def cmd_learning_record_outcome(args):
         source=args.source,
         reward=args.reward,
         realized_cost=args.realized_cost,
+        config=load_config(root),
     )
     _json({
         "recorded": True,
@@ -1231,6 +1353,9 @@ def build_parser():
     d.add_argument("--max-unknown-context-rate", type=float, default=0.20)
     d.add_argument("--minimum-drift-samples", type=int, default=50)
     d.add_argument("--drift-window", type=int, default=200)
+    d.add_argument("--minimum-monitor-clusters", type=int, default=5)
+    d.add_argument("--cluster-bootstrap-resamples", type=int, default=2000)
+    d.add_argument("--cluster-bootstrap-seed", type=int, default=20260911)
     d.add_argument("--max-cumulative-realized-cost", type=float)
     d.set_defaults(func=cmd_deployment_create)
 
@@ -1275,6 +1400,29 @@ def build_parser():
     d.set_defaults(func=cmd_deployment_promote)
 
     d = dsp.add_parser(
+        "metrics",
+        help="export low-cardinality deployment metrics from live evidence",
+    )
+    d.add_argument("--state", default=default_state)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.add_argument("--output")
+    d.set_defaults(func=cmd_deployment_metrics)
+
+    d = dsp.add_parser(
+        "verify-incident",
+        help="verify a signed Stage-8 deployment incident bundle",
+    )
+    d.add_argument("--input", required=True)
+    d.add_argument(
+        "--signing-key-env",
+        default="AI_WORKFLOW_POLICY_SIGNING_KEY",
+    )
+    d.set_defaults(func=cmd_deployment_verify_incident)
+
+    d = dsp.add_parser(
         "rollback",
         help="manually terminate canary traffic and return to adaptive_math",
     )
@@ -1287,6 +1435,24 @@ def build_parser():
     d.add_argument("--expected-generation", type=int, required=True)
     d.add_argument("--reason", required=True)
     d.set_defaults(func=cmd_deployment_rollback)
+
+    q = sp.add_parser(
+        "production",
+        help="manage the Stage-8 same-host WAL evidence mirror",
+    )
+    psp = q.add_subparsers(dest="production_command", required=True)
+    x = psp.add_parser("status", help="inspect SQLite WAL store health")
+    x.set_defaults(func=cmd_production_status)
+    x = psp.add_parser(
+        "sync",
+        help="idempotently backfill immutable learning records into SQLite",
+    )
+    x.set_defaults(func=cmd_production_sync)
+    x = psp.add_parser(
+        "reconcile",
+        help="verify SQLite learning-event digests against canonical files",
+    )
+    x.set_defaults(func=cmd_production_reconcile)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
