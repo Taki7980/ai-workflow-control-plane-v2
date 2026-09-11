@@ -5,10 +5,11 @@ import hmac
 import json
 import math
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .contextual_features import (
     FEATURE_SCHEMA_VERSION,
