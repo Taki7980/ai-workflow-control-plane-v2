@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from .indexer import sha256
 from .math_retrieval import BM25Scorer, tokenize
+from .memory_location import memory_db_path
 from .memory_store import SQLiteMemoryStore
 from .path_policy import PathOutsideWorkspace, resolve_within_root
 
@@ -11,15 +12,11 @@ MEMORY_TYPES = {"decision", "incident", "verified-fix", "architecture", "pattern
 
 
 def _db_path(root: Path) -> Path:
-    return root / "ai-workspace" / "memory" / "memory.sqlite3"
-
-
-def _legacy_path(root: Path) -> Path:
-    return root / "ai-workspace" / "memory" / "memory.jsonl"
+    return memory_db_path(root)
 
 
 def _has_store(root: Path) -> bool:
-    return _db_path(root).exists() or _legacy_path(root).exists()
+    return _db_path(root).exists()
 
 
 def _store(root: Path) -> SQLiteMemoryStore:
@@ -122,6 +119,29 @@ def prune_stale(root: Path) -> dict:
     pruned = len(records) - len(kept)
     store.replace_all(kept)
     return {"kept": len(kept), "pruned": pruned}
+
+
+
+def import_memory_jsonl(
+    root: Path,
+    source: Path,
+    *,
+    trusted: bool = False,
+) -> int:
+    """Explicitly import legacy JSONL into trusted operational memory."""
+
+    if not trusted:
+        raise ValueError(
+            "memory import requires explicit trusted=True acknowledgement"
+        )
+    candidate = Path(source).expanduser()
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"memory import source is unavailable: {candidate}") from exc
+    if not resolved.is_file():
+        raise ValueError("memory import source must be a regular file")
+    return _store(root).import_jsonl(resolved)
 
 
 def export_memory_jsonl(root: Path, destination: Path) -> int:
