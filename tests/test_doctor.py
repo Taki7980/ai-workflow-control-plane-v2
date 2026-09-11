@@ -42,3 +42,39 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(result["handoff_errors"], [])
             self.assertEqual(result["index"]["tracked_files"], 1)
             self.assertEqual(result["index"]["stale_files"], 0)
+
+
+    def test_doctor_fails_closed_when_production_wal_runtime_is_vulnerable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "app.py").write_text("def main(): pass\n")
+            build_indexes(root)
+            config = {
+                **CFG,
+                "context": {
+                    **CFG["context"],
+                    "production": {"enabled": True},
+                },
+            }
+            with patch(
+                "ai_workflow.doctor.sqlite_wal_runtime_status",
+                return_value={
+                    "version": "3.51.2",
+                    "parsed_version": [3, 51, 2],
+                    "safe_for_wal": False,
+                    "reason": "wal_reset_bug_affected_range",
+                    "reference": "https://www.sqlite.org/wal.html#walreset",
+                },
+            ):
+                result, ok = run(root, config)
+
+            self.assertFalse(ok)
+            self.assertFalse(
+                result["sqlite_wal_runtime"]["safe_for_wal"]
+            )
+            self.assertTrue(
+                any(
+                    "WAL-reset corruption bug" in item
+                    for item in result["recommendations"]
+                )
+            )

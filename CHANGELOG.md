@@ -22,6 +22,7 @@ All notable repository changes are summarized here. The project follows semantic
 
 ### Fixed
 
+- Production WAL mirroring now rejects SQLite runtimes affected by the 2026 WAL-reset corruption bug; doctor reports the runtime safety state when the production mirror is enabled.
 - Synchronous command-provider stdout handles are explicitly closed after bounded reader shutdown.
 
 ## 2.3.0 - 2026-09-10
