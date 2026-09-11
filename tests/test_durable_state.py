@@ -21,14 +21,24 @@ class DurableMemoryStoreTests(unittest.TestCase):
             "evidence": "", "files": [], "source_hashes": {}, "confidence": 0.8,
         }
 
-    def test_sqlite_store_imports_legacy_jsonl_once_backs_up_and_exports(self):
+    def test_sqlite_store_never_auto_imports_repository_legacy_jsonl(self):
         from ai_workflow.memory_store import SQLiteMemoryStore
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); legacy = root / "ai-workspace/memory/memory.jsonl"
             legacy.parent.mkdir(parents=True); legacy.write_text(json.dumps(self._record("mem-legacy")) + "\n", encoding="utf-8")
             store = SQLiteMemoryStore(root)
+            self.assertEqual(store.list_records(), [])
+            self.assertTrue(legacy.exists())
+            self.assertFalse(legacy.with_suffix(".jsonl.bak").exists())
+
+    def test_legacy_jsonl_import_requires_explicit_operator_action(self):
+        from ai_workflow.memory_store import SQLiteMemoryStore
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); legacy = root / "legacy-memory.jsonl"
+            legacy.write_text(json.dumps(self._record("mem-legacy")) + "\n", encoding="utf-8")
+            store = SQLiteMemoryStore(root)
+            self.assertEqual(store.import_jsonl(legacy), 1)
             self.assertEqual([row["id"] for row in store.list_records()], ["mem-legacy"])
-            self.assertTrue(legacy.with_suffix(".jsonl.bak").exists())
             self.assertEqual(store.import_jsonl(legacy), 0)
             exported = root / "export.jsonl"; self.assertEqual(store.export_jsonl(exported), 1)
             self.assertEqual(json.loads(exported.read_text().strip())["id"], "mem-legacy")
