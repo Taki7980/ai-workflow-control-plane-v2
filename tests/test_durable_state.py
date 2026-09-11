@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -65,29 +66,118 @@ class DurableMemoryStoreTests(unittest.TestCase):
 
 
 class TelemetryPrivacyTests(unittest.TestCase):
-    def test_trace_redacts_task_by_default_and_keeps_fingerprint(self):
-        from ai_workflow.telemetry import RetrievalTrace, write_trace
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td); rel = write_trace(root, RetrievalTrace("fix secret auth token", "small", "high", "exact"), {"context": {"telemetry": {"mode": "all"}}})
-            payload = json.loads((root / rel).read_text(encoding="utf-8")); self.assertNotIn("task", payload); self.assertEqual(len(payload["task_fingerprint"]), 64)
+    _TRUSTED_TELEMETRY_ENV = {
+        "AI_WORKFLOW_OTLP_ENDPOINT",
+        "AI_WORKFLOW_OTLP_ALLOWED_HOSTS",
+        "AI_WORKFLOW_OTLP_HEADERS_JSON",
+        "AI_WORKFLOW_OTLP_TIMEOUT_SECONDS",
+        "AI_WORKFLOW_OTLP_INCLUDE_TASK_TEXT",
+        "AI_WORKFLOW_TELEMETRY_HMAC_KEY",
+    }
 
-    def test_task_text_can_be_enabled_and_redacted(self):
+    def _clean_env(self) -> dict[str, str]:
+        return {
+            key: value
+            for key, value in os.environ.items()
+            if key not in self._TRUSTED_TELEMETRY_ENV
+        }
+
+    def test_local_trace_omits_task_and_unkeyed_fingerprint_by_default(self):
         from ai_workflow.telemetry import RetrievalTrace, write_trace
-        with tempfile.TemporaryDirectory() as td:
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            self._clean_env(),
+            clear=True,
+        ):
             root = Path(td)
-            cfg = {"context": {"telemetry": {"store_task_text": True, "redact_patterns": [r"(?i)bearer\s+\S+", r"(?i)api[_-]?key\s*[=:]\s*\S+"]}}}
-            rel = write_trace(root, RetrievalTrace("Bearer abc API_KEY=secret", "full", "high", "exact"), cfg)
-            task = json.loads((root / rel).read_text(encoding="utf-8"))["task"]
-            self.assertNotIn("abc", task); self.assertNotIn("secret", task); self.assertIn("[REDACTED]", task)
+            rel = write_trace(
+                root,
+                RetrievalTrace(
+                    "fix secret auth token",
+                    "small",
+                    "high",
+                    "exact",
+                ),
+                {"context": {"telemetry": {"mode": "all"}}},
+            )
+            payload = json.loads((root / rel).read_text(encoding="utf-8"))
+            self.assertNotIn("task", payload)
+            self.assertNotIn("task_fingerprint", payload)
 
-    def test_write_trace_loads_project_telemetry_config_when_config_is_omitted(self):
+    def test_remote_task_text_can_be_enabled_and_redacted_without_local_persistence(self):
+        from ai_workflow.telemetry import RetrievalTrace, write_trace
+
+        env = self._clean_env()
+        env.update(
+            {
+                "AI_WORKFLOW_OTLP_ENDPOINT": "https://collector.example/v1/logs",
+                "AI_WORKFLOW_OTLP_ALLOWED_HOSTS": "collector.example",
+                "AI_WORKFLOW_OTLP_INCLUDE_TASK_TEXT": "1",
+            }
+        )
+        cfg = {
+            "context": {
+                "telemetry": {
+                    "redact_patterns": [
+                        r"(?i)bearer\s+\S+",
+                        r"(?i)api[_-]?key\s*[=:]\s*\S+",
+                    ]
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            env,
+            clear=True,
+        ), patch("ai_workflow.telemetry.OtlpHttpSink") as sink:
+            root = Path(td)
+            rel = write_trace(
+                root,
+                RetrievalTrace(
+                    "Bearer abc API_KEY=secret",
+                    "full",
+                    "high",
+                    "exact",
+                ),
+                cfg,
+            )
+            remote = sink.return_value.emit.call_args.args[0]
+            self.assertNotIn("abc", remote["task"])
+            self.assertNotIn("secret", remote["task"])
+            self.assertIn("[REDACTED]", remote["task"])
+            local = json.loads((root / rel).read_text(encoding="utf-8"))
+            self.assertNotIn("task", local)
+
+    def test_write_trace_loads_project_local_telemetry_config_when_config_is_omitted(self):
         from ai_workflow.config import DEFAULT_RELATIVE, default_config
         from ai_workflow.telemetry import RetrievalTrace, write_trace
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td); cfg = default_config(); cfg["context"]["telemetry"]["store_task_text"] = True
-            path = root / DEFAULT_RELATIVE; path.parent.mkdir(parents=True); path.write_text(json.dumps(cfg), encoding="utf-8")
-            rel = write_trace(root, RetrievalTrace("visible task", "small", "low", "exact"))
-            self.assertEqual(json.loads((root / rel).read_text())["task"], "visible task")
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            self._clean_env(),
+            clear=True,
+        ):
+            root = Path(td)
+            cfg = default_config()
+            cfg["context"]["telemetry"]["max_trace_files"] = 1
+            cfg["context"]["telemetry"]["retention_days"] = 3650
+            path = root / DEFAULT_RELATIVE
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(cfg), encoding="utf-8")
+
+            write_trace(
+                root,
+                RetrievalTrace("first task", "small", "low", "exact"),
+            )
+            write_trace(
+                root,
+                RetrievalTrace("second task", "small", "low", "exact"),
+            )
+            traces = list(
+                (root / "ai-workspace/generated/traces").glob("*.json")
+            )
+            self.assertEqual(len(traces), 1)
 
     def test_retention_limits_local_trace_files(self):
         from ai_workflow.telemetry import RetrievalTrace, write_trace
@@ -110,9 +200,29 @@ class TelemetryPrivacyTests(unittest.TestCase):
 
     def test_exporter_failure_never_breaks_local_trace(self):
         from ai_workflow.telemetry import RetrievalTrace, write_trace
-        cfg = {"context": {"telemetry": {"otlp_endpoint": "https://collector.invalid/v1/logs", "export_timeout_seconds": 0.1}}}
-        with tempfile.TemporaryDirectory() as td, patch("ai_workflow.telemetry.urlopen", side_effect=OSError("offline")):
-            root = Path(td); rel = write_trace(root, RetrievalTrace("task", "small", "low", "exact"), cfg); self.assertTrue((root / rel).exists())
+
+        env = self._clean_env()
+        env.update(
+            {
+                "AI_WORKFLOW_OTLP_ENDPOINT": "https://collector.example/v1/logs",
+                "AI_WORKFLOW_OTLP_ALLOWED_HOSTS": "collector.example",
+            }
+        )
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            env,
+            clear=True,
+        ), patch(
+            "ai_workflow.telemetry.OtlpHttpSink.emit",
+            side_effect=OSError("offline"),
+        ):
+            root = Path(td)
+            rel = write_trace(
+                root,
+                RetrievalTrace("task", "small", "low", "exact"),
+                {"context": {"telemetry": {"mode": "all"}}},
+            )
+            self.assertTrue((root / rel).exists())
 
 
 if __name__ == "__main__": unittest.main()

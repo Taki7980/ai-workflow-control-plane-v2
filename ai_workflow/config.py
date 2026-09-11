@@ -254,8 +254,24 @@ def validate_config(data: dict[str, Any]) -> None:
     if not isinstance(selector.get("mandatory_structural_evidence", True), bool):
         raise ValueError("context.selector.mandatory_structural_evidence must be boolean")
     _positive_int(selector.get("max_selector_candidates", 200), "context.selector.max_selector_candidates")
-    if data["context"]["telemetry"].get("mode", "mutations") not in {"off", "mutations", "all"}:
+    telemetry = data["context"]["telemetry"]
+    if telemetry.get("mode", "mutations") not in {"off", "mutations", "all"}:
         raise ValueError("context.telemetry.mode must be off, mutations, or all")
+    trusted_runtime_fields = {
+        "otlp_endpoint",
+        "otlp_allowed_hosts",
+        "otlp_headers_env",
+        "otlp_headers",
+        "store_task_text",
+        "include_task_text",
+        "export_timeout_seconds",
+    }
+    for field in sorted(trusted_runtime_fields):
+        if field in telemetry:
+            raise ValueError(
+                f"context.telemetry.{field} is trusted runtime configuration "
+                "and must not appear in project config"
+            )
 
     learning = data["context"].get("learning")
     if learning is not None:
