@@ -178,6 +178,12 @@ def _auto_rollback_if_needed(
             expected_generation=int(state["generation"]),
             reason=reason,
         )
+        mirror_learning_event(
+            root,
+            config,
+            "deployment_state",
+            rolled_back,
+        )
         if bool(cfg.get("incident_bundles", True)):
             try:
                 incident = create_incident_bundle(
