@@ -14,55 +14,160 @@ class DurableMemoryStoreTests(unittest.TestCase):
     @staticmethod
     def _record(id_: str = "mem-1") -> dict:
         return {
-            "id": id_, "type": "decision",
+            "id": id_,
+            "type": "decision",
             "created_at": "2026-01-01T00:00:00+00:00",
             "verified_at": "2026-01-01T00:00:00+00:00",
-            "keywords": ["legacy"], "summary": "legacy decision",
-            "evidence": "", "files": [], "source_hashes": {}, "confidence": 0.8,
+            "keywords": ["legacy"],
+            "summary": "legacy decision",
+            "evidence": "",
+            "files": [],
+            "source_hashes": {},
+            "confidence": 0.8,
         }
 
-    def test_sqlite_store_imports_legacy_jsonl_once_backs_up_and_exports(self):
+    @staticmethod
+    def _layout(td: str) -> tuple[Path, Path]:
+        base = Path(td)
+        root = base / "repo"
+        state = base / "state"
+        root.mkdir()
+        return root, state
+
+    def test_runtime_store_is_external_and_legacy_import_is_explicit(self):
         from ai_workflow.memory_store import SQLiteMemoryStore
+
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td); legacy = root / "ai-workspace/memory/memory.jsonl"
-            legacy.parent.mkdir(parents=True); legacy.write_text(json.dumps(self._record("mem-legacy")) + "\n", encoding="utf-8")
-            store = SQLiteMemoryStore(root)
-            self.assertEqual([row["id"] for row in store.list_records()], ["mem-legacy"])
-            self.assertTrue(legacy.with_suffix(".jsonl.bak").exists())
-            self.assertEqual(store.import_jsonl(legacy), 0)
-            exported = root / "export.jsonl"; self.assertEqual(store.export_jsonl(exported), 1)
-            self.assertEqual(json.loads(exported.read_text().strip())["id"], "mem-legacy")
+            root, state = self._layout(td)
+            legacy = root / "ai-workspace/memory/memory.jsonl"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text(
+                json.dumps(self._record("mem-legacy")) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"AI_WORKFLOW_MEMORY_HOME": str(state.resolve())},
+                clear=False,
+            ):
+                store = SQLiteMemoryStore(root)
+                self.assertFalse(store.path.resolve().is_relative_to(root.resolve()))
+                self.assertEqual(store.path.parent.parent, state.resolve())
+                self.assertEqual(store.list_records(), [])
+                self.assertFalse(legacy.with_suffix(".jsonl.bak").exists())
+
+                self.assertEqual(store.import_jsonl(legacy), 1)
+                self.assertEqual(
+                    [row["id"] for row in store.list_records()],
+                    ["mem-legacy"],
+                )
+                exported = root / "export.jsonl"
+                self.assertEqual(store.export_jsonl(exported), 1)
+                self.assertEqual(
+                    json.loads(exported.read_text().strip())["id"],
+                    "mem-legacy",
+                )
+
+    def test_memory_home_must_be_absolute_and_outside_repository(self):
+        from ai_workflow.memory_store import SQLiteMemoryStore
+
+        with tempfile.TemporaryDirectory() as td:
+            root, _ = self._layout(td)
+            for configured in ("relative-state", str((root / "state").resolve())):
+                with self.subTest(configured=configured), patch.dict(
+                    os.environ,
+                    {"AI_WORKFLOW_MEMORY_HOME": configured},
+                    clear=False,
+                ):
+                    with self.assertRaisesRegex(ValueError, "memory home"):
+                        SQLiteMemoryStore(root)
 
     def test_replace_all_rolls_back_if_replacement_is_invalid(self):
         from ai_workflow.memory_store import SQLiteMemoryStore
+
         with tempfile.TemporaryDirectory() as td:
-            store = SQLiteMemoryStore(Path(td)); original = self._record("original"); store.insert(original)
-            with self.assertRaises(sqlite3.IntegrityError):
-                store.replace_all([self._record("dup"), self._record("dup")])
-            self.assertEqual([row["id"] for row in store.list_records()], ["original"])
+            root, state = self._layout(td)
+            with patch.dict(
+                os.environ,
+                {"AI_WORKFLOW_MEMORY_HOME": str(state.resolve())},
+                clear=False,
+            ):
+                store = SQLiteMemoryStore(root)
+                original = self._record("original")
+                store.insert(original)
+                with self.assertRaises(sqlite3.IntegrityError):
+                    store.replace_all(
+                        [self._record("dup"), self._record("dup")]
+                    )
+                self.assertEqual(
+                    [row["id"] for row in store.list_records()],
+                    ["original"],
+                )
 
     def test_concurrent_insertions_are_transactional_and_connections_close(self):
         from ai_workflow.memory_store import SQLiteMemoryStore
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td); errors: list[Exception] = []
-            def write(index: int):
-                try:
-                    row = self._record(f"mem-{index}"); row["created_at"] = f"2026-01-01T00:00:{index:02d}+00:00"; row["verified_at"] = row["created_at"]
-                    SQLiteMemoryStore(root).insert(row)
-                except Exception as exc: errors.append(exc)
-            threads = [threading.Thread(target=write, args=(i,)) for i in range(10)]
-            for thread in threads: thread.start()
-            for thread in threads: thread.join()
-            self.assertEqual(errors, []); self.assertEqual(len(SQLiteMemoryStore(root).list_records()), 10)
 
-    def test_compatibility_memory_facade_uses_sqlite_and_preserves_staleness(self):
-        from ai_workflow.memory import add_memory, search_memory
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td); source = root / "a.py"; source.write_text("x=1", encoding="utf-8")
-            add_memory(root, "verified-fix", "alpha bug", "fixed alpha", files=["a.py"])
-            self.assertTrue((root / "ai-workspace/memory/memory.sqlite3").exists())
-            self.assertFalse(search_memory(root, "alpha")[0]["stale"])
-            source.write_text("x=2", encoding="utf-8"); self.assertTrue(search_memory(root, "alpha")[0]["stale"])
+            root, state = self._layout(td)
+            errors: list[Exception] = []
+            with patch.dict(
+                os.environ,
+                {"AI_WORKFLOW_MEMORY_HOME": str(state.resolve())},
+                clear=False,
+            ):
+                def write(index: int):
+                    try:
+                        row = self._record(f"mem-{index}")
+                        row["created_at"] = (
+                            f"2026-01-01T00:00:{index:02d}+00:00"
+                        )
+                        row["verified_at"] = row["created_at"]
+                        SQLiteMemoryStore(root).insert(row)
+                    except Exception as exc:
+                        errors.append(exc)
+
+                threads = [
+                    threading.Thread(target=write, args=(i,))
+                    for i in range(10)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+                self.assertEqual(errors, [])
+                self.assertEqual(
+                    len(SQLiteMemoryStore(root).list_records()),
+                    10,
+                )
+
+    def test_compatibility_memory_facade_uses_external_sqlite_and_preserves_staleness(self):
+        from ai_workflow.memory import add_memory, search_memory
+        from ai_workflow.memory_store import SQLiteMemoryStore
+
+        with tempfile.TemporaryDirectory() as td:
+            root, state = self._layout(td)
+            source = root / "a.py"
+            source.write_text("x=1", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {"AI_WORKFLOW_MEMORY_HOME": str(state.resolve())},
+                clear=False,
+            ):
+                add_memory(
+                    root,
+                    "verified-fix",
+                    "alpha bug",
+                    "fixed alpha",
+                    files=["a.py"],
+                )
+                store = SQLiteMemoryStore(root)
+                self.assertTrue(store.path.exists())
+                self.assertFalse(
+                    (root / "ai-workspace/memory/memory.sqlite3").exists()
+                )
+                self.assertFalse(search_memory(root, "alpha")[0]["stale"])
+                source.write_text("x=2", encoding="utf-8")
+                self.assertTrue(search_memory(root, "alpha")[0]["stale"])
 
 
 class TelemetryPrivacyTests(unittest.TestCase):
