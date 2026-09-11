@@ -1,1 +1,0 @@
-{"id": "mem-9a7d6985ef0a", "type": "architecture", "created_at": "2026-09-03T22:23:38.339911+00:00", "verified_at": "2026-09-03T22:23:38.339911+00:00", "keywords": ["control-plane", "index"], "summary": "Incremental AST indexing uses SHA-256 state tracking", "evidence": "", "files": [], "source_hashes": {}, "confidence": 0.95}
