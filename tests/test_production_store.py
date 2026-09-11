@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -29,6 +30,10 @@ def production_config():
     )
     config["context"]["learning"]["mode"] = "observe"
     return config
+
+
+def evidence_digest(label: str) -> str:
+    return "sha256:" + hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
 class ProductionStoreTests(unittest.TestCase):
@@ -65,7 +70,9 @@ class ProductionStoreTests(unittest.TestCase):
                 root,
                 decision.decision_id,
                 success=True,
-                source="verification-suite",
+                source="local:test-suite",
+                verifier_identity="unittest:ProductionStoreTests",
+                evidence_digest=evidence_digest("production-store-lifecycle"),
                 reward=1.0,
                 realized_cost=0.2,
                 config=config,
