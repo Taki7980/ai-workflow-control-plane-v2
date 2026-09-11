@@ -788,11 +788,25 @@ def cmd_deployment_rollback(args):
     path = _deployment_state_path(root, args.state)
     signing_key = _signing_key_from_env(args.signing_key_env)
     current = load_deployment_state(path)
-    guardrail_report = evaluate_live_guardrails(
-        root,
-        current,
-        signing_key,
-    )
+    try:
+        guardrail_report = evaluate_live_guardrails(
+            root,
+            current,
+            signing_key,
+        )
+    except (RuntimeError, TypeError, ValueError) as exc:
+        guardrail_report = {
+            "scope": "manual-rollback-diagnostic-unavailable",
+            "policy_id": current.get("policy_id"),
+            "stage": current.get("stage"),
+            "state_generation": current.get("generation"),
+            "gate": {
+                "rollback_required": True,
+                "safe_to_advance": False,
+                "rollback_blockers": ["manual_rollback"],
+                "diagnostic_error": type(exc).__name__,
+            },
+        }
     updated = update_deployment_state_file(
         path,
         signing_key,
