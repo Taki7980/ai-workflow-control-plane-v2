@@ -10,6 +10,11 @@ from typing import Any
 
 from .contextual_features import build_context_features, context_key
 from .deployment_guardrails import evaluate_live_guardrails
+from .deployment_incident import (
+    create_incident_bundle,
+    write_incident_bundle,
+)
+from .production_store import mirror_learning_event
 from .deployment_state import (
     LIVE_STAGES,
     load_deployment_state,
@@ -173,6 +178,33 @@ def _auto_rollback_if_needed(
             expected_generation=int(state["generation"]),
             reason=reason,
         )
+        if bool(cfg.get("incident_bundles", True)):
+            try:
+                incident = create_incident_bundle(
+                    root,
+                    rolled_back,
+                    report,
+                    signing_key,
+                    reason=reason,
+                )
+                incident_path = write_incident_bundle(
+                    root,
+                    incident,
+                    signing_key,
+                )
+                report["incident_bundle"] = (
+                    Path(incident_path)
+                    .relative_to(root.resolve())
+                    .as_posix()
+                )
+                mirror_learning_event(
+                    root,
+                    config,
+                    "deployment_incident",
+                    incident,
+                )
+            except (OSError, RuntimeError, ValueError):
+                report["incident_bundle"] = None
         return rolled_back, report
     except (OSError, RuntimeError, ValueError):
         return state, report
