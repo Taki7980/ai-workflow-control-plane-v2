@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
 import tempfile
 import threading
@@ -10,6 +9,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Protocol
+
+from .memory_location import memory_db_path
 
 
 _INITIALIZE_LOCK = threading.RLock()
@@ -28,16 +29,22 @@ class SQLiteMemoryStore:
 
     def __init__(self, root: Path):
         self.root = root.resolve()
-        self.path = self.root / "ai-workspace" / "memory" / "memory.sqlite3"
+        self.path = memory_db_path(self.root)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self.path.parent, 0o700)
+        except OSError:
+            pass
+
         # SQLite's PRAGMA journal_mode=WAL takes an exclusive schema-level lock.
         # Multiple store constructors in one process can otherwise race before
         # ordinary busy_timeout handling applies consistently on Windows.
         with _INITIALIZE_LOCK:
             self._initialize()
-            legacy = self.root / "ai-workspace" / "memory" / "memory.jsonl"
-            if legacy.exists():
-                self._migrate_legacy(legacy)
+        try:
+            os.chmod(self.path, 0o600)
+        except OSError:
+            pass
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -117,23 +124,6 @@ class SQLiteMemoryStore:
             if isinstance(record, dict) and record.get("id"):
                 records.append(record)
         return records
-
-    def _migrate_legacy(self, legacy: Path) -> None:
-        backup = legacy.with_suffix(legacy.suffix + ".bak")
-        if not backup.exists():
-            shutil.copy2(legacy, backup)
-        expected_ids = {str(record["id"]) for record in self._read_jsonl(legacy)}
-        self.import_jsonl(legacy)
-        if expected_ids:
-            actual_ids = {str(record.get("id")) for record in self.list_records()}
-            missing = expected_ids - actual_ids
-            if missing:
-                raise RuntimeError("legacy memory migration validation failed: missing " + ", ".join(sorted(missing)))
-        with self._connection() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO metadata(key,value) VALUES(?,?)",
-                ("legacy_jsonl_migrated", "1"),
-            )
 
     def insert(self, record: dict) -> None:
         with self._connection() as conn:
