@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import re
 import statistics
@@ -23,6 +24,8 @@ OTLP_HEADERS_JSON_ENV = "AI_WORKFLOW_OTLP_HEADERS_JSON"
 OTLP_TIMEOUT_ENV = "AI_WORKFLOW_OTLP_TIMEOUT_SECONDS"
 OTLP_INCLUDE_TASK_ENV = "AI_WORKFLOW_OTLP_INCLUDE_TASK_TEXT"
 TELEMETRY_HMAC_KEY_ENV = "AI_WORKFLOW_TELEMETRY_HMAC_KEY"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -184,7 +187,12 @@ class OtlpHttpSink:
 
     def emit(self, payload: dict[str, Any]) -> None:
         body = json.dumps({"resourceLogs": [{"scopeLogs": [{"logRecords": [{"body": payload}]}]}]}, ensure_ascii=False).encode("utf-8")
-        request = Request(self.endpoint, data=body, headers={"Content-Type": "application/json", **self.headers}, method="POST")
+        request = Request(  # noqa: S310 - endpoint validated by runtime-owned HTTPS host allowlist
+            self.endpoint,
+            data=body,
+            headers={"Content-Type": "application/json", **self.headers},
+            method="POST",
+        )
         opener = build_opener(_NoRedirectHandler())
         with opener.open(request, timeout=self.timeout_seconds) as response:
             response.read(1)
@@ -294,8 +302,8 @@ def write_trace(
                 timeout_seconds=trusted.timeout_seconds,
                 headers=trusted.headers,
             ).emit(export_payload)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - export is best-effort
+            _LOGGER.warning("OTLP export failed: %s", type(exc).__name__)
 
     return str(local_payload["_local_path"])
 
