@@ -1,0 +1,18 @@
+# Security-sensitive repository paths.
+# GitHub rulesets must require CODEOWNERS review for these entries to become an enforcement boundary.
+
+/.github/CODEOWNERS @Taki7980
+/.github/workflows/ @Taki7980
+/SECURITY.md @Taki7980
+/pyproject.toml @Taki7980
+/Dockerfile @Taki7980
+/install.sh @Taki7980
+/install.ps1 @Taki7980
+/ai_workflow/provider_registry.py @Taki7980
+/ai_workflow/provider_runner.py @Taki7980
+/ai_workflow/telemetry.py @Taki7980
+/ai_workflow/deployment_*.py @Taki7980
+/ai_workflow/policy_manifest.py @Taki7980
+/ai_workflow/retrieval_learning.py @Taki7980
+/ai_workflow/outcome_verification.py @Taki7980
+/ai_workflow/provenance.py @Taki7980
