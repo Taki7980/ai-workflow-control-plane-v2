@@ -176,7 +176,7 @@ def _bootstrap_delta(
             "resamples_used": 0,
         }
 
-    rng = random.Random(int(seed))
+    rng = random.Random(int(seed))  # noqa: S311 - deterministic statistical bootstrap
     n = len(rows)
     draws = max(1, int(resamples))
     deltas: list[float] = []
