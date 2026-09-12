@@ -566,7 +566,7 @@ async def run_command_provider_async(
         )
     except asyncio.CancelledError:
         if proc.returncode is None:
-            proc.kill()
+            _terminate_provider_tree(proc)
         await proc.wait()
         raise
 
