@@ -66,7 +66,7 @@ def bootstrap_mean_ci(
             "resamples": 0,
         }
 
-    rng = random.Random(int(seed))
+    rng = random.Random(int(seed))  # noqa: S311 - deterministic statistical bootstrap
     size = len(cleaned)
     sampled_means = [
         statistics.mean(cleaned[rng.randrange(size)] for _ in range(size))
