@@ -15,6 +15,8 @@ from typing import Iterable
 ARXIV_API = "https://export.arxiv.org/api/query"
 CROSSREF_API = "https://api.crossref.org/works"
 USER_AGENT = "ai-workflow-control-plane/2.3 (+https://github.com/Taki7980/ai-workflow-control-plane-v2)"
+TRUSTED_RESEARCH_HOSTS = frozenset({"export.arxiv.org", "api.crossref.org"})
+MAX_RESEARCH_RESPONSE_BYTES = 8 * 1024 * 1024
 
 PROJECT_TERMS = {
     "agent": 2,
@@ -78,10 +80,57 @@ class Paper:
     crossref_url: str | None = None
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _validated_research_url(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("research URL must use a trusted HTTPS endpoint") from exc
+
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if (
+        parsed.scheme.lower() != "https"
+        or hostname not in TRUSTED_RESEARCH_HOSTS
+        or parsed.username
+        or parsed.password
+        or port not in (None, 443)
+    ):
+        raise ValueError("research URL must use a trusted HTTPS endpoint")
+    return url
+
+
 def _request(url: str, timeout: int = 25) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json, application/atom+xml"})
-    with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310 - fixed trusted API hosts
-        return response.read()
+    validated = _validated_research_url(url)
+    req = urllib.request.Request(  # noqa: S310 - exact HTTPS host allowlist above
+        validated,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, application/atom+xml",
+        },
+    )
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    with opener.open(  # noqa: S310 - redirects disabled; exact host allowlist above
+        req,
+        timeout=timeout,
+    ) as response:
+        raw = response.read(MAX_RESEARCH_RESPONSE_BYTES + 1)
+    if len(raw) > MAX_RESEARCH_RESPONSE_BYTES:
+        raise ValueError("research response exceeded maximum allowed size")
+    return raw
+
+
+def _parse_arxiv_xml(raw: bytes) -> ET.Element:
+    lowered = raw.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise ValueError("arXiv XML DTD/entity declarations are not allowed")
+    return ET.fromstring(  # noqa: S314 - bounded input; DTD/entities rejected above
+        raw
+    )
 
 
 def _clean(text: str | None) -> str:
@@ -130,7 +179,7 @@ def _arxiv_query(days: int, max_results: int) -> str:
 
 def fetch_arxiv(days: int = 3, max_results: int = 80) -> list[Paper]:
     raw = _request(_arxiv_query(days, max_results))
-    root = ET.fromstring(raw)
+    root = _parse_arxiv_xml(raw)
     ns = {
         "atom": "http://www.w3.org/2005/Atom",
         "arxiv": "http://arxiv.org/schemas/atom",
