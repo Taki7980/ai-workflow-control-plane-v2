@@ -48,7 +48,7 @@ The default local store writes one JSON document per run under `ai-workspace/run
 - Python implementation/version/platform;
 - optional model, dataset, or artifact references.
 
-Raw task text is deliberately excluded from the immutable provenance record. `ArtifactReference` is only an interoperability vocabulary; recording a DVC-, MLflow-, registry-, or content-addressed URI does not add a dependency on that system.
+Raw task text is deliberately excluded from the immutable provenance record. `ArtifactReference` is only an interoperability vocabulary; recording a DVC-, MLflow-, registry-, or content-addressed URI does not add a dependency on that system. Security-sensitive artifact kinds (`model`, `dataset`, `policy`, `prompt-template`, `tool-schema`, and `safety-policy`) must also carry an immutable `sha256:<64-hex>` digest. Mutable URI/version-only references for those kinds are rejected when metadata is created or loaded.
 
 `to_openlineage()` produces an OpenLineage-shaped dictionary for integration code without importing or contacting an OpenLineage service.
 
