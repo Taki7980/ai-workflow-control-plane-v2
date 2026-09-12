@@ -41,7 +41,12 @@ class ProviderProcessTreeTests(unittest.TestCase):
             provider_runner.os,
             "killpg",
             create=True,
-        ) as killpg:
+        ) as killpg, patch.object(
+            provider_runner.signal,
+            "SIGKILL",
+            9,
+            create=True,
+        ):
             provider_runner._terminate_provider_tree(proc)
 
         killpg.assert_called_once_with(4242, signal.SIGKILL)
@@ -80,6 +85,11 @@ class ProviderProcessTreeTests(unittest.TestCase):
             provider_runner.os,
             "killpg",
             side_effect=OSError("gone"),
+            create=True,
+        ), patch.object(
+            provider_runner.signal,
+            "SIGKILL",
+            9,
             create=True,
         ):
             provider_runner._terminate_provider_tree(proc)
