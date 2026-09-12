@@ -40,6 +40,7 @@ class ProviderProcessTreeTests(unittest.TestCase):
         with patch.object(provider_runner.os, "name", "posix"), patch.object(
             provider_runner.os,
             "killpg",
+            create=True,
         ) as killpg:
             provider_runner._terminate_provider_tree(proc)
 
@@ -79,6 +80,7 @@ class ProviderProcessTreeTests(unittest.TestCase):
             provider_runner.os,
             "killpg",
             side_effect=OSError("gone"),
+            create=True,
         ):
             provider_runner._terminate_provider_tree(proc)
 
