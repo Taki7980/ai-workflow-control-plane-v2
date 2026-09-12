@@ -89,7 +89,7 @@ def clustered_reward_difference(
             "largest_cluster": max(len(items) for items in clusters.values()),
         }
 
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - deterministic statistical bootstrap
     bootstrap: list[float] = []
     cluster_count = len(cluster_names)
     for _ in range(resamples):
