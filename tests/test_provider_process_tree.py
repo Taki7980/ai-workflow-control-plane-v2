@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import signal
 import subprocess
 import unittest
 from unittest.mock import Mock, patch
@@ -49,7 +48,7 @@ class ProviderProcessTreeTests(unittest.TestCase):
         ):
             provider_runner._terminate_provider_tree(proc)
 
-        killpg.assert_called_once_with(4242, signal.SIGKILL)
+        killpg.assert_called_once_with(4242, 9)
         proc.kill.assert_not_called()
 
     def test_windows_termination_uses_taskkill_tree(self) -> None:
