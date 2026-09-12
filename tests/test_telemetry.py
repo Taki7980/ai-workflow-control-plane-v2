@@ -200,6 +200,35 @@ class TelemetryTests(unittest.TestCase):
             local = json.loads((root / path).read_text(encoding="utf-8"))
             self.assertNotIn("task", local)
 
+
+    def test_otlp_export_failure_is_observable_without_breaking_local_trace(self):
+        env = self._clean_env()
+        env.update(
+            {
+                "AI_WORKFLOW_OTLP_ENDPOINT": "https://telemetry.example/v1/logs",
+                "AI_WORKFLOW_OTLP_ALLOWED_HOSTS": "telemetry.example",
+            }
+        )
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            env,
+            clear=True,
+        ), patch(
+            "ai_workflow.telemetry.OtlpHttpSink.emit",
+            side_effect=OSError("network unavailable"),
+        ):
+            root = Path(td)
+            with self.assertLogs("ai_workflow.telemetry", level="WARNING") as logs:
+                path = write_trace(
+                    root,
+                    RetrievalTrace("task", "small", "low", "exact"),
+                    {"context": {"telemetry": {"mode": "all"}}},
+                )
+            self.assertTrue((root / path).exists())
+            self.assertTrue(
+                any("OTLP export failed: OSError" in message for message in logs.output)
+            )
+
     def test_insecure_or_local_runtime_destination_is_rejected(self):
         for endpoint, allowed in (
             ("http://telemetry.example/v1/logs", "telemetry.example"),
