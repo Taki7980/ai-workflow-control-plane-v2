@@ -24,7 +24,8 @@ class SecurityCIContractTests(unittest.TestCase):
             "pip-licenses",
             "python -m unittest discover -s security_tests -v",
             "gitleaks_8.30.1_linux_x64.tar.gz",
-            "trivy_0.74.0_Linux-64bit.tar.gz",
+            'version="0.74.0"',
+            'asset="trivy_${version}_Linux-64bit.tar.gz"',
         ):
             with self.subTest(required=required):
                 self.assertIn(required, workflow)
