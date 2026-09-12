@@ -207,8 +207,7 @@ def _bounded_reader(
             if len(chunk) > remaining:
                 output.extend(chunk[: max(0, remaining)])
                 exceeded.set()
-                try:
-                    _terminate_provider_tree(proc)
+                _terminate_provider_tree(proc)
                 return
             output.extend(chunk)
     except OSError:
