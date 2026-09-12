@@ -45,15 +45,61 @@ def _runtime_info() -> dict[str, str]:
     }
 
 
+_SECURITY_SENSITIVE_ARTIFACT_KINDS = frozenset(
+    {
+        "model",
+        "dataset",
+        "policy",
+        "prompt-template",
+        "tool-schema",
+        "safety-policy",
+    }
+)
+
+
+def _artifact_kind_key(kind: str) -> str:
+    return str(kind).strip().lower().replace("_", "-")
+
+
+def _validated_sha256_digest(value: str | None) -> str:
+    digest = str(value or "").strip().lower()
+    prefix = "sha256:"
+    if not digest.startswith(prefix):
+        raise ValueError(
+            "security-sensitive artifact digest must use sha256:<64-hex>"
+        )
+    hex_value = digest.removeprefix(prefix)
+    if len(hex_value) != 64 or any(
+        char not in "0123456789abcdef" for char in hex_value
+    ):
+        raise ValueError(
+            "security-sensitive artifact digest must use sha256:<64-hex>"
+        )
+    return digest
+
+
 @dataclass(frozen=True)
 class ArtifactReference:
-    """External model/dataset/artifact identity without a runtime dependency."""
+    """External artifact identity with fail-closed production provenance."""
 
     kind: str
     uri: str
     digest: str | None = None
     version: str | None = None
     role: str | None = None
+
+    def __post_init__(self) -> None:
+        if _artifact_kind_key(self.kind) not in _SECURITY_SENSITIVE_ARTIFACT_KINDS:
+            return
+        if self.digest is None:
+            raise ValueError(
+                "security-sensitive artifact requires immutable sha256 digest"
+            )
+        object.__setattr__(
+            self,
+            "digest",
+            _validated_sha256_digest(self.digest),
+        )
 
 
 @dataclass(frozen=True)
