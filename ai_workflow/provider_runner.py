@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shlex
+import signal
 import subprocess
 import threading
 import time
@@ -19,6 +20,60 @@ from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 
 DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+def _provider_process_group_kwargs() -> dict[str, Any]:
+    """Launch each provider in an isolated OS process group/session."""
+
+    if os.name == "nt":
+        return {
+            "creationflags": int(
+                getattr(
+                    subprocess,
+                    "CREATE_NEW_PROCESS_GROUP",
+                    0x00000200,
+                )
+            )
+        }
+    return {"start_new_session": True}
+
+
+def _terminate_provider_tree(proc: Any) -> None:
+    """Terminate a provider and any descendants without invoking a shell."""
+
+    if getattr(proc, "returncode", None) is not None:
+        return
+
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                [
+                    "taskkill",
+                    "/PID",
+                    str(proc.pid),
+                    "/T",
+                    "/F",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+            return
+        except OSError:
+            pass
+
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
 SAFE_ENV_KEYS = {
     "PATH",
     "PATHEXT",
@@ -152,10 +207,7 @@ def _bounded_reader(
             if len(chunk) > remaining:
                 output.extend(chunk[: max(0, remaining)])
                 exceeded.set()
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
+                _terminate_provider_tree(proc)
                 return
             output.extend(chunk)
     except OSError:
@@ -351,6 +403,7 @@ def run_command_provider(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env=build_provider_env(spec.env_allowlist),
+            **_provider_process_group_kwargs(),
         )
     except (OSError, ValueError) as exc:
         return ProviderResult(
@@ -382,13 +435,13 @@ def run_command_provider(
             returncode = proc.wait(timeout=effective_timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            proc.kill()
+            _terminate_provider_tree(proc)
             returncode = proc.wait()
     finally:
         reader.join(timeout=1.0)
         if reader.is_alive():
             try:
-                proc.kill()
+                _terminate_provider_tree(proc)
             except OSError:
                 pass
             reader.join(timeout=1.0)
@@ -459,6 +512,7 @@ async def run_command_provider_async(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             env=build_provider_env(spec.env_allowlist),
+            **_provider_process_group_kwargs(),
         )
     except (OSError, ValueError) as exc:
         return ProviderResult(
@@ -488,7 +542,7 @@ async def run_command_provider_async(
             spec.max_output_bytes,
         )
         if exceeded and proc.returncode is None:
-            proc.kill()
+            _terminate_provider_tree(proc)
         returncode = await proc.wait()
         return output, exceeded, returncode
 
@@ -499,7 +553,7 @@ async def run_command_provider_async(
         )
     except asyncio.TimeoutError:
         if proc.returncode is None:
-            proc.kill()
+            _terminate_provider_tree(proc)
         await proc.wait()
         return ProviderResult(
             provider=spec.name,
@@ -511,7 +565,7 @@ async def run_command_provider_async(
         )
     except asyncio.CancelledError:
         if proc.returncode is None:
-            proc.kill()
+            _terminate_provider_tree(proc)
         await proc.wait()
         raise
 
