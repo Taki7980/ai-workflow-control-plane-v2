@@ -1,9 +1,16 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_workflow.bootstrap import setup
-from ai_workflow.research_scout import Paper, score_paper, title_similarity
+from ai_workflow.research_scout import (
+    Paper,
+    _parse_arxiv_xml,
+    _request,
+    score_paper,
+    title_similarity,
+)
 
 
 class SetupTests(unittest.TestCase):
@@ -74,6 +81,27 @@ class ResearchScoutTests(unittest.TestCase):
         )
         self.assertGreater(score_paper(relevant), score_paper(unrelated))
         self.assertGreaterEqual(score_paper(relevant), 6)
+
+
+    def test_research_request_rejects_untrusted_scheme_before_io(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "payload.json"
+            target.write_text("secret", encoding="utf-8")
+            with patch(
+                "ai_workflow.research_scout.urllib.request.build_opener"
+            ) as opener:
+                with self.assertRaisesRegex(ValueError, "trusted HTTPS"):
+                    _request(target.as_uri())
+                opener.assert_not_called()
+
+    def test_arxiv_xml_rejects_doctype_and_entities(self):
+        malicious = (
+            b'<?xml version="1.0"?>'
+            b'<!DOCTYPE feed [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+            b'<feed xmlns="http://www.w3.org/2005/Atom">&xxe;</feed>'
+        )
+        with self.assertRaisesRegex(ValueError, "DTD"):
+            _parse_arxiv_xml(malicious)
 
     def test_title_similarity_supports_crossref_corroboration(self):
         a = "Retrieval-Conditioned Topology Selection for Multi-Agent Code Generation"
