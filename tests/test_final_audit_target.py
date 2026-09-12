@@ -81,6 +81,7 @@ class ProvenanceAndCacheTests(unittest.TestCase):
                 ArtifactReference(
                     "model",
                     "models:/retriever@prod",
+                    digest="sha256:" + ("a" * 64),
                     version="1",
                     role="semantic-retriever",
                 ),
@@ -153,7 +154,7 @@ class ProvenanceAndCacheTests(unittest.TestCase):
                     ArtifactReference(
                         "dataset",
                         "dvc://corpus@rev",
-                        digest="deadbeef",
+                        digest="sha256:" + ("b" * 64),
                         role="input:retrieval-corpus",
                     ),
                 ),
