@@ -1,0 +1,6 @@
+# Security-only CI tooling. Product runtime dependencies remain empty.
+coverage==7.16.0
+hypothesis==6.168.0
+pip-audit==2.10.1
+pip-licenses==5.5.5
+ruff==0.16.7
