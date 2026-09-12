@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _job_block(workflow: str, job: str) -> str:
     match = re.search(
-        rf"(?ms)^  {re.escape(job)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\\Z)",
+        rf"(?ms)^  {re.escape(job)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
         workflow,
     )
     if match is None:
@@ -55,7 +55,7 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertRegex(workflow, r'(?ms)^  push:\n    tags:\n      - "v\\*"')
+        self.assertRegex(workflow, r'(?ms)^  push:\n    tags:\n      - "v\*"')
         self.assertNotRegex(workflow, r"(?m)^    branches:")
 
     def test_release_starts_behind_protected_environment_gate(self) -> None:
