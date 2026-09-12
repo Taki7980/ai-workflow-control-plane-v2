@@ -1,0 +1,90 @@
+name: Security
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install pinned security tools
+        run: python -m pip install . -r security/requirements.txt
+      - name: SAST security rules
+        run: >-
+          ruff check --select S
+          --ignore S101,S404,S603,S607
+          ai_workflow scripts
+      - name: Audit project dependency graph
+        run: pip-audit --strict .
+      - name: Run adversarial property tests
+        run: python -m unittest discover -s security_tests -v
+      - name: Enforce test coverage floor
+        run: |
+          coverage run --source=ai_workflow -m unittest discover -s tests -q
+          coverage report --fail-under=65
+      - name: Enforce runtime dependency license policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/runtime-license"
+          python -m venv "$runtime"
+          "$runtime/bin/python" -m pip install .
+          allowed='MIT;MIT License;Apache-2.0;Apache Software License;BSD License;BSD-2-Clause;BSD-3-Clause;ISC;ISC License (ISCL);MPL-2.0;Mozilla Public License 2.0 (MPL 2.0);Python Software Foundation License'
+          pip-licenses             --python "$runtime/bin/python"             --ignore-packages pip setuptools             --allow-only "$allowed"             --partial-match
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install checksum-pinned Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="gitleaks_8.30.1_linux_x64.tar.gz"
+          curl --fail --silent --show-error --location             --output "$RUNNER_TEMP/$asset"             "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$asset"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$asset" | sha256sum --check -
+          tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" gitleaks
+      - name: Scan Git history for secrets
+        shell: bash
+        run: "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+
+  container-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build container for scanning
+        run: docker build --tag ai-workflow-security:ci .
+      - name: Install checksum-verified Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          version="0.74.0"
+          checksums="trivy_${version}_checksums.txt"
+          asset="trivy_${version}_Linux-64bit.tar.gz"
+          base="https://github.com/aquasecurity/trivy/releases/download/v${version}"
+          curl --fail --silent --show-error --location --output "$checksums" "$base/$checksums"
+          echo "bc701c3c3ee8b9acbea2c23257e41381e3854888f51281616a6ba5dc96963821  $checksums" | sha256sum --check -
+          curl --fail --silent --show-error --location --output "$asset" "$base/$asset"
+          grep "  $asset$" "$checksums" | sha256sum --check -
+          tar -xzf "$asset" trivy
+      - name: Block critical container vulnerabilities
+        shell: bash
+        run: >-
+          "$RUNNER_TEMP/trivy" image
+          --scanners vuln
+          --severity CRITICAL
+          --ignore-unfixed
+          --exit-code 1
+          --timeout 10m
+          ai-workflow-security:ci
