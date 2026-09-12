@@ -56,7 +56,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" gitleaks
       - name: Scan Git history for secrets
         shell: bash
-        run: "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
 
   container-scan:
     runs-on: ubuntu-latest
