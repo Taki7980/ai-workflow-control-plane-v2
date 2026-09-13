@@ -1,5 +1,4 @@
 import tempfile, unittest, json
-from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 from ai_workflow.doctor import run
@@ -21,16 +20,30 @@ class DoctorTests(unittest.TestCase):
             root = Path(td)
             (root / "app.py").write_text("def main(): pass\n")
             build_indexes(root)
-            graph = root / ".code-review-graph" / "graph.db"
-            graph.parent.mkdir()
-            graph.touch()
-            failed = SimpleNamespace(returncode=1, stdout="", stderr="broken graph")
-            with patch("ai_workflow.doctor.shutil.which", return_value="code-review-graph"), patch(
-                "ai_workflow.doctor.subprocess.run", return_value=failed
-            ):
+            unhealthy = {
+                "installed": True,
+                "ready": False,
+                "data_root": str(root / "ai-workspace/code-review-graph"),
+                "repository_count": 1,
+                "ready_repositories": 0,
+                "repositories": [
+                    {
+                        "relative_path": "backend",
+                        "ready": False,
+                        "error": "broken graph",
+                    }
+                ],
+            }
+            with patch("ai_workflow.doctor.workspace_health", return_value=unhealthy):
                 result, _ = run(root, CFG)
 
             self.assertFalse(result["code_review_graph_health"]["ready"])
+            self.assertTrue(
+                any(
+                    "rerun `ai-workflow setup`" in item
+                    for item in result["recommendations"]
+                )
+            )
 
     def test_doctor_on_fresh_repo(self):
         with tempfile.TemporaryDirectory() as td:
