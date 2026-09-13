@@ -33,14 +33,14 @@ If the brief selects `superpowers`, use the installed Superpowers workflow rathe
 
 If unavailable, use native phases:
 
-1. Plan: write `.ai/HANDOFF.md` with exact scope, invariants, checks, and next step.
+1. Plan: write `ai-workspace/handoff/HANDOFF.md` with exact scope, invariants, checks, and next step.
 2. Build: validate handoff, make minimal changes, run named checks.
 3. Review: inspect the diff/risk, repair findings, re-run checks.
 4. Complete: capture only reusable knowledge.
 
 ## 5. Handoff
 
-`.ai/HANDOFF.md` is active task state, not a transcript. Keep it under 30 lines. Required fields: lane/risk, goal/state, exact paths/symbols, context sources, ordered edits, invariants, changed files, checks, blockers, next step.
+`ai-workspace/handoff/HANDOFF.md` is active task state, not a transcript. Keep it under 30 lines. Required fields: lane/risk, goal/state, exact paths/symbols, context sources, ordered edits, invariants, changed files, checks, blockers, next step.
 
 ## 6. Output compression
 
