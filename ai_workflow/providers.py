@@ -2,6 +2,7 @@ from __future__ import annotations
 import os, shutil
 from pathlib import Path
 from dataclasses import dataclass, asdict
+from .code_review_graph import any_graph_ready
 from .models import Lane, Risk, RouteDecision
 from .semantic import semantic_ready
 
@@ -47,8 +48,8 @@ def _has_superpowers(root: Path) -> bool:
             pass
     return False
 
-def _has_crg(root: Path) -> bool:
-    return shutil.which("code-review-graph") is not None and (root / ".code-review-graph" / "graph.db").is_file()
+def _has_crg(root: Path, config: dict | None = None) -> bool:
+    return any_graph_ready(root, config)
 
 
 def detect(root: Path, config: dict | None = None) -> ProviderStatus:
@@ -56,7 +57,7 @@ def detect(root: Path, config: dict | None = None) -> ProviderStatus:
     sp_mode = (cfg.get('execution', {}).get('superpowers', {}) or {}).get('mode','auto')
     crg_mode = (cfg.get('context', {}).get('crg', {}) or {}).get('mode','auto')
     sp = _has_superpowers(root) if sp_mode == 'auto' else sp_mode == 'on'
-    crg = _has_crg(root) if crg_mode == 'auto' else crg_mode == 'on'
+    crg = _has_crg(root, cfg) if crg_mode == 'auto' else crg_mode == 'on'
     return ProviderStatus(
         superpowers=sp,
         code_review_graph=crg,
