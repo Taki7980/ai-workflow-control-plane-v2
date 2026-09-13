@@ -55,9 +55,9 @@ The sufficiency score is a retrieval-control heuristic, not a calibrated correct
 
 ## Workspace boundaries
 
-`workspace.roots` can name related repositories such as frontend/backend/service roots. The primary root is always first, configured roots are resolved and deduplicated, missing roots are ignored, and `workspace.max_roots` bounds fan-out. Secondary-root retrieval does not inherit the primary Git working-tree change list. All selected context still shares the primary lane's final hard context ceiling.
+The control root may be a non-Git parent directory. Setup recursively discovers Git repositories and worktrees, records them in `ai-workspace/config/repositories.json`, and activates them by default. `workspace.roots` remains as a manual compatibility escape hatch, while `workspace.max_roots` bounds per-request retrieval fan-out. Dirty-file paths are detected per active repository and re-scoped before structural retrieval.
 
-Each context item records its workspace root in provenance when available.
+Each context item records its workspace root in provenance when available. CRG state is isolated per repository under `ai-workspace/code-review-graph/<repo>/`.
 
 ## Provider boundaries
 
@@ -92,7 +92,7 @@ Each selected context item carries provenance metadata. Repository-derived text 
 
 ## Bootstrap and initialization
 
-`bootstrap` is the fresh-project path. It creates only missing `AGENTS.md`, `ai-workspace/config/control-plane.json`, and `.ai/PROJECT`, then indexes the project. It refuses to overwrite any of those control-plane files.
+`setup` is the normal project path. It keeps control-plane state under one `ai-workspace/` folder, refreshes the repository registry, builds the local index, and synchronizes per-repository CRG graphs when CRG is installed. `bootstrap` remains the strict fresh-scaffold compatibility command and refuses to overwrite existing workspace files.
 
 `init` remains the path for an existing template/configuration and validates before writing project state.
 
