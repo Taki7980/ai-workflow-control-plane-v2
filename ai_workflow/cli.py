@@ -207,7 +207,12 @@ def cmd_repos_refresh(args):
         else int(discovery.get("max_depth", 3))
     )
     try:
-        result = refresh_registry(root, max_depth=depth, config=config)
+        result = refresh_registry(
+            root,
+            max_depth=depth,
+            config=config,
+            auto_include=False,
+        )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     _json(result)
@@ -1076,7 +1081,7 @@ def build_parser():
 
     r = rsp.add_parser(
         "refresh",
-        help="rediscover repositories using the configured activation policy",
+        help="rediscover repositories without changing explicit activation decisions",
     )
     r.add_argument(
         "--discover-depth",
