@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +35,55 @@ class SetupTests(unittest.TestCase):
             self.assertIn("ai-workspace/agents/AGENTS.md", second["preserved"])
             self.assertIn("ai-workspace/config/control-plane.json", second["preserved"])
             self.assertIn("ai-workspace/config/repositories.json", second["preserved"])
+
+    def test_setup_auto_detects_and_activates_nested_git_repositories(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+
+            def fake_repo(relative: str) -> None:
+                repo = root / relative
+                git_dir = repo / ".git"
+                (git_dir / "refs/heads").mkdir(parents=True)
+                (git_dir / "HEAD").write_text(
+                    "ref: refs/heads/main\n",
+                    encoding="utf-8",
+                )
+                (git_dir / "refs/heads/main").write_text(
+                    "a" * 40 + "\n",
+                    encoding="utf-8",
+                )
+                (git_dir / "config").write_text(
+                    '[remote "origin"]\n'
+                    f'\turl = https://example.com/{relative}.git\n',
+                    encoding="utf-8",
+                )
+
+            fake_repo("admin-panel")
+            fake_repo("services/backend")
+
+            with patch(
+                "ai_workflow.bootstrap.sync_workspace_graphs",
+                return_value={
+                    "installed": False,
+                    "attempted": 0,
+                    "ready": 0,
+                    "repositories": [],
+                },
+            ):
+                result = setup(root)
+
+            registry = json.loads(
+                (root / "ai-workspace/config/repositories.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            repositories = registry["repositories"]
+            self.assertEqual(
+                {row["relative_path"] for row in repositories},
+                {"admin-panel", "services/backend"},
+            )
+            self.assertTrue(all(row["included"] for row in repositories))
+            self.assertEqual(result["repository_registry"]["accepted"], 2)
 
     def test_setup_preserves_existing_legacy_agents_file(self):
         with tempfile.TemporaryDirectory() as td:
