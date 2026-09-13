@@ -21,7 +21,7 @@
       "min_source_files": 250,
       "changed_files_threshold": 3
     },
-    "semantic": {"mode": "auto", "provider_id": "", "command": "", "timeout_seconds": 8, "max_results": 6},
+    "semantic": {"mode": "auto", "provider_id": "builtin-local", "command": "", "timeout_seconds": 8, "max_results": 6, "max_output_bytes": 8388608, "env_allowlist": []},
     "external_retrievers": [],
     "sufficiency": {"threshold": 0.72},
     "adaptive_budget": {
@@ -33,12 +33,22 @@
     "selector": {
       "enabled": true,
       "tight_budget_fraction": 0.3,
-      "mandatory_structural_evidence": true
+      "mandatory_structural_evidence": true,
+      "max_selector_candidates": 200
     },
     "telemetry": {"mode": "mutations"},
     "targeted_search": {"max_matches": 12, "max_file_bytes": 500000}
   },
-  "workspace": {"roots": [], "max_roots": 4},
+  "workspace": {
+    "roots": [],
+    "max_roots": 8,
+    "registry": "ai-workspace/config/repositories.json",
+    "discovery": {
+      "max_depth": 8,
+      "require_acceptance": false,
+      "auto_include_on_setup": true
+    }
+  },
   "execution": {
     "prefer_superpowers_for_full": true,
     "native_fallback": true,
