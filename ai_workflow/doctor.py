@@ -1,6 +1,7 @@
 from __future__ import annotations
-import json, shutil, subprocess, sys
+import sys
 from pathlib import Path
+from .code_review_graph import workspace_health
 from .providers import detect
 from .indexer import load_state, sha256
 from .handoff import validate as validate_handoff
@@ -20,35 +21,30 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
                 stale += 1
         except OSError:
             stale += 1
-    handoff_path = root / ".ai" / "HANDOFF.md"
+    handoff_path = root / "ai-workspace" / "handoff" / "HANDOFF.md"
     handoff_present = handoff_path.exists()
     handoff_errors = validate_handoff(root, int(config["handoff"].get("max_lines", 30))) if handoff_present else []
     tracked = len(state.get("files", {}))
     recommendations = []
     if not state:
         recommendations.append("Local index not built; run `ai-workflow index`")
-    crg_installed = shutil.which("code-review-graph") is not None
-    crg_health = {"installed": crg_installed, "ready": status.code_review_graph}
-    if crg_installed:
-        try:
-            proc = subprocess.run(["code-review-graph", "status", "--repo", str(root), "--json"], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5, check=False)
-            if proc.returncode == 0 and proc.stdout.strip():
-                crg_health["ready"] = True
-                try:
-                    crg_health["status"] = json.loads(proc.stdout)
-                except json.JSONDecodeError:
-                    crg_health["status"] = proc.stdout.strip()[:1000]
-            else:
-                crg_health["ready"] = False
-                crg_health["error"] = (proc.stderr or proc.stdout).strip()[:500]
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            crg_health["ready"] = False
-            crg_health["error"] = str(exc)
+    crg_health = workspace_health(root, config, timeout=5)
+    crg_installed = bool(crg_health.get("installed"))
     min_crg = int(config.get("context", {}).get("crg", {}).get("min_source_files", 250))
     if tracked >= min_crg and not crg_installed:
-        recommendations.append(f"repository index has {tracked} source files; consider Code Review Graph for structural Full-lane work")
-    elif crg_installed and not crg_health["ready"]:
-        recommendations.append("Code Review Graph is installed but no healthy graph was detected; run `code-review-graph build`")
+        recommendations.append(
+            f"repository index has {tracked} source files; install Code Review Graph "
+            "for structural Full-lane work"
+        )
+    elif (
+        crg_installed
+        and crg_health.get("repository_count", 0)
+        and not crg_health.get("ready")
+    ):
+        recommendations.append(
+            "One or more managed Code Review Graph indexes are not healthy; "
+            "rerun `ai-workflow setup` to build/update central graphs"
+        )
     if not status.superpowers:
         recommendations.append("Superpowers not detected; Full lane will use native Plan -> Build -> Review")
     production_cfg = (
