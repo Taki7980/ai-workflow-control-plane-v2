@@ -92,6 +92,54 @@ class Stage2WorkspaceIdentityTests(unittest.TestCase):
             args.func(args)
         return json.loads(output.getvalue())
 
+    def test_discovery_finds_nested_repositories_inside_another_repository(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outer = self._fake_git_repo(
+                root,
+                "platform",
+                "https://github.com/acme/platform.git",
+            )
+            self._fake_git_repo(
+                outer / "services",
+                "api",
+                "https://github.com/acme/api.git",
+            )
+
+            repositories = discover_repositories(root, max_depth=3)
+            self.assertEqual(
+                [repo.relative_path for repo in repositories],
+                ["platform", "platform/services/api"],
+            )
+
+    def test_discovery_supports_git_file_worktree_markers(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            worktree = root / "admin-panel"
+            worktree.mkdir()
+
+            git_dir = root / "_gitdata" / "worktrees" / "admin-panel"
+            git_dir.mkdir(parents=True)
+            (git_dir / "HEAD").write_text("a" * 40 + "\n", encoding="utf-8")
+            (git_dir / "config").write_text(
+                '[remote "origin"]\n'
+                '\turl = https://github.com/acme/admin-panel.git\n',
+                encoding="utf-8",
+            )
+            relative_git_dir = Path("..") / "_gitdata" / "worktrees" / "admin-panel"
+            (worktree / ".git").write_text(
+                f"gitdir: {relative_git_dir.as_posix()}\n",
+                encoding="utf-8",
+            )
+
+            repositories = discover_repositories(root, max_depth=2)
+            self.assertEqual(len(repositories), 1)
+            self.assertEqual(repositories[0].relative_path, "admin-panel")
+            self.assertEqual(
+                repositories[0].remote_identity,
+                "github.com/acme/admin-panel",
+            )
+
     def test_registry_payload_never_persists_raw_remote_credentials(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
