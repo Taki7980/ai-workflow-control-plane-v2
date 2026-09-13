@@ -76,7 +76,7 @@ _DEFAULT_CONFIG = {
     },
     "workspace": {
         "roots": [],
-        "max_roots": 8,
+        "max_roots": 4,
         "registry": "ai-workspace/config/repositories.json",
         "discovery": {
             "max_depth": 8,
