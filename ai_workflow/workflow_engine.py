@@ -273,10 +273,23 @@ class WorkflowEngine:
         )
         selected_roots = roots[:max_roots]
         base_calls: list[ScheduledCall] = []
+        workspace_root = Path(root).resolve()
         for index, candidate_root in enumerate(selected_roots):
             label = "base" if index == 0 else f"workspace:{candidate_root.name}"
             trace.providers_attempted.append(label)
-            candidate_changed = changed if index == 0 else []
+            candidate_changed = changed if candidate_root == workspace_root else []
+            if candidate_root != workspace_root:
+                try:
+                    relative_root = candidate_root.relative_to(workspace_root).as_posix()
+                except ValueError:
+                    relative_root = ""
+                if relative_root:
+                    prefix = relative_root.rstrip("/") + "/"
+                    candidate_changed = [
+                        path[len(prefix):]
+                        for path in changed
+                        if path.startswith(prefix)
+                    ]
             base_calls.append(ScheduledCall(
                 label,
                 lambda candidate_root=candidate_root, candidate_changed=candidate_changed: self.base_gather(
