@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .code-review-graph/
+ai-workspace/code-review-graph/
 ai-workspace/generated/*
 !ai-workspace/generated/.gitkeep
 ai-workspace/memory/*
