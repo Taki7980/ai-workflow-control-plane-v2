@@ -52,7 +52,7 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             data_dir = repository_data_dir(root, repo)
             self.assertEqual(
                 data_dir,
-                root / "ai-workspace/code-review-graph/admin-panel",
+                (root / "ai-workspace/code-review-graph/admin-panel").resolve(),
             )
             self.assertNotEqual(data_dir, repo / ".code-review-graph")
 
@@ -82,10 +82,10 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             self.assertEqual(result["ready"], 1)
             command, kwargs = calls[0]
             self.assertEqual(command[1], "build")
-            self.assertEqual(Path(kwargs["cwd"]), repo)
+            self.assertEqual(Path(kwargs["cwd"]).resolve(), repo.resolve())
             self.assertEqual(
-                Path(kwargs["env"]["CRG_DATA_DIR"]),
-                root / "ai-workspace/code-review-graph/admin-panel",
+                Path(kwargs["env"]["CRG_DATA_DIR"]).resolve(),
+                (root / "ai-workspace/code-review-graph/admin-panel").resolve(),
             )
             self.assertFalse((repo / ".code-review-graph").exists())
 
