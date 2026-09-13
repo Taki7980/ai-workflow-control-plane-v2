@@ -129,7 +129,7 @@ def _builtin_semantic_result(
                 for key in ("symbol", "kind", "method", "path", "file")
             )
             score = _hybrid_similarity(query, candidate)
-            if score > 0:
+            if score >= 0.08:
                 ranked.append((score, row))
 
     ranked.sort(
@@ -141,7 +141,7 @@ def _builtin_semantic_result(
     )
     items: list[ContextItem] = []
     seen: set[tuple[str, int]] = set()
-    builtin_limit = min(3, max(1, int(limit)))
+    builtin_limit = min(2, max(1, int(limit)))
     for score, row in ranked:
         if len(items) >= builtin_limit:
             break
