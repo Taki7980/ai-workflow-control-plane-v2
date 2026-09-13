@@ -277,8 +277,8 @@ def _spec_for_directory(
 def discover_repositories(
     root: Path,
     *,
-    max_depth: int = 3,
-    include_nested: bool = False,
+    max_depth: int = 8,
+    include_nested: bool = True,
     skip_dirs: set[str] | None = None,
 ) -> list[RepositorySpec]:
     """Discover local Git repositories under a parent workspace, read-only."""
@@ -487,26 +487,50 @@ def registry_summary(root: Path, config: dict | None = None) -> dict[str, Any]:
 def refresh_registry(
     root: Path,
     *,
-    max_depth: int = 3,
+    max_depth: int = 8,
     config: dict | None = None,
+    auto_include: bool | None = None,
 ) -> dict[str, Any]:
-    """Rediscover repositories while preserving only unchanged explicit decisions."""
+    """Rediscover repositories while preserving explicit include/exclude decisions."""
 
     path = registry_path(root, config)
+    discovery = ((((config or {}).get("workspace") or {}).get("discovery") or {}))
+    require_acceptance = bool(discovery.get("require_acceptance", True))
+    include_new = (not require_acceptance) if auto_include is None else bool(auto_include)
+
     with _registry_lock(path):
         existing = {
             (repo.relative_path, repo.remote_identity): repo
             for repo in load_registry(root, config)
         }
-        discovered = discover_repositories(root, max_depth=max_depth)
+        discovered = discover_repositories(
+            root,
+            max_depth=max_depth,
+            include_nested=True,
+        )
         merged: list[RepositorySpec] = []
         for repo in discovered:
             previous = existing.get((repo.relative_path, repo.remote_identity))
+            if previous is None:
+                included = include_new
+                reason = "auto-discovered" if include_new else repo.reason
+            elif (
+                include_new
+                and not previous.included
+                and previous.reason == "discovered"
+            ):
+                # Migrate registries created by older setup versions where
+                # discovery was passive and every repository started disabled.
+                included = True
+                reason = "auto-discovered"
+            else:
+                included = bool(previous.included)
+                reason = previous.reason
             merged.append(
                 replace(
                     repo,
-                    included=bool(previous.included) if previous is not None else False,
-                    reason=previous.reason if previous is not None else repo.reason,
+                    included=included,
+                    reason=reason,
                 )
             )
         atomic_write_json(path, registry_payload(merged))
@@ -545,13 +569,25 @@ def set_repository_included(
 
         target = matches[0]
         updated = [
-            replace(repo, included=bool(included)) if repo == target else repo
+            replace(
+                repo,
+                included=bool(included),
+                reason="manual-include" if included else "manual-exclude",
+            )
+            if repo == target
+            else repo
             for repo in repositories
         ]
         atomic_write_json(path, registry_payload(updated))
         result = registry_summary(root, config)
         result["changed"] = {
-            **_entry(replace(target, included=bool(included))),
+            **_entry(
+                replace(
+                    target,
+                    included=bool(included),
+                    reason="manual-include" if included else "manual-exclude",
+                )
+            ),
             "action": "included" if included else "excluded",
         }
         return result
