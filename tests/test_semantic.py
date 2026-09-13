@@ -12,8 +12,8 @@ from ai_workflow.semantic import semantic_context, semantic_ready
 
 
 class SemanticProviderTests(unittest.TestCase):
-    def test_not_ready_without_provider_id(self):
-        self.assertFalse(semantic_ready({"context": {"semantic": {"provider_id": ""}}}))
+    def test_auto_mode_uses_builtin_provider_without_extra_setup(self):
+        self.assertTrue(semantic_ready({"context": {"semantic": {"provider_id": ""}}}))
 
     def test_repository_command_is_not_ready_without_explicit_unsafe_compatibility(self):
         cfg = {"context": {"semantic": {"command": "semantic-cmd", "timeout_seconds": 2}}}
@@ -48,6 +48,28 @@ class SemanticProviderTests(unittest.TestCase):
         self.assertEqual(items[0].source, "semantic")
         self.assertEqual(items[0].metadata["path"], "payments.py")
         self.assertEqual(items[0].metadata["retriever"], "semantic")
+
+    def test_builtin_provider_returns_indexed_source_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "payments.py"
+            source.write_text(
+                "def prevent_duplicate_charge():\n    return True\n",
+                encoding="utf-8",
+            )
+            generated = root / "ai-workspace/generated"
+            generated.mkdir(parents=True)
+            (generated / "symbol-index.jsonl").write_text(
+                '{"symbol":"prevent_duplicate_charge","file":"payments.py","line":1,"kind":"function"}\n',
+                encoding="utf-8",
+            )
+            cfg = {"context": {"semantic": {"mode": "auto", "provider_id": ""}}}
+            items = semantic_context(root, "prevent duplicate payment charge", cfg, 3)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].source, "semantic")
+        self.assertEqual(items[0].metadata["provider"], "builtin-local")
+        self.assertIn("payments.py", items[0].text)
 
     def test_provider_failure_degrades_to_empty_list_for_legacy_callers(self):
         cfg = {"context": {"semantic": {"provider_id": "semantic-local", "timeout_seconds": 2}}}
