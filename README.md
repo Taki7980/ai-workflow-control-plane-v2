@@ -114,14 +114,16 @@ Each retrieval packet contains a stable fingerprint derived from:
 
 This lets downstream agents reject context that was built against a different workspace state.
 
-Multi-root workspaces can be configured with:
+Multi-repository workspaces are discovered automatically. The control root itself does not need to be a Git repository. For example:
 
-```json
-"workspace": {
-  "roots": ["../backend", "../frontend"],
-  "max_roots": 4
-}
+```text
+RevenueOS/
+├─ ai-workspace/
+├─ admin-panel/.git/
+└─ backend/.git/
 ```
+
+Running `ai-workflow setup` at `RevenueOS/` recursively discovers and activates both repositories, including Git worktrees (where `.git` is a file) and nested repositories. `workspace.roots` remains available only as a legacy/manual escape hatch.
 
 ## Install
 
@@ -158,7 +160,9 @@ ai-workflow doctor --strict
 ai-workflow brief "refactor payment retry handling" --format prompt
 ```
 
-`setup` is safe to rerun. It creates only missing control-plane files, preserves an existing `AGENTS.md` and configuration, refreshes `.ai/PROJECT`, and builds the local index automatically. The project name defaults to the current directory name; use `--project-name NAME` only when you want a different display name.
+`setup` is safe to rerun. The default user-facing layout is a single `ai-workspace/` folder: configuration, state, generated indexes, handoffs, memory, and managed Code Review Graph data all live below it. Setup recursively refreshes the repository registry, auto-activates discovered Git repositories, builds the local index, enables the built-in local semantic retriever, and—when `code-review-graph` is installed—builds or updates one graph per repository under `ai-workspace/code-review-graph/<repo>/`. The project name defaults to the current directory name; use `--project-name NAME` only when you want a different display name.
+
+You do **not** need to copy or clone this repository into the project being managed. Install the CLI once with pipx/uv, then run `ai-workflow setup` from the parent workspace.
 
 For scripts or automation, request JSON explicitly:
 
@@ -200,11 +204,13 @@ ai-workflow benchmark --tasks benchmarks/sample-tasks.json
 
 Auth/security/payment/schema/migration/concurrency/deploy/public-contract mutations deterministically escalate to Full/High.
 
-## Optional retrievers
+## Retrieval providers
 
-A semantic command provider can be configured with `context.semantic.command` or `AI_WORKFLOW_SEMANTIC_CMD`. Generic command retrievers can register for one or more intents through `context.external_retrievers`.
+Semantic retrieval works out of the box through the dependency-free `builtin-local` provider, which hybrid-ranks indexed symbols/endpoints and returns bounded source snippets. No second "enable semantic" command is required. A trusted external semantic provider can still override it through `context.semantic.provider_id` or `AI_WORKFLOW_SEMANTIC_PROVIDER_ID`; legacy repository-defined command providers remain opt-in for security.
 
-Providers receive JSON on stdin and return JSON/JSONL context candidates. Failure, timeout, malformed output, or absence must degrade safely to the remaining providers.
+Code Review Graph remains optional. When installed, AI Workflow passes a repository-specific `CRG_DATA_DIR` so graph databases and generated graph artifacts stay centralized under `ai-workspace/code-review-graph/` instead of creating `.code-review-graph/` folders beside source repositories.
+
+Generic command retrievers can register for one or more intents through `context.external_retrievers`. Provider failure, timeout, malformed output, or absence degrades safely to the remaining local providers.
 
 ## Provenance and prompt-injection boundary
 
