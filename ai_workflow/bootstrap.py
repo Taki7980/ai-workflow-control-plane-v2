@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import DEFAULT_RELATIVE, default_config
+from .code_review_graph import sync_workspace_graphs
+from .config import DEFAULT_RELATIVE, default_config, load_config
 from .indexer import build_indexes, incremental_indexes
 from .io_utils import atomic_write_json, atomic_write_text
-from .repository_registry import discover_repositories, registry_payload, workspace_registry_fingerprint
+from .repository_registry import refresh_registry, registry_payload
 
 
 WORKSPACE_AGENTS_RELATIVE = Path("ai-workspace/agents/AGENTS.md")
@@ -84,26 +85,45 @@ def _write_project_marker(root: Path, legacy_root_files: bool, created: list[str
 def _write_repository_registry(
     root: Path,
     *,
+    config: dict,
     discover: bool,
     discovery_depth: int,
     created: list[str],
     preserved: list[str],
 ) -> dict:
     registry_path = root / REPOSITORY_REGISTRY_RELATIVE
-    if registry_path.exists():
+    existed = registry_path.exists()
+    if not discover:
+        if existed:
+            preserved.append(REPOSITORY_REGISTRY_RELATIVE.as_posix())
+            return {"path": REPOSITORY_REGISTRY_RELATIVE.as_posix(), "status": "preserved"}
+        atomic_write_json(registry_path, registry_payload([]))
+        created.append(REPOSITORY_REGISTRY_RELATIVE.as_posix())
+        return {
+            "path": REPOSITORY_REGISTRY_RELATIVE.as_posix(),
+            "status": "created",
+            "discovered": 0,
+            "accepted": 0,
+            "review_required": True,
+        }
+
+    discovery = (((config.get("workspace") or {}).get("discovery") or {}))
+    summary = refresh_registry(
+        root,
+        max_depth=discovery_depth,
+        config=config,
+        auto_include=bool(discovery.get("auto_include_on_setup", True)),
+    )
+    if existed:
         preserved.append(REPOSITORY_REGISTRY_RELATIVE.as_posix())
-        return {"path": REPOSITORY_REGISTRY_RELATIVE.as_posix(), "status": "preserved"}
-    repositories = discover_repositories(root, max_depth=discovery_depth) if discover else []
-    payload = registry_payload(repositories)
-    atomic_write_json(registry_path, payload)
-    created.append(REPOSITORY_REGISTRY_RELATIVE.as_posix())
+        status = "refreshed"
+    else:
+        created.append(REPOSITORY_REGISTRY_RELATIVE.as_posix())
+        status = "created"
     return {
+        **summary,
         "path": REPOSITORY_REGISTRY_RELATIVE.as_posix(),
-        "status": "created",
-        "discovered": len(repositories),
-        "accepted": 0,
-        "fingerprint": workspace_registry_fingerprint(repositories),
-        "review_required": True,
+        "status": status,
     }
 
 
@@ -115,7 +135,8 @@ def setup(
     index_mode: str = "auto",
     legacy_root_files: bool = False,
     discover: bool = True,
-    discovery_depth: int = 3,
+    discovery_depth: int = 8,
+    sync_crg: bool = True,
 ) -> dict:
     """Connect AI Workflow to an existing project without overwriting project files.
 
@@ -148,10 +169,12 @@ def setup(
         atomic_write_json(config_path, default_config())
         created.append(DEFAULT_RELATIVE.as_posix())
 
+    config = load_config(root)
     _write_project_rules(root, name, legacy_root_files, created, preserved)
     _write_project_marker(root, legacy_root_files, created, preserved)
     registry = _write_repository_registry(
         root,
+        config=config,
         discover=discover,
         discovery_depth=discovery_depth,
         created=created,
@@ -159,6 +182,17 @@ def setup(
     )
 
     index = _index(root, index_mode)
+    crg = (
+        sync_workspace_graphs(root, config)
+        if sync_crg
+        else {
+            "installed": False,
+            "attempted": 0,
+            "ready": 0,
+            "skipped": True,
+            "reason": "disabled",
+        }
+    )
     return {
         "status": "ready",
         "project": name,
@@ -168,6 +202,7 @@ def setup(
         "preserved": preserved,
         "repository_registry": registry,
         "index": index,
+        "code_review_graph": crg,
         "next": 'ai-workflow brief "your task" --format prompt',
     }
 
