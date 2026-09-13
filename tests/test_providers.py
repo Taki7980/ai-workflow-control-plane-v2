@@ -16,10 +16,11 @@ class ProviderTests(unittest.TestCase):
     def test_crg_is_available_only_when_its_graph_exists(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            with patch('ai_workflow.providers.shutil.which', return_value='code-review-graph'):
+            (root / '.git').mkdir()
+            with patch('ai_workflow.code_review_graph.shutil.which', return_value='code-review-graph'):
                 self.assertFalse(detect(root, CFG).code_review_graph)
-                graph = root / '.code-review-graph' / 'graph.db'
-                graph.parent.mkdir()
+                graph = root / 'ai-workspace' / 'code-review-graph' / 'root' / 'graph.db'
+                graph.parent.mkdir(parents=True)
                 graph.touch()
                 self.assertTrue(detect(root, CFG).code_review_graph)
 
