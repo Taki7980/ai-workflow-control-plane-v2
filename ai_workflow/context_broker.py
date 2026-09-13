@@ -2,7 +2,10 @@ from __future__ import annotations
 import ast, json, re, subprocess, shutil, concurrent.futures
 from pathlib import Path
 from .budget import ContextBudget, truncate
+from .code_review_graph import crg_environment, find_workspace_root, graph_exists
 from .indexer import load_state, row_fresh, sha256
+from .repository_registry import load_registry
+from .workspace import registry_spec_to_root
 from .memory import search_memory
 from .models import ContextItem, RouteDecision, Lane
 from .providers import ProviderStatus
@@ -20,7 +23,7 @@ def _jsonl(path: Path):
         except json.JSONDecodeError: continue
     return rows
 
-def detect_changed_files(root: Path) -> list[str]:
+def _git_changed_files(root: Path) -> list[str]:
     if not shutil.which("git"):
         return []
     try:
@@ -46,6 +49,26 @@ def detect_changed_files(root: Path) -> list[str]:
         return changed
     except (OSError, subprocess.TimeoutExpired):
         return []
+
+
+def detect_changed_files(root: Path) -> list[str]:
+    """Detect dirty files across the control root and all active nested repos."""
+    root = Path(root).resolve()
+    changed = list(_git_changed_files(root))
+    seen = set(changed)
+    for spec in load_registry(root):
+        if not spec.included or spec.relative_path == ".":
+            continue
+        try:
+            repository_root = registry_spec_to_root(root, spec)
+        except (OSError, ValueError):
+            continue
+        for rel in _git_changed_files(repository_root):
+            prefixed = f"{spec.relative_path.rstrip('/')}/{rel}"
+            if prefixed not in seen:
+                seen.add(prefixed)
+                changed.append(prefixed)
+    return changed
 
 def _score(query: str, text: str) -> int:
     return len(set(tokenize(query)) & set(tokenize(text)))
@@ -323,8 +346,20 @@ def lightweight(
 def _run_crg(root: Path, args: list[str], timeout: int = 8) -> str | None:
     if not shutil.which("code-review-graph"):
         return None
+    workspace_root = find_workspace_root(root)
+    if not graph_exists(workspace_root, root):
+        return None
     try:
-        p = subprocess.run(["code-review-graph", *args], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
+        p = subprocess.run(
+            ["code-review-graph", *args],
+            cwd=root,
+            env=crg_environment(workspace_root, root),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
         if p.returncode == 0 and p.stdout.strip():
             return p.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
