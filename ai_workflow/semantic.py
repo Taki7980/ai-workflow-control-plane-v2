@@ -24,9 +24,17 @@ def configured_provider_id(config: dict) -> str:
     if environment_provider:
         return environment_provider
     configured = str(semantic.get("provider_id") or "").strip()
+    if configured:
+        return configured
+    if str(semantic.get("command") or "").strip() or os.getenv(
+        "AI_WORKFLOW_SEMANTIC_CMD", ""
+    ).strip():
+        # An explicitly requested command keeps its security semantics. Do not
+        # hide a rejected repository command behind the built-in fallback.
+        return ""
     # Auto mode is useful without a second setup command: when no external
     # provider is selected, use the dependency-free local hybrid retriever.
-    return configured or BUILTIN_SEMANTIC_PROVIDER_ID
+    return BUILTIN_SEMANTIC_PROVIDER_ID
 
 
 def configured_command(config: dict) -> str | list[str]:
@@ -133,8 +141,9 @@ def _builtin_semantic_result(
     )
     items: list[ContextItem] = []
     seen: set[tuple[str, int]] = set()
+    builtin_limit = min(3, max(1, int(limit)))
     for score, row in ranked:
-        if len(items) >= max(1, int(limit)):
+        if len(items) >= builtin_limit:
             break
         relative = str(row.get("file") or "").strip()
         line_number = int(row.get("line", 1) or 1)
@@ -154,8 +163,8 @@ def _builtin_semantic_result(
             ).splitlines()
         except (OSError, ValueError):
             continue
-        start = max(0, line_number - 4)
-        end = min(len(lines), line_number + 4)
+        start = max(0, line_number - 2)
+        end = min(len(lines), line_number + 1)
         snippet = "\n".join(
             f"{index + 1}: {lines[index]}"
             for index in range(start, end)
