@@ -32,7 +32,7 @@ _DEFAULT_CONFIG = {
             "min_source_files": 250, "changed_files_threshold": 3,
         },
         "semantic": {
-            "mode": "auto", "provider_id": "", "command": "",
+            "mode": "auto", "provider_id": "builtin-local", "command": "",
             "timeout_seconds": 8, "max_results": 6,
             "max_output_bytes": 8388608, "env_allowlist": [],
         },
@@ -76,9 +76,13 @@ _DEFAULT_CONFIG = {
     },
     "workspace": {
         "roots": [],
-        "max_roots": 4,
+        "max_roots": 8,
         "registry": "ai-workspace/config/repositories.json",
-        "discovery": {"max_depth": 3, "require_acceptance": True},
+        "discovery": {
+            "max_depth": 8,
+            "require_acceptance": False,
+            "auto_include_on_setup": True,
+        },
     },
     "execution": {
         "prefer_superpowers_for_full": True,
@@ -395,12 +399,21 @@ def validate_config(data: dict[str, Any]) -> None:
     registry = data["workspace"].get("registry", "ai-workspace/config/repositories.json")
     if not isinstance(registry, str) or not registry.strip():
         raise ValueError("workspace.registry must be a non-empty path")
-    discovery = data["workspace"].get("discovery", {"max_depth": 3, "require_acceptance": True})
+    discovery = data["workspace"].get(
+        "discovery",
+        {
+            "max_depth": 8,
+            "require_acceptance": False,
+            "auto_include_on_setup": True,
+        },
+    )
     if not isinstance(discovery, dict):
         raise ValueError("workspace.discovery must be an object")
-    _nonnegative_int(discovery.get("max_depth", 3), "workspace.discovery.max_depth")
-    if not isinstance(discovery.get("require_acceptance", True), bool):
+    _nonnegative_int(discovery.get("max_depth", 8), "workspace.discovery.max_depth")
+    if not isinstance(discovery.get("require_acceptance", False), bool):
         raise ValueError("workspace.discovery.require_acceptance must be boolean")
+    if not isinstance(discovery.get("auto_include_on_setup", True), bool):
+        raise ValueError("workspace.discovery.auto_include_on_setup must be boolean")
     orchestration = data["execution"].get("orchestration_budget")
     if not isinstance(orchestration, dict):
         raise ValueError("missing required section: execution.orchestration_budget")
