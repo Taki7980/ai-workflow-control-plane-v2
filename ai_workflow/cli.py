@@ -102,7 +102,8 @@ def cmd_setup(args):
         index_mode=index_mode,
         legacy_root_files=bool(getattr(args, "legacy_root_files", False)),
         discover=not bool(getattr(args, "no_discover_repos", False)),
-        discovery_depth=int(getattr(args, "discover_depth", 3)),
+        discovery_depth=int(getattr(args, "discover_depth", 8)),
+        sync_crg=not bool(getattr(args, "no_crg_sync", False)),
     )
     if args.json:
         _json(result)
@@ -114,10 +115,18 @@ def cmd_setup(args):
     if result["preserved"]:
         print("Preserved: " + ", ".join(result["preserved"]))
     registry = result.get("repository_registry") or {}
-    if registry.get("status") == "created":
+    if registry.get("status") in {"created", "refreshed"}:
         print(
-            "Repositories discovered: "
-            f"{registry.get('discovered', 0)}; review {registry.get('path')} before enabling multi-repo roots"
+            "Repositories: "
+            f"{registry.get('discovered', 0)} discovered; "
+            f"{registry.get('accepted', 0)} active"
+        )
+    crg = result.get("code_review_graph") or {}
+    if crg.get("installed"):
+        print(
+            "Code Review Graph: "
+            f"{crg.get('ready', 0)}/{crg.get('attempted', 0)} repositories ready "
+            f"under ai-workspace/code-review-graph"
         )
     print("Next: " + result["next"])
 
@@ -1030,8 +1039,13 @@ def build_parser():
     q.add_argument(
         "--discover-depth",
         type=int,
-        default=3,
-        help="maximum folder depth for multi-repo discovery",
+        default=8,
+        help="maximum folder depth for recursive multi-repo discovery",
+    )
+    q.add_argument(
+        "--no-crg-sync",
+        action="store_true",
+        help="skip automatic Code Review Graph build/update during setup",
     )
     idx = q.add_mutually_exclusive_group()
     idx.add_argument("--no-index", action="store_true", help="skip index construction during setup")
@@ -1062,7 +1076,7 @@ def build_parser():
 
     r = rsp.add_parser(
         "refresh",
-        help="rediscover repositories without automatically including new identities",
+        help="rediscover repositories using the configured activation policy",
     )
     r.add_argument(
         "--discover-depth",
