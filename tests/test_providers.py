@@ -39,7 +39,7 @@ class ProviderTests(unittest.TestCase):
                     value TEXT NOT NULL
                 );
                 INSERT INTO metadata(key, value)
-                VALUES ('schema_version', '10');
+                VALUES ('schema_version', '9');
                 INSERT INTO nodes(
                     id, kind, name, qualified_name, file_path
                 ) VALUES (
