@@ -247,7 +247,12 @@ def graph_freshness(
     if not isinstance(manifest, dict):
         result["reason"] = "manifest.json must contain an object"
         return result
-    if int(manifest.get("manifest_schema", 0) or 0) != GRAPH_MANIFEST_SCHEMA:
+    try:
+        manifest_schema = int(manifest.get("manifest_schema", 0) or 0)
+    except (TypeError, ValueError):
+        result["reason"] = "invalid manifest schema"
+        return result
+    if manifest_schema != GRAPH_MANIFEST_SCHEMA:
         result["reason"] = "unsupported manifest schema"
         return result
 
