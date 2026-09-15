@@ -47,14 +47,22 @@ def _repo_key(relative_path: str) -> str:
     return "__".join(parts)
 
 
-def repository_data_dir(workspace_root: Path, repository_root: Path) -> Path:
+def _repository_relative_path(
+    workspace_root: Path,
+    repository_root: Path,
+) -> str:
     workspace = Path(workspace_root).resolve()
     repository = Path(repository_root).resolve()
     try:
-        relative = repository.relative_to(workspace).as_posix() or "."
+        return repository.relative_to(workspace).as_posix() or "."
     except ValueError:
         # Legacy explicit external roots remain isolated by their directory name.
-        relative = f"external/{repository.name}"
+        return f"external/{repository.name}"
+
+
+def repository_data_dir(workspace_root: Path, repository_root: Path) -> Path:
+    workspace = Path(workspace_root).resolve()
+    relative = _repository_relative_path(workspace, repository_root)
     return resolve_within_root(
         workspace,
         CRG_WORKSPACE_RELATIVE / _repo_key(relative),
@@ -203,6 +211,84 @@ def graph_exists(workspace_root: Path, repository_root: Path) -> bool:
     return (repository_data_dir(workspace_root, repository_root) / "graph.db").is_file()
 
 
+def graph_freshness(
+    workspace_root: Path,
+    repository_root: Path,
+) -> dict[str, Any]:
+    """Verify graph bytes and provenance match the current repository state."""
+
+    workspace = Path(workspace_root).resolve()
+    repository = Path(repository_root).resolve()
+    data_dir = repository_data_dir(workspace, repository)
+    graph = data_dir / "graph.db"
+    manifest_path = data_dir / "manifest.json"
+    result: dict[str, Any] = {
+        "fresh": False,
+        "data_dir": str(data_dir),
+        "graph": str(graph),
+        "manifest": str(manifest_path),
+        "reason": "",
+    }
+
+    if not graph.is_file():
+        result["reason"] = "graph.db is missing"
+        return result
+    if not manifest_path.is_file():
+        result["reason"] = "manifest.json is missing"
+        return result
+
+    try:
+        manifest = json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        result["reason"] = "manifest.json is unreadable"
+        return result
+    if not isinstance(manifest, dict):
+        result["reason"] = "manifest.json must contain an object"
+        return result
+    if int(manifest.get("manifest_schema", 0) or 0) != GRAPH_MANIFEST_SCHEMA:
+        result["reason"] = "unsupported manifest schema"
+        return result
+
+    relative = _repository_relative_path(workspace, repository)
+    if manifest.get("repository_relative_path") != relative:
+        result["reason"] = "repository path identity mismatch"
+        return result
+
+    try:
+        graph_sha256 = _sha256_file(graph)
+    except OSError:
+        result["reason"] = "graph.db is unreadable"
+        return result
+    if manifest.get("graph_sha256") != graph_sha256:
+        result["reason"] = "graph hash mismatch"
+        return result
+
+    current = repository_fingerprint(repository, relative)
+    if manifest.get("repository_fingerprint") != current.get("fingerprint"):
+        result["reason"] = "repository fingerprint mismatch"
+        result["manifest_fingerprint"] = manifest.get(
+            "repository_fingerprint"
+        )
+        result["current_fingerprint"] = current.get("fingerprint")
+        return result
+    if manifest.get("git_head") != current.get("git_head"):
+        result["reason"] = "Git HEAD mismatch"
+        return result
+
+    result.update(
+        {
+            "fresh": True,
+            "reason": "graph provenance matches repository state",
+            "graph_sha256": graph_sha256,
+            "repository_fingerprint": current.get("fingerprint"),
+            "git_head": current.get("git_head"),
+        }
+    )
+    return result
+
+
 def any_graph_ready(workspace_root: Path, config: dict | None = None) -> bool:
     if shutil.which("code-review-graph") is None:
         return False
@@ -213,7 +299,13 @@ def any_graph_ready(workspace_root: Path, config: dict | None = None) -> bool:
     for row in rows:
         try:
             validate_graph_database(row["data_dir"] / "graph.db")
+            freshness = graph_freshness(
+                workspace_root,
+                row["repository_root"],
+            )
         except (GraphValidationError, OSError):
+            continue
+        if not freshness.get("fresh"):
             continue
         return True
     return False
@@ -328,6 +420,14 @@ def repository_health(
         result["validation"] = validate_graph_database(graph)
     except GraphValidationError as exc:
         result["error"] = f"graph validation failed: {exc}"
+        return result
+
+    result["freshness"] = graph_freshness(workspace_root, repo)
+    if not result["freshness"].get("fresh"):
+        result["error"] = (
+            "graph provenance stale: "
+            + str(result["freshness"].get("reason") or "unknown reason")
+        )
         return result
 
     try:
