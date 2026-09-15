@@ -14,6 +14,15 @@ class BenchmarkDatasetTests(unittest.TestCase):
         self.assertTrue(all(case.get("expected_intent") for case in cases))
         self.assertTrue(all(int(case.get("retrieval_k", 0)) > 0 for case in cases))
 
+        structural_entry_discovery = [
+            case
+            for case in cases
+            if case.get("query_type") == "structural"
+            and not case.get("symbol")
+            and case.get("expected_intent") == "mixed"
+        ]
+        self.assertTrue(structural_entry_discovery)
+
 
 if __name__ == "__main__":
     unittest.main()
