@@ -180,6 +180,8 @@ def _builtin_semantic_result(
                 {
                     "path": relative,
                     "line": line_number,
+                    "symbol": str(row.get("symbol") or "").strip(),
+                    "kind": str(row.get("kind") or "").strip(),
                     "retriever": "semantic",
                     "provider": BUILTIN_SEMANTIC_PROVIDER_ID,
                 },
