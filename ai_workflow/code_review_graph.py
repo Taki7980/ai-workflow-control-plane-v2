@@ -18,7 +18,7 @@ from .workspace_state import repository_fingerprint
 
 
 CRG_WORKSPACE_RELATIVE = Path("ai-workspace/code-review-graph")
-CRG_MIN_SCHEMA_VERSION = 10
+CRG_MIN_SCHEMA_VERSION = 9
 GRAPH_MANIFEST_SCHEMA = 1
 _REQUIRED_GRAPH_TABLES = frozenset({"nodes", "edges", "metadata"})
 
