@@ -2,7 +2,12 @@ from __future__ import annotations
 import ast, json, re, subprocess, shutil, concurrent.futures
 from pathlib import Path
 from .budget import ContextBudget, truncate
-from .code_review_graph import crg_environment, find_workspace_root, graph_exists
+from .code_review_graph import (
+    crg_environment,
+    find_workspace_root,
+    graph_exists,
+    graph_freshness,
+)
 from .indexer import load_state, row_fresh, sha256
 from .repository_registry import load_registry
 from .workspace import registry_spec_to_root
@@ -353,6 +358,9 @@ def _run_crg(
         return None
     workspace_root = find_workspace_root(root)
     if not graph_exists(workspace_root, root):
+        return None
+    freshness = graph_freshness(workspace_root, root)
+    if not freshness.get("fresh"):
         return None
     try:
         proc = subprocess.run(
