@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sqlite3
@@ -51,6 +52,28 @@ class ProviderTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def _write_manifest(
+        self,
+        graph: Path,
+        *,
+        fingerprint: str = "fresh-fingerprint",
+    ) -> None:
+        payload = {
+            "manifest_schema": 1,
+            "repository_relative_path": ".",
+            "repository_fingerprint": fingerprint,
+            "git_head": None,
+            "graph_file": "graph.db",
+            "graph_sha256": hashlib.sha256(
+                graph.read_bytes()
+            ).hexdigest(),
+            "crg_schema_version": 9,
+        }
+        (graph.parent / "manifest.json").write_text(
+            json.dumps(payload),
+            encoding="utf-8",
+        )
+
     def test_superpowers_can_be_forced_for_marketplace_installs(self):
         with patch.dict(os.environ, {"AI_WORKFLOW_SUPERPOWERS": "1"}):
             status = detect(ROOT, CFG)
@@ -84,7 +107,24 @@ class ProviderTests(unittest.TestCase):
 
                 graph.unlink()
                 self._write_valid_graph(graph)
-                self.assertTrue(detect(root, CFG).code_review_graph)
+                self._write_manifest(graph)
+                with patch(
+                    "ai_workflow.code_review_graph.repository_fingerprint",
+                    return_value={
+                        "fingerprint": "fresh-fingerprint",
+                        "git_head": None,
+                    },
+                ):
+                    self.assertTrue(detect(root, CFG).code_review_graph)
+
+                with patch(
+                    "ai_workflow.code_review_graph.repository_fingerprint",
+                    return_value={
+                        "fingerprint": "stale-fingerprint",
+                        "git_head": None,
+                    },
+                ):
+                    self.assertFalse(detect(root, CFG).code_review_graph)
 
     @unittest.skipIf(
         os.name == "nt",
