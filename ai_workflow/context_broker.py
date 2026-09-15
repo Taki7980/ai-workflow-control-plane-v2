@@ -10,6 +10,7 @@ from .memory import search_memory
 from .models import ContextItem, RouteDecision, Lane
 from .providers import ProviderStatus
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
+from .retrieval_policy import structural_requirements
 
 
 def _jsonl(path: Path):
@@ -343,14 +344,18 @@ def lightweight(
     selected_ids = {id(item) for item in selected}
     return stronger + [item for item in tied if id(item) in selected_ids]
 
-def _run_crg(root: Path, args: list[str], timeout: int = 8) -> str | None:
+def _run_crg(
+    root: Path,
+    args: list[str],
+    timeout: int = 8,
+) -> dict | None:
     if not shutil.which("code-review-graph"):
         return None
     workspace_root = find_workspace_root(root)
     if not graph_exists(workspace_root, root):
         return None
     try:
-        p = subprocess.run(
+        proc = subprocess.run(
             ["code-review-graph", *args],
             cwd=root,
             env=crg_environment(workspace_root, root),
@@ -360,27 +365,237 @@ def _run_crg(root: Path, args: list[str], timeout: int = 8) -> str | None:
             timeout=timeout,
             check=False,
         )
-        if p.returncode == 0 and p.stdout.strip():
-            return p.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return None
 
-def crg_context(root: Path, query: str, symbol: str | None, changed_files: list[str] | None, limit: int) -> list[ContextItem]:
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        return None
+    return payload
+
+
+def _verified_empty_crg(payload: dict) -> bool:
+    confidence = str(payload.get("confidence") or "").casefold()
+    return (
+        "real absence" in confidence
+        and "current" in confidence
+        and "unverified" not in confidence
+    )
+
+
+def _crg_result_count(payload: dict, pattern: str) -> int:
+    if pattern == "impact":
+        raw = payload.get("total_impacted")
+        if raw is None:
+            raw = len(payload.get("impacted_nodes") or [])
+    elif pattern == "architecture":
+        raw = 1 if payload.get("summary") else 0
+    else:
+        raw = payload.get("result_count")
+        if raw is None:
+            raw = len(payload.get("results") or [])
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _compact_crg_payload(
+    payload: dict,
+    pattern: str,
+    limit: int,
+) -> dict:
+    compact = {
+        "status": "ok",
+        "pattern": pattern,
+    }
+    for key in ("target", "summary", "confidence", "truncated"):
+        value = payload.get(key)
+        if value not in (None, "", [], {}):
+            compact[key] = value
+
+    if pattern == "impact":
+        compact["total_impacted"] = _crg_result_count(payload, pattern)
+        compact["impacted_files"] = list(
+            payload.get("impacted_files") or []
+        )[:limit]
+        compact["impacted_nodes"] = list(
+            payload.get("impacted_nodes") or []
+        )[:limit]
+        compact["edges"] = list(payload.get("edges") or [])[:limit]
+    elif pattern == "architecture":
+        for key in (
+            "communities",
+            "entry_points",
+            "hub_nodes",
+            "bridge_nodes",
+        ):
+            value = payload.get(key)
+            if isinstance(value, list):
+                compact[key] = value[:limit]
+    else:
+        compact["result_count"] = _crg_result_count(payload, pattern)
+        compact["results"] = list(payload.get("results") or [])[:limit]
+        compact["edges"] = list(payload.get("edges") or [])[:limit]
+    return compact
+
+
+def _crg_item(
+    payload: dict,
+    pattern: str,
+    score: float,
+    limit: int,
+    *,
+    anchor: str | None = None,
+) -> ContextItem:
+    count = _crg_result_count(payload, pattern)
+    empty_verified = count == 0 and _verified_empty_crg(payload)
+    metadata = {
+        "pattern": pattern,
+        "structural_valid": count > 0 or empty_verified,
+        "result_count": count,
+        "empty_verified": empty_verified,
+        "truncated": bool(payload.get("truncated", False)),
+    }
+    if anchor:
+        metadata["anchor"] = anchor
+    return ContextItem(
+        "code_review_graph",
+        json.dumps(
+            _compact_crg_payload(payload, pattern, limit),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        score,
+        False,
+        metadata,
+    )
+
+
+def _crg_anchor(payload: dict | None) -> tuple[str | None, str | None]:
+    if not payload:
+        return None, None
+    results = payload.get("results") or []
+    if not isinstance(results, list):
+        return None, None
+    for row in results:
+        if not isinstance(row, dict):
+            continue
+        anchor = str(
+            row.get("qualified_name")
+            or row.get("name")
+            or ""
+        ).strip()
+        path = str(
+            row.get("relative_path")
+            or row.get("file_path")
+            or row.get("path")
+            or ""
+        ).strip()
+        if anchor:
+            return anchor, path or None
+    return None, None
+
+
+def crg_context(
+    root: Path,
+    query: str,
+    symbol: str | None,
+    changed_files: list[str] | None,
+    limit: int,
+    *,
+    patterns: tuple[str, ...] = (),
+) -> list[ContextItem]:
+    requested = patterns or structural_requirements(query)
+    if not requested:
+        if changed_files:
+            requested = ("impact",)
+        elif symbol:
+            requested = ("callers_of",)
+        else:
+            requested = ("architecture",)
+
     results: list[ContextItem] = []
-    if symbol:
-        for pattern in ("callers_of", "callees_of", "tests_for"):
-            text = _run_crg(root, ["query", pattern, symbol])
-            if text:
-                results.append(ContextItem("code_review_graph", text, 9.0, False, {"pattern": pattern}))
-                if len(results) >= limit: return results
-    if changed_files:
-        text = _run_crg(root, ["impact", "--files", *changed_files])
-        if text: results.append(ContextItem("code_review_graph", text, 8.0, False, {"pattern": "impact"}))
-    if not results:
-        text = _run_crg(root, ["search", query, "--limit", str(limit)])
-        if text: results.append(ContextItem("code_review_graph", text, 5.0, False, {"pattern": "search"}))
+    anchor = symbol
+    anchor_path: str | None = None
+
+    needs_anchor = any(
+        pattern in {"callers_of", "callees_of", "tests_for"}
+        for pattern in requested
+    ) or ("impact" in requested and not changed_files)
+    if needs_anchor and not anchor:
+        search = _run_crg(
+            root,
+            ["search", query, "--limit", str(limit)],
+        )
+        anchor, anchor_path = _crg_anchor(search)
+
+    if "impact" in requested:
+        impact_files = list(changed_files or [])
+        if not impact_files and anchor_path:
+            impact_files = [anchor_path]
+        if not impact_files and anchor:
+            search = _run_crg(
+                root,
+                ["search", anchor, "--limit", str(limit)],
+            )
+            _, anchor_path = _crg_anchor(search)
+            if anchor_path:
+                impact_files = [anchor_path]
+        if impact_files:
+            payload = _run_crg(
+                root,
+                ["impact", "--files", *impact_files],
+            )
+            if payload:
+                results.append(
+                    _crg_item(
+                        payload,
+                        "impact",
+                        9.0,
+                        limit,
+                        anchor=anchor,
+                    )
+                )
+
+    for pattern in requested:
+        if pattern in {"impact", "architecture"}:
+            continue
+        if not anchor:
+            continue
+        payload = _run_crg(root, ["query", pattern, anchor])
+        if payload:
+            results.append(
+                _crg_item(
+                    payload,
+                    pattern,
+                    9.0,
+                    limit,
+                    anchor=anchor,
+                )
+            )
+        if len(results) >= limit:
+            return results[:limit]
+
+    if "architecture" in requested and len(results) < limit:
+        payload = _run_crg(root, ["architecture"])
+        if payload:
+            results.append(
+                _crg_item(
+                    payload,
+                    "architecture",
+                    8.0,
+                    limit,
+                )
+            )
+
     return results[:limit]
+
 
 def targeted_source(root: Path, query: str, limit: int) -> list[ContextItem]:
     terms = [x for x in re.split(r"\W+", query) if len(x) >= 4][:4]
@@ -475,7 +690,14 @@ def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudge
             item.source in code_sources and _score(query, item.text) > 0
             for item in items
         )
-        needs_structural_fallback = decision.structural_context and not crg_items
+        has_structural_evidence = any(
+            item.source == "code_review_graph"
+            and bool(item.metadata.get("structural_valid"))
+            for item in crg_items
+        )
+        needs_structural_fallback = (
+            decision.structural_context and not has_structural_evidence
+        )
         needs_mutation_fallback = decision.lane != Lane.ANSWER and not has_code_evidence
         
         if not items or needs_structural_fallback or needs_mutation_fallback:
