@@ -142,5 +142,111 @@ class WorkflowEngineTests(unittest.TestCase):
         self.assertIn("scheduler", diagnostics)
 
 
+    def test_structural_mixed_query_uses_semantic_anchor_then_graph_expansion(self):
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        cfg["context"]["sufficiency"]["threshold"] = 0.4
+        decision = RouteDecision(
+            Lane.FULL,
+            Risk.MEDIUM,
+            structural_context=True,
+            confidence=0.9,
+        )
+        budget = ContextBudget(6000, 1200, 24000, {})
+        structural_calls = []
+
+        def base(*args, **kwargs):
+            return [
+                ContextItem(
+                    "lightweight_index",
+                    "payment retry handler",
+                    0.4,
+                )
+            ]
+
+        def semantic(root, query, config, limit):
+            return ProviderResult(
+                "semantic",
+                (
+                    ContextItem(
+                        "semantic",
+                        "billing.py:10 payment retry handler",
+                        0.95,
+                        False,
+                        {
+                            "path": "billing.py",
+                            "symbol": "ProcessPayment",
+                        },
+                    ),
+                ),
+            )
+
+        def structural(
+            root,
+            query,
+            symbol,
+            changed_files,
+            limit,
+            *,
+            patterns=(),
+        ):
+            structural_calls.append(
+                {
+                    "symbol": symbol,
+                    "changed_files": list(changed_files or []),
+                    "patterns": tuple(patterns),
+                }
+            )
+            return [
+                ContextItem(
+                    "code_review_graph",
+                    "billing.py impacts checkout.py through ProcessPayment",
+                    9.0,
+                    False,
+                    {
+                        "pattern": "impact",
+                        "structural_valid": True,
+                        "result_count": 1,
+                    },
+                )
+            ]
+
+        with tempfile.TemporaryDirectory() as td:
+            engine = WorkflowEngine(
+                base_gather=base,
+                semantic_provider=semantic,
+                structural_provider=structural,
+            )
+            items, diagnostics = engine.gather_detailed(
+                Path(td),
+                "What breaks if the payment retry handler changes?",
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(False, True, False, False, True),
+            )
+
+        self.assertEqual(diagnostics["retrieval_intent"], "mixed")
+        self.assertIn("semantic", diagnostics["providers_attempted"])
+        self.assertIn(
+            "structural-expansion",
+            diagnostics["providers_attempted"],
+        )
+        self.assertEqual(len(structural_calls), 1)
+        self.assertEqual(
+            structural_calls[0],
+            {
+                "symbol": "ProcessPayment",
+                "changed_files": ["billing.py"],
+                "patterns": ("impact",),
+            },
+        )
+        self.assertTrue(diagnostics["sufficiency"]["structural_complete"])
+        self.assertTrue(
+            any(item.source == "code_review_graph" for item in items)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
