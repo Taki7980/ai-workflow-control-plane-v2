@@ -1,18 +1,30 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .io_utils import atomic_write_json
 from .path_policy import PathOutsideWorkspace, resolve_within_root
 from .repository_registry import RepositorySpec, is_git_repository, load_registry
+from .workspace_state import repository_fingerprint
 
 
 CRG_WORKSPACE_RELATIVE = Path("ai-workspace/code-review-graph")
+CRG_MIN_SCHEMA_VERSION = 10
+GRAPH_MANIFEST_SCHEMA = 1
+_REQUIRED_GRAPH_TABLES = frozenset({"nodes", "edges", "metadata"})
+
+
+class GraphValidationError(RuntimeError):
+    """Raised when a Code Review Graph database cannot be trusted."""
 
 
 def find_workspace_root(start: Path) -> Path:
@@ -43,7 +55,10 @@ def repository_data_dir(workspace_root: Path, repository_root: Path) -> Path:
     except ValueError:
         # Legacy explicit external roots remain isolated by their directory name.
         relative = f"external/{repository.name}"
-    return workspace / CRG_WORKSPACE_RELATIVE / _repo_key(relative)
+    return resolve_within_root(
+        workspace,
+        CRG_WORKSPACE_RELATIVE / _repo_key(relative),
+    )
 
 
 def _resolve_spec_root(workspace_root: Path, spec: RepositorySpec) -> Path | None:
@@ -59,7 +74,10 @@ def _resolve_spec_root(workspace_root: Path, spec: RepositorySpec) -> Path | Non
     return candidate
 
 
-def managed_repositories(workspace_root: Path, config: dict | None = None) -> list[dict[str, Any]]:
+def managed_repositories(
+    workspace_root: Path,
+    config: dict | None = None,
+) -> list[dict[str, Any]]:
     """Return active Git repositories backed by the workspace registry."""
     root = Path(workspace_root).resolve()
     rows: list[dict[str, Any]] = []
@@ -97,6 +115,90 @@ def crg_environment(workspace_root: Path, repository_root: Path) -> dict[str, st
     return env
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_graph_database(
+    graph_path: Path,
+    *,
+    minimum_schema_version: int = CRG_MIN_SCHEMA_VERSION,
+) -> dict[str, int]:
+    """Validate the stable SQLite contract needed by the control plane."""
+
+    path = Path(graph_path)
+    if not path.is_file():
+        raise GraphValidationError("graph.db is missing")
+
+    try:
+        resolved = path.resolve(strict=True)
+        connection = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
+    except (OSError, sqlite3.DatabaseError) as exc:
+        raise GraphValidationError(f"cannot open graph.db read-only: {exc}") from exc
+
+    try:
+        try:
+            quick_check = connection.execute("PRAGMA quick_check").fetchall()
+            if quick_check != [("ok",)]:
+                raise GraphValidationError(
+                    f"SQLite quick_check failed: {quick_check[:3]}"
+                )
+
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            missing = sorted(_REQUIRED_GRAPH_TABLES - tables)
+            if missing:
+                raise GraphValidationError(
+                    f"missing required graph tables: {', '.join(missing)}"
+                )
+
+            metadata = {
+                str(key): str(value)
+                for key, value in connection.execute(
+                    "SELECT key, value FROM metadata"
+                )
+            }
+            raw_schema = metadata.get("schema_version")
+            try:
+                schema_version = int(raw_schema) if raw_schema is not None else 0
+            except ValueError as exc:
+                raise GraphValidationError(
+                    f"invalid schema_version metadata: {raw_schema!r}"
+                ) from exc
+            if schema_version < minimum_schema_version:
+                raise GraphValidationError(
+                    "unsupported CRG schema "
+                    f"{schema_version}; need >= {minimum_schema_version}"
+                )
+
+            node_count = int(
+                connection.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+            )
+            edge_count = int(
+                connection.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+            )
+            if node_count <= 0:
+                raise GraphValidationError("graph contains zero nodes")
+        except sqlite3.DatabaseError as exc:
+            raise GraphValidationError(f"invalid graph database: {exc}") from exc
+
+        return {
+            "schema_version": schema_version,
+            "node_count": node_count,
+            "edge_count": edge_count,
+        }
+    finally:
+        connection.close()
+
+
 def graph_exists(workspace_root: Path, repository_root: Path) -> bool:
     return (repository_data_dir(workspace_root, repository_root) / "graph.db").is_file()
 
@@ -104,10 +206,13 @@ def graph_exists(workspace_root: Path, repository_root: Path) -> bool:
 def any_graph_ready(workspace_root: Path, config: dict | None = None) -> bool:
     if shutil.which("code-review-graph") is None:
         return False
-    return any(
-        (row["data_dir"] / "graph.db").is_file()
-        for row in managed_repositories(workspace_root, config)
-    )
+    for row in managed_repositories(workspace_root, config):
+        try:
+            validate_graph_database(row["data_dir"] / "graph.db")
+        except (GraphValidationError, OSError):
+            continue
+        return True
+    return False
 
 
 def _run(
@@ -131,6 +236,59 @@ def _run(
     )
 
 
+def _crg_version(executable: str, *, timeout: int = 5) -> str:
+    try:
+        proc = subprocess.run(
+            [executable, "--version"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    if proc.returncode != 0:
+        return "unknown"
+    value = (proc.stdout or proc.stderr).strip().splitlines()
+    return value[0][:200] if value else "unknown"
+
+
+def _write_graph_manifest(
+    *,
+    repository_root: Path,
+    relative_path: str,
+    data_dir: Path,
+    action: str,
+    crg_version: str,
+    validation: dict[str, int],
+) -> dict[str, Any]:
+    graph = data_dir / "graph.db"
+    fingerprint = repository_fingerprint(repository_root, relative_path)
+    manifest: dict[str, Any] = {
+        "manifest_schema": GRAPH_MANIFEST_SCHEMA,
+        "repository_relative_path": relative_path,
+        "repository_fingerprint": fingerprint["fingerprint"],
+        "git_head": fingerprint.get("git_head"),
+        "crg_version": crg_version,
+        "crg_schema_version": validation["schema_version"],
+        "generation_mode": action,
+        "graph_file": "graph.db",
+        "graph_sha256": _sha256_file(graph),
+        "node_count": validation["node_count"],
+        "edge_count": validation["edge_count"],
+        "generated_at": datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+    atomic_write_json(
+        data_dir / "manifest.json",
+        manifest,
+        sort_keys=True,
+    )
+    return manifest
+
+
 def repository_health(
     workspace_root: Path,
     repository_root: Path,
@@ -138,7 +296,16 @@ def repository_health(
     timeout: int = 8,
 ) -> dict[str, Any]:
     repo = Path(repository_root).resolve()
-    data_dir = repository_data_dir(workspace_root, repo)
+    try:
+        data_dir = repository_data_dir(workspace_root, repo)
+    except (PathOutsideWorkspace, OSError) as exc:
+        return {
+            "repository_root": str(repo),
+            "data_dir": None,
+            "ready": False,
+            "error": f"unsafe central graph path: {exc}",
+        }
+
     result: dict[str, Any] = {
         "repository_root": str(repo),
         "data_dir": str(data_dir),
@@ -147,9 +314,18 @@ def repository_health(
     if shutil.which("code-review-graph") is None:
         result["error"] = "code-review-graph is not installed"
         return result
-    if not (data_dir / "graph.db").is_file():
+
+    graph = data_dir / "graph.db"
+    if not graph.is_file():
         result["error"] = "central graph is not built"
         return result
+
+    try:
+        result["validation"] = validate_graph_database(graph)
+    except GraphValidationError as exc:
+        result["error"] = f"graph validation failed: {exc}"
+        return result
+
     try:
         proc = _run(
             workspace_root,
@@ -157,12 +333,13 @@ def repository_health(
             ["status", "--repo", str(repo), "--json"],
             timeout=timeout,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, subprocess.TimeoutExpired, PathOutsideWorkspace) as exc:
         result["error"] = str(exc)
         return result
     if proc.returncode != 0:
         result["error"] = (proc.stderr or proc.stdout).strip()[:500]
         return result
+
     result["ready"] = True
     if proc.stdout.strip():
         try:
@@ -181,7 +358,20 @@ def workspace_health(
     root = Path(workspace_root).resolve()
     installed = shutil.which("code-review-graph") is not None
     repositories = []
-    for row in managed_repositories(root, config):
+    try:
+        rows = managed_repositories(root, config)
+    except (PathOutsideWorkspace, OSError) as exc:
+        return {
+            "installed": installed,
+            "ready": False,
+            "data_root": str(root / CRG_WORKSPACE_RELATIVE),
+            "repository_count": 0,
+            "ready_repositories": 0,
+            "repositories": [],
+            "error": f"unsafe central graph path: {exc}",
+        }
+
+    for row in rows:
         health = repository_health(root, row["repository_root"], timeout=timeout)
         health["relative_path"] = row["relative_path"]
         repositories.append(health)
@@ -205,7 +395,19 @@ def sync_workspace_graphs(
     """Build missing graphs and incrementally refresh existing central graphs."""
     root = Path(workspace_root).resolve()
     executable = shutil.which("code-review-graph")
-    rows = managed_repositories(root, config)
+
+    try:
+        rows = managed_repositories(root, config)
+    except (PathOutsideWorkspace, OSError) as exc:
+        return {
+            "installed": executable is not None,
+            "attempted": 0,
+            "ready": 0,
+            "data_root": str(root / CRG_WORKSPACE_RELATIVE),
+            "repositories": [],
+            "error": f"unsafe central graph path: {exc}",
+        }
+
     if executable is None:
         return {
             "installed": False,
@@ -215,11 +417,21 @@ def sync_workspace_graphs(
             "repositories": [],
         }
 
+    crg_version = _crg_version(executable)
     results: list[dict[str, Any]] = []
     for row in rows:
         repo = row["repository_root"]
         data_dir = row["data_dir"]
-        action = "update" if (data_dir / "graph.db").is_file() else "build"
+        graph = data_dir / "graph.db"
+        action = "update" if graph.is_file() else "build"
+        entry: dict[str, Any] = {
+            "relative_path": row["relative_path"],
+            "repository_root": str(repo),
+            "data_dir": str(data_dir),
+            "action": action,
+            "ok": False,
+        }
+
         try:
             proc = _run(
                 root,
@@ -227,24 +439,34 @@ def sync_workspace_graphs(
                 [action, "--repo", str(repo), "--quiet"],
                 timeout=timeout,
             )
-            entry: dict[str, Any] = {
-                "relative_path": row["relative_path"],
-                "repository_root": str(repo),
-                "data_dir": str(data_dir),
-                "action": action,
-                "ok": proc.returncode == 0 and (data_dir / "graph.db").is_file(),
-            }
-            if not entry["ok"]:
+            if proc.returncode != 0:
                 entry["error"] = (proc.stderr or proc.stdout).strip()[:500]
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            entry = {
-                "relative_path": row["relative_path"],
-                "repository_root": str(repo),
-                "data_dir": str(data_dir),
-                "action": action,
-                "ok": False,
-                "error": str(exc),
-            }
+            elif not graph.is_file():
+                entry["error"] = "graph database was not created"
+            else:
+                try:
+                    validation = validate_graph_database(graph)
+                except GraphValidationError as exc:
+                    entry["error"] = f"graph validation failed: {exc}"
+                else:
+                    manifest = _write_graph_manifest(
+                        repository_root=repo,
+                        relative_path=row["relative_path"],
+                        data_dir=data_dir,
+                        action=action,
+                        crg_version=crg_version,
+                        validation=validation,
+                    )
+                    entry["validation"] = validation
+                    entry["manifest"] = str(data_dir / "manifest.json")
+                    entry["graph_sha256"] = manifest["graph_sha256"]
+                    entry["ok"] = True
+        except (
+            OSError,
+            subprocess.TimeoutExpired,
+            PathOutsideWorkspace,
+        ) as exc:
+            entry["error"] = str(exc)
         results.append(entry)
 
     return {
