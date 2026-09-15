@@ -336,6 +336,25 @@ class StructuralCRGContractTests(unittest.TestCase):
         self.assertFalse(items[0].metadata["empty_verified"])
         self.assertFalse(items[0].metadata["structural_valid"])
 
+    def test_run_crg_rejects_stale_graph_before_subprocess(self):
+        import ai_workflow.context_broker as cb
+
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb.shutil, "which", return_value="code-review-graph"
+        ), patch.object(
+            cb, "graph_exists", return_value=True
+        ), patch.object(
+            cb,
+            "graph_freshness",
+            return_value={"fresh": False, "reason": "repository fingerprint mismatch"},
+        ), patch.object(
+            cb.subprocess, "run"
+        ) as run:
+            result = cb._run_crg(Path(td), ["search", "query"])
+
+        self.assertIsNone(result)
+        run.assert_not_called()
+
     def test_run_crg_rejects_malformed_json(self):
         from types import SimpleNamespace
         import ai_workflow.context_broker as cb
