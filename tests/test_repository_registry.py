@@ -290,5 +290,89 @@ class RepositoryRegistryTests(unittest.TestCase):
             self.assertEqual(worktree_spec.head_sha, expected_head)
 
 
+
+    def test_reftable_repository_metadata_comes_from_git(self):
+        if not shutil.which("git"):
+            self.skipTest("git not installed")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "reftable-repo"
+            init = subprocess.run(
+                [
+                    "git",
+                    "init",
+                    "--ref-format=reftable",
+                    str(repo),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if init.returncode != 0:
+                self.skipTest("installed Git does not support reftable")
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/acme/reftable-repo.git",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            (repo / "file.txt").write_text("ok\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "file.txt"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "init"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            expected_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            expected_ref = subprocess.run(
+                ["git", "symbolic-ref", "--quiet", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            found = {
+                item.relative_path: item
+                for item in discover_repositories(root, max_depth=1)
+            }
+
+            self.assertIn("reftable-repo", found)
+            spec = found["reftable-repo"]
+            self.assertEqual(spec.head_sha, expected_head)
+            self.assertEqual(spec.head_ref, expected_ref)
+            self.assertEqual(
+                spec.remote_identity,
+                "github.com/acme/reftable-repo",
+            )
+
 if __name__ == "__main__":
     unittest.main()
