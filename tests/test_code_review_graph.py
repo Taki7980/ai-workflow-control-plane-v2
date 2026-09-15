@@ -208,6 +208,22 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             self.assertFalse(stale["fresh"])
             self.assertIn("repository fingerprint", stale["reason"])
 
+    def test_graph_freshness_rejects_malformed_manifest_schema(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = self._workspace(root)
+            data_dir = repository_data_dir(root, repo)
+            self._write_valid_graph(data_dir)
+            manifest = self._write_manifest(data_dir)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["manifest_schema"] = "not-an-integer"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+            status = graph_freshness(root, repo)
+
+            self.assertFalse(status["fresh"])
+            self.assertIn("manifest schema", status["reason"])
+
     def test_graph_freshness_rejects_tampered_graph_file(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
