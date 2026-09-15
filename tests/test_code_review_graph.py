@@ -95,7 +95,7 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             )
             connection.execute(
                 "INSERT INTO metadata(key, value) VALUES (?, ?)",
-                ("schema_version", "10"),
+                ("schema_version", "9"),
             )
             connection.execute(
                 """
@@ -228,7 +228,7 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             payload = json.loads(manifest.read_text(encoding="utf-8"))
             self.assertEqual(payload["manifest_schema"], 1)
             self.assertEqual(payload["repository_relative_path"], "admin-panel")
-            self.assertEqual(payload["crg_schema_version"], 10)
+            self.assertEqual(payload["crg_schema_version"], 9)
             self.assertEqual(payload["node_count"], 2)
             self.assertEqual(payload["edge_count"], 1)
             self.assertEqual(payload["generation_mode"], "build")
@@ -290,7 +290,7 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             self.assertEqual(health["repository_count"], 1)
             self.assertEqual(health["ready_repositories"], 1)
             repository = health["repositories"][0]
-            self.assertEqual(repository["validation"]["schema_version"], 10)
+            self.assertEqual(repository["validation"]["schema_version"], 9)
             self.assertEqual(repository["validation"]["node_count"], 2)
             self.assertEqual(repository["validation"]["edge_count"], 1)
 
