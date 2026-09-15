@@ -52,12 +52,12 @@ _SEMANTIC = re.compile(
     re.I,
 )
 _CALLERS = re.compile(
-    r"\b(who\s+calls?|callers?|called\s+by|references?\s+to)\b",
+    r"\b(who\s+calls?|callers?|called\s+by|references?\s+to|dependents?)\b",
     re.I,
 )
 _CALLEES = re.compile(
     r"\b(callees?|what\s+does\b.*\bcall|calls?\s+into|"
-    r"depends?\s+on|dependencies?|imports?\s+of)\b",
+    r"dependencies?|imports?\s+of)\b",
     re.I,
 )
 _TESTS = re.compile(
@@ -66,7 +66,7 @@ _TESTS = re.compile(
     re.I,
 )
 _IMPACT = re.compile(
-    r"\b(impact|blast\s+radius|what\s+breaks|affected|dependents?)\b",
+    r"\b(impact|blast\s+radius|what\s+breaks|affected)\b",
     re.I,
 )
 _ARCHITECTURE = re.compile(
