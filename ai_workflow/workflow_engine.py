@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Callable
 
 from .budget import ContextBudget, truncate
-from .context_broker import gather as default_base_gather
+from .context_broker import (
+    crg_context as default_structural_provider,
+    gather as default_base_gather,
+)
 from .context_selection import select_context
 from .deployment_runtime import resolve_runtime_deployment
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
@@ -200,6 +204,46 @@ def _fallback_label(label: str, kind: str) -> str:
     return f"{label} failed: {kind}"
 
 
+def _structural_anchor(
+    items: list[ContextItem],
+) -> tuple[str | None, str | None]:
+    """Return the first bounded symbol/path anchor from ranked evidence."""
+
+    for item in items:
+        metadata = dict(item.metadata)
+        symbol = str(
+            metadata.get("symbol")
+            or metadata.get("qualified_name")
+            or ""
+        ).strip()
+        path = str(
+            metadata.get("path")
+            or metadata.get("file")
+            or ""
+        ).strip()
+
+        if not symbol and item.source == "lightweight_index":
+            try:
+                payload = json.loads(item.text)
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            if isinstance(payload, dict):
+                symbol = str(
+                    payload.get("symbol")
+                    or payload.get("qualified_name")
+                    or ""
+                ).strip()
+                path = path or str(
+                    payload.get("file")
+                    or payload.get("path")
+                    or ""
+                ).strip()
+
+        if symbol or path:
+            return symbol or None, path or None
+    return None, None
+
+
 class WorkflowEngine:
     """Application-level retrieval sequencer with bounded concurrent adapters."""
 
@@ -208,10 +252,12 @@ class WorkflowEngine:
         *,
         base_gather: Callable = default_base_gather,
         semantic_provider: Callable = default_semantic_provider,
+        structural_provider: Callable = default_structural_provider,
         external_provider: Callable = default_external_provider,
     ) -> None:
         self.base_gather = base_gather
         self.semantic_provider = semantic_provider
+        self.structural_provider = structural_provider
         self.external_provider = external_provider
 
     async def gather_detailed_async(
@@ -315,7 +361,13 @@ class WorkflowEngine:
                     deadline_labels.append(outcome.label)
 
         threshold = float((((config.get("context") or {}).get("sufficiency") or {}).get("threshold", 0.72)))
-        suff = evaluate_sufficiency(query, base_items, structural_required=plan.use_structural, threshold=threshold)
+        suff = evaluate_sufficiency(
+            query,
+            base_items,
+            structural_required=plan.use_structural,
+            structural_patterns=plan.structural_patterns,
+            threshold=threshold,
+        )
         specialist_items: list[ContextItem] = []
         specialist_calls: list[ScheduledCall] = []
         specialist_kinds: list[str] = []
@@ -384,6 +436,87 @@ class WorkflowEngine:
                 trace.fallbacks.append(_fallback_label(outcome.label, error_kind))
             specialist_items.extend(_provenance(item, root) for item in result.items)
 
+        pre_expansion_suff = evaluate_sufficiency(
+            query,
+            [*base_items, *specialist_items],
+            structural_required=plan.use_structural,
+            structural_patterns=plan.structural_patterns,
+            threshold=threshold,
+        )
+        if plan.use_structural and not pre_expansion_suff.structural_complete:
+            if not providers.code_review_graph:
+                trace.providers_skipped["structural-expansion"] = (
+                    "provider not configured"
+                )
+            else:
+                anchor_symbol, anchor_path = _structural_anchor(
+                    [*specialist_items, *base_items]
+                )
+                structural_files = list(changed)
+                if not structural_files and anchor_path:
+                    structural_files = [anchor_path]
+                can_expand = bool(
+                    anchor_symbol
+                    or structural_files
+                    or "architecture" in plan.structural_patterns
+                )
+                if can_expand:
+                    label = "structural-expansion"
+                    trace.providers_attempted.append(label)
+                    time_left = remaining()
+                    if time_left > 0:
+                        outcomes = await scheduler.run(
+                            [
+                                ScheduledCall(
+                                    label,
+                                    lambda: self.structural_provider(
+                                        root,
+                                        query,
+                                        anchor_symbol,
+                                        structural_files,
+                                        provider_limit,
+                                        patterns=plan.structural_patterns,
+                                    ),
+                                )
+                            ],
+                            time_left,
+                        )
+                        outcome = outcomes[0]
+                    else:
+                        outcome = SchedulerOutcome(
+                            label,
+                            error=(
+                                "global retrieval deadline exceeded after "
+                                f"{global_deadline:g} seconds"
+                            ),
+                            error_kind="deadline",
+                            timed_out=True,
+                        )
+
+                    trace.stage_latency_ms[label] = round(
+                        outcome.latency_ms,
+                        2,
+                    )
+                    if outcome.ok and isinstance(outcome.value, list):
+                        trace.candidates[label] = len(outcome.value)
+                        specialist_items.extend(
+                            _provenance(item, root)
+                            for item in outcome.value
+                        )
+                    else:
+                        trace.candidates[label] = 0
+                        provider_errors[label] = _scheduler_error(outcome)
+                        kind = outcome.error_kind or "scheduler_error"
+                        trace.fallbacks.append(
+                            _fallback_label(label, kind)
+                        )
+                        if outcome.timed_out:
+                            deadline_labels.append(label)
+                else:
+                    trace.providers_skipped["structural-expansion"] = (
+                        "no symbol or file anchor"
+                    )
+
         limit = provider_limit * 3
         candidates = _hybrid_rank(
             query,
@@ -392,15 +525,31 @@ class WorkflowEngine:
             limit,
             effective_config,
         )
-        suff = evaluate_sufficiency(query, candidates, structural_required=plan.use_structural, threshold=threshold)
+        suff = evaluate_sufficiency(
+            query,
+            candidates,
+            structural_required=plan.use_structural,
+            structural_patterns=plan.structural_patterns,
+            threshold=threshold,
+        )
         adaptive_chars = _adaptive_char_limit(budget, suff.score, config)
 
         selector_cfg = ((config.get("context") or {}).get("selector") or {})
         if selector_cfg.get("enabled", True):
             mandatory_sources = (
                 ("code_review_graph",)
-                if plan.use_structural and selector_cfg.get("mandatory_structural_evidence", True)
-                and any(item.source == "code_review_graph" for item in candidates)
+                if (
+                    plan.use_structural
+                    and selector_cfg.get(
+                        "mandatory_structural_evidence",
+                        True,
+                    )
+                    and any(
+                        item.source == "code_review_graph"
+                        and bool(item.metadata.get("structural_valid"))
+                        for item in candidates
+                    )
+                )
                 else ()
             )
             selected, selector = select_context(
@@ -414,7 +563,13 @@ class WorkflowEngine:
             selected = _hard_cap(candidates, adaptive_chars)
             selector = {"mode": "legacy_hard_cap", "selected_count": len(selected), "used_chars": sum(len(i.text) for i in selected)}
 
-        final_suff = evaluate_sufficiency(query, selected, structural_required=plan.use_structural, threshold=threshold)
+        final_suff = evaluate_sufficiency(
+            query,
+            selected,
+            structural_required=plan.use_structural,
+            structural_patterns=plan.structural_patterns,
+            threshold=threshold,
+        )
         state = _evidence_state(decision, final_suff.sufficient)
         snapshot = workspace_fingerprint(root, changed)
 
@@ -426,11 +581,18 @@ class WorkflowEngine:
             "source_diversity": final_suff.source_diversity,
             "exact_match": final_suff.exact_match,
             "structural_complete": final_suff.structural_complete,
+            "structural_patterns": list(plan.structural_patterns),
         }
         if plan.use_semantic and not any(item.source == "semantic" for item in specialist_items) and not final_suff.sufficient and "semantic" not in provider_errors:
             trace.fallbacks.append("semantic unavailable or returned no candidates")
-        if plan.use_structural and not any(item.source == "code_review_graph" for item in selected):
-            trace.fallbacks.append("structural provider unavailable; base broker source fallback used")
+        if plan.use_structural and not any(
+            item.source == "code_review_graph"
+            and bool(item.metadata.get("structural_valid"))
+            for item in selected
+        ):
+            trace.fallbacks.append(
+                "structural evidence incomplete; source fallback used"
+            )
         trace.used_chars = sum(len(item.text) for item in selected)
 
         elapsed_ms = (time.perf_counter() - started) * 1000
