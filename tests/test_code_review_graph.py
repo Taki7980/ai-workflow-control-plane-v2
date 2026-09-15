@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -184,8 +185,11 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             root = Path(td)
             repo = self._workspace(root)
             calls = []
+            real_run = subprocess.run
 
             def fake_run(command, **kwargs):
+                if command and command[0] == "git":
+                    return real_run(command, **kwargs)
                 calls.append((command, kwargs))
                 if command[1:] == ["--version"]:
                     return SimpleNamespace(
