@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sqlite3
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from ai_workflow.code_review_graph import (
+    graph_freshness,
     repository_data_dir,
     sync_workspace_graphs,
     workspace_health,
@@ -154,6 +156,79 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             connection.close()
         return graph
 
+    def _write_manifest(
+        self,
+        data_dir: Path,
+        *,
+        relative_path: str = "admin-panel",
+        fingerprint: str = "fresh-fingerprint",
+        git_head: str | None = "a" * 40,
+    ) -> Path:
+        graph = data_dir / "graph.db"
+        digest = hashlib.sha256(graph.read_bytes()).hexdigest()
+        manifest = {
+            "manifest_schema": 1,
+            "repository_relative_path": relative_path,
+            "repository_fingerprint": fingerprint,
+            "git_head": git_head,
+            "graph_file": "graph.db",
+            "graph_sha256": digest,
+            "crg_schema_version": 9,
+        }
+        path = data_dir / "manifest.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        return path
+
+    def test_graph_freshness_requires_matching_repository_fingerprint(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = self._workspace(root)
+            data_dir = repository_data_dir(root, repo)
+            self._write_valid_graph(data_dir)
+            self._write_manifest(data_dir)
+
+            with patch(
+                "ai_workflow.code_review_graph.repository_fingerprint",
+                return_value={
+                    "fingerprint": "fresh-fingerprint",
+                    "git_head": "a" * 40,
+                },
+            ):
+                fresh = graph_freshness(root, repo)
+            self.assertTrue(fresh["fresh"], fresh)
+
+            with patch(
+                "ai_workflow.code_review_graph.repository_fingerprint",
+                return_value={
+                    "fingerprint": "different-fingerprint",
+                    "git_head": "a" * 40,
+                },
+            ):
+                stale = graph_freshness(root, repo)
+            self.assertFalse(stale["fresh"])
+            self.assertIn("repository fingerprint", stale["reason"])
+
+    def test_graph_freshness_rejects_tampered_graph_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = self._workspace(root)
+            data_dir = repository_data_dir(root, repo)
+            graph = self._write_valid_graph(data_dir)
+            self._write_manifest(data_dir)
+            graph.write_bytes(graph.read_bytes() + b"tamper")
+
+            with patch(
+                "ai_workflow.code_review_graph.repository_fingerprint",
+                return_value={
+                    "fingerprint": "fresh-fingerprint",
+                    "git_head": "a" * 40,
+                },
+            ):
+                status = graph_freshness(root, repo)
+
+            self.assertFalse(status["fresh"])
+            self.assertIn("graph hash", status["reason"])
+
     def test_repository_data_is_centralized_under_ai_workspace(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -272,6 +347,7 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             repo = self._workspace(root)
             data_dir = repository_data_dir(root, repo)
             self._write_valid_graph(data_dir)
+            self._write_manifest(data_dir)
             ok = SimpleNamespace(
                 returncode=0,
                 stdout='{"nodes": 42}',
@@ -280,6 +356,12 @@ class CodeReviewGraphWorkspaceTests(unittest.TestCase):
             with patch(
                 "ai_workflow.code_review_graph.shutil.which",
                 return_value="code-review-graph",
+            ), patch(
+                "ai_workflow.code_review_graph.repository_fingerprint",
+                return_value={
+                    "fingerprint": "fresh-fingerprint",
+                    "git_head": "a" * 40,
+                },
             ), patch(
                 "ai_workflow.code_review_graph.subprocess.run",
                 return_value=ok,
