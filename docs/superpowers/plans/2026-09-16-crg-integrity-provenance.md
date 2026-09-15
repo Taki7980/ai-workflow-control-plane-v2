@@ -15,7 +15,7 @@
 - Keep the runtime dependency-free.
 - Preserve centralized CRG storage under `ai-workspace/code-review-graph/<repo-key>/`.
 - Do not change structural retrieval/routing policy in this PR.
-- Treat the CRG SQLite schema as an external contract: require only the stable `nodes`, `edges`, `metadata` tables and schema version >= 10.
+- Treat the CRG SQLite schema as an external contract: require only the stable `nodes`, `edges`, `metadata` tables and schema version >= 9.
 - Fail closed on corrupt/empty graph databases.
 - Keep compatibility with repositories that legitimately have zero relationship edges; the real integration fixture must prove edges are produced for code that contains a call relationship.
 - Never follow a CRG data-directory symlink outside the workspace.
@@ -48,7 +48,7 @@
 - Produces: manifest schema 1 beside every successfully built/refreshed `graph.db`
 
 - [ ] **Step 1: Open SQLite read-only and require `PRAGMA quick_check = ok`.**
-- [ ] **Step 2: Require `nodes`, `edges`, and `metadata`; require schema version >= 10 and at least one node.**
+- [ ] **Step 2: Require `nodes`, `edges`, and `metadata`; require schema version >= 9 and at least one node.**
 - [ ] **Step 3: Hash `graph.db` with SHA-256.**
 - [ ] **Step 4: Record repository fingerprint, Git HEAD, CRG version, CRG schema, graph hash, node/edge counts, action, and UTC generation time in `manifest.json`.**
 - [ ] **Step 5: Make sync readiness depend on validation rather than file existence.**
