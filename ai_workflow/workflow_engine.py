@@ -449,9 +449,10 @@ class WorkflowEngine:
                     "provider not configured"
                 )
             else:
-                anchor_symbol, anchor_path = _structural_anchor(
+                discovered_symbol, anchor_path = _structural_anchor(
                     [*specialist_items, *base_items]
                 )
+                anchor_symbol = symbol or discovered_symbol
                 structural_files = list(changed)
                 if not structural_files and anchor_path:
                     structural_files = [anchor_path]
