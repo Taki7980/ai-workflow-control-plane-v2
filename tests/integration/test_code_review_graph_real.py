@@ -11,6 +11,7 @@ from ai_workflow.code_review_graph import (
     sync_workspace_graphs,
     validate_graph_database,
 )
+from ai_workflow.context_broker import crg_context
 
 
 @unittest.skipUnless(
@@ -119,6 +120,37 @@ def test_handle() -> None:
             self.assertRegex(
                 manifest["repository_fingerprint"],
                 r"^[0-9a-f]{64}$",
+            )
+
+
+            structural = crg_context(
+                repo,
+                "Who calls helper?",
+                "helper",
+                None,
+                5,
+                patterns=("callers_of",),
+            )
+            self.assertEqual(len(structural), 1, structural)
+            item = structural[0]
+            self.assertEqual(item.source, "code_review_graph")
+            self.assertEqual(item.metadata["pattern"], "callers_of")
+            self.assertTrue(item.metadata["structural_valid"])
+            self.assertGreaterEqual(item.metadata["result_count"], 1)
+
+            normalized = json.loads(item.text)
+            self.assertEqual(normalized["status"], "ok")
+            self.assertEqual(normalized["pattern"], "callers_of")
+            self.assertTrue(
+                any(
+                    "handle" in str(row.get("name", "")).lower()
+                    or "handle" in str(
+                        row.get("qualified_name", "")
+                    ).lower()
+                    for row in normalized.get("results", [])
+                    if isinstance(row, dict)
+                ),
+                normalized,
             )
 
 
