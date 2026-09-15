@@ -248,5 +248,78 @@ class WorkflowEngineTests(unittest.TestCase):
         )
 
 
+    def test_explicit_symbol_wins_over_semantic_anchor(self):
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        decision = RouteDecision(
+            Lane.FULL,
+            Risk.MEDIUM,
+            structural_context=True,
+            confidence=0.9,
+        )
+        budget = ContextBudget(6000, 1200, 24000, {})
+        seen = []
+
+        def base(*args, **kwargs):
+            return [ContextItem("lightweight_index", "payment evidence", 0.1)]
+
+        def semantic(root, query, config, limit):
+            return ProviderResult(
+                "semantic",
+                (
+                    ContextItem(
+                        "semantic",
+                        "wrong.py:1 guessed handler",
+                        0.95,
+                        False,
+                        {"path": "wrong.py", "symbol": "WrongAnchor"},
+                    ),
+                ),
+            )
+
+        def structural(
+            root,
+            query,
+            symbol,
+            changed_files,
+            limit,
+            *,
+            patterns=(),
+        ):
+            seen.append(symbol)
+            return [
+                ContextItem(
+                    "code_review_graph",
+                    "Caller -> ProcessPayment",
+                    9.0,
+                    False,
+                    {
+                        "pattern": "callers_of",
+                        "structural_valid": True,
+                        "result_count": 1,
+                    },
+                )
+            ]
+
+        with tempfile.TemporaryDirectory() as td:
+            engine = WorkflowEngine(
+                base_gather=base,
+                semantic_provider=semantic,
+                structural_provider=structural,
+            )
+            engine.gather_detailed(
+                Path(td),
+                "Who calls ProcessPayment?",
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(False, True, False, False, True),
+                symbol="ProcessPayment",
+            )
+
+        self.assertEqual(seen, ["ProcessPayment"])
+
+
 if __name__ == "__main__":
     unittest.main()
