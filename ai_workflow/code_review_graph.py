@@ -206,7 +206,11 @@ def graph_exists(workspace_root: Path, repository_root: Path) -> bool:
 def any_graph_ready(workspace_root: Path, config: dict | None = None) -> bool:
     if shutil.which("code-review-graph") is None:
         return False
-    for row in managed_repositories(workspace_root, config):
+    try:
+        rows = managed_repositories(workspace_root, config)
+    except (PathOutsideWorkspace, OSError):
+        return False
+    for row in rows:
         try:
             validate_graph_database(row["data_dir"] / "graph.db")
         except (GraphValidationError, OSError):
