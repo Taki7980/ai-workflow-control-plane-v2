@@ -78,6 +78,12 @@ class RetrievalPolicyTests(unittest.TestCase):
             structural_requirements("What is the blast radius of this change?"),
             ("impact",),
         )
+        self.assertEqual(
+            structural_requirements(
+                "What callers depend on ProcessPayment?"
+            ),
+            ("callers_of",),
+        )
 
     def test_sufficiency_is_bounded_and_requires_structural_evidence(self):
         items = [
