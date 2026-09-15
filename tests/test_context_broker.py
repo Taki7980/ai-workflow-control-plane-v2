@@ -130,29 +130,45 @@ class StructuralFallbackTests(unittest.TestCase):
             self.assertTrue(items)
             fallback.assert_not_called()
 
-    def test_crg_invocation_args(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            calls = []
-            def fake_run(root, args, timeout=8):
-                calls.append(args)
-                return "callers result"
-            import ai_workflow.context_broker as cb
-            orig = cb._run_crg
-            try:
-                cb._run_crg = fake_run
-                items = cb.crg_context(root, "my query", "TargetFunc", None, 5)
-                self.assertEqual(calls[0], ["query", "callers_of", "TargetFunc"])
-                self.assertEqual(calls[1], ["query", "callees_of", "TargetFunc"])
-                self.assertEqual(calls[2], ["query", "tests_for", "TargetFunc"])
-                self.assertEqual(len(items), 3)
-                self.assertEqual(items[0].source, "code_review_graph")
+    def test_crg_only_queries_requested_relationship(self):
+        import ai_workflow.context_broker as cb
 
-                calls.clear()
-                items2 = cb.crg_context(root, "my query", None, None, 5)
-                self.assertEqual(calls[0], ["search", "my query", "--limit", "5"])
-            finally:
-                cb._run_crg = orig
+        calls = []
+
+        def fake_run(root, args, timeout=8):
+            calls.append(args)
+            return {
+                "status": "ok",
+                "pattern": "callers_of",
+                "target": "TargetFunc",
+                "result_count": 1,
+                "results": [
+                    {
+                        "name": "Caller",
+                        "qualified_name": "service.py::Caller",
+                        "file_path": "service.py",
+                    }
+                ],
+                "edges": [{"kind": "CALLS"}],
+            }
+
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb, "_run_crg", side_effect=fake_run
+        ):
+            items = cb.crg_context(
+                Path(td),
+                "Who calls TargetFunc?",
+                "TargetFunc",
+                None,
+                5,
+            )
+
+        self.assertEqual(calls, [["query", "callers_of", "TargetFunc"]])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].source, "code_review_graph")
+        self.assertEqual(items[0].metadata["pattern"], "callers_of")
+        self.assertTrue(items[0].metadata["structural_valid"])
+        self.assertEqual(items[0].metadata["result_count"], 1)
 
     def test_structural_query_falls_back_to_source_without_crg(self):
         cfg = json.loads((Path(__file__).parents[1]/'ai-workspace/config/control-plane.json').read_text())
@@ -163,3 +179,179 @@ class StructuralFallbackTests(unittest.TestCase):
             decision=RouteDecision(Lane.FULL,Risk.MEDIUM,['structural'],True)
             items=gather(root,'blast radius ProcessPayment',decision,budget_for(Lane.FULL,cfg),cfg,ProviderStatus(False,False,False,False),symbol='ProcessPayment')
             self.assertTrue(any(i.source == 'targeted_source' for i in items))
+
+class StructuralCRGContractTests(unittest.TestCase):
+    def test_blast_radius_uses_impact_evidence(self):
+        import ai_workflow.context_broker as cb
+
+        calls = []
+
+        def fake_run(root, args, timeout=8):
+            calls.append(args)
+            return {
+                "status": "ok",
+                "summary": "1 impacted node",
+                "total_impacted": 1,
+                "impacted_nodes": [
+                    {
+                        "name": "CheckoutService",
+                        "file_path": "checkout.py",
+                    }
+                ],
+                "impacted_files": ["checkout.py"],
+                "edges": [{"kind": "CALLS"}],
+                "truncated": False,
+            }
+
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb, "_run_crg", side_effect=fake_run
+        ):
+            items = cb.crg_context(
+                Path(td),
+                "What is the blast radius of this change?",
+                None,
+                ["service.py"],
+                5,
+            )
+
+        self.assertEqual(calls, [["impact", "--files", "service.py"]])
+        self.assertEqual(items[0].metadata["pattern"], "impact")
+        self.assertTrue(items[0].metadata["structural_valid"])
+
+    def test_crg_search_result_becomes_anchor_before_relationship_query(self):
+        import ai_workflow.context_broker as cb
+
+        calls = []
+
+        def fake_run(root, args, timeout=8):
+            calls.append(args)
+            if args[0] == "search":
+                return {
+                    "status": "ok",
+                    "query": "Who calls the payment retry handler?",
+                    "results": [
+                        {
+                            "name": "ProcessPayment",
+                            "qualified_name": "billing.py::ProcessPayment",
+                            "file_path": "billing.py",
+                            "score": 0.92,
+                        }
+                    ],
+                }
+            return {
+                "status": "ok",
+                "pattern": "callers_of",
+                "target": "billing.py::ProcessPayment",
+                "result_count": 1,
+                "results": [
+                    {
+                        "name": "CheckoutService",
+                        "qualified_name": "checkout.py::CheckoutService",
+                        "file_path": "checkout.py",
+                    }
+                ],
+                "edges": [{"kind": "CALLS"}],
+            }
+
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb, "_run_crg", side_effect=fake_run
+        ):
+            items = cb.crg_context(
+                Path(td),
+                "Who calls the payment retry handler?",
+                None,
+                None,
+                5,
+            )
+
+        self.assertEqual(calls[0][0], "search")
+        self.assertEqual(
+            calls[1],
+            ["query", "callers_of", "billing.py::ProcessPayment"],
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].metadata["pattern"], "callers_of")
+        self.assertEqual(
+            items[0].metadata["anchor"],
+            "billing.py::ProcessPayment",
+        )
+
+    def test_verified_empty_relation_is_retained_as_structural_evidence(self):
+        import ai_workflow.context_broker as cb
+
+        payload = {
+            "status": "ok",
+            "pattern": "callers_of",
+            "target": "TargetFunc",
+            "result_count": 0,
+            "results": [],
+            "edges": [],
+            "confidence": (
+                "'TargetFunc' is indexed and the graph is current, "
+                "so this 0 is a real absence"
+            ),
+        }
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb, "_run_crg", return_value=payload
+        ):
+            items = cb.crg_context(
+                Path(td),
+                "Who calls TargetFunc?",
+                "TargetFunc",
+                None,
+                5,
+            )
+
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0].metadata["empty_verified"])
+        self.assertTrue(items[0].metadata["structural_valid"])
+
+    def test_unverified_empty_relation_does_not_claim_structural_completion(self):
+        import ai_workflow.context_broker as cb
+
+        payload = {
+            "status": "ok",
+            "pattern": "callers_of",
+            "target": "TargetFunc",
+            "result_count": 0,
+            "results": [],
+            "edges": [],
+            "confidence": (
+                "'TargetFunc' is indexed and no such edge is recorded; "
+                "graph currency unverified"
+            ),
+        }
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb, "_run_crg", return_value=payload
+        ):
+            items = cb.crg_context(
+                Path(td),
+                "Who calls TargetFunc?",
+                "TargetFunc",
+                None,
+                5,
+            )
+
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0].metadata["empty_verified"])
+        self.assertFalse(items[0].metadata["structural_valid"])
+
+    def test_run_crg_rejects_malformed_json(self):
+        from types import SimpleNamespace
+        import ai_workflow.context_broker as cb
+
+        proc = SimpleNamespace(
+            returncode=0,
+            stdout="{not-json",
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            cb.shutil, "which", return_value="code-review-graph"
+        ), patch.object(
+            cb, "graph_exists", return_value=True
+        ), patch.object(
+            cb.subprocess, "run", return_value=proc
+        ):
+            result = cb._run_crg(Path(td), ["search", "query"])
+
+        self.assertIsNone(result)
