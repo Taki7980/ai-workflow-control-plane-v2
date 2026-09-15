@@ -38,6 +38,22 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
+
+  crg-contract:
+    name: Code Review Graph contract (2.3.8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned Code Review Graph
+        run: python -m pip install "code-review-graph==2.3.8"
+      - name: Verify pinned CRG executable
+        run: code-review-graph --version
+      - name: Run real graph contract test
+        run: python -m unittest tests.integration.test_code_review_graph_real -v
+
   quality:
     runs-on: ubuntu-latest
     steps:
