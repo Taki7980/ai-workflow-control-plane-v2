@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import FrozenInstanceError
 import importlib.util
 import json
 import os
@@ -38,7 +39,7 @@ class ProviderBoundaryContractTests(unittest.TestCase):
 
         self.assertEqual(request.query, "find payment handler")
         self.assertEqual(result.items, (item,))
-        with self.assertRaises(Exception):
+        with self.assertRaises(FrozenInstanceError):
             request.query = "mutated"
 
     def test_workspace_path_policy_rejects_absolute_parent_and_symlink_escape(self):
