@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 
+from .indexer import index_data_dir
 from .models import ContextItem
 from .provider_registry import resolve_project_provider, unsafe_repo_commands_enabled
 from .provider_runner import run_command_provider
@@ -120,7 +121,7 @@ def _builtin_semantic_result(
     limit: int,
 ) -> ProviderResult:
     root = Path(root).resolve()
-    generated = root / "ai-workspace" / "generated"
+    generated = index_data_dir(root)
     ranked: list[tuple[float, dict]] = []
     for filename in ("symbol-index.jsonl", "endpoint-index.jsonl"):
         for row in _index_rows(generated / filename):
