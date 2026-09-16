@@ -319,13 +319,14 @@ def _spec_for_directory(
     included: bool = False,
     reason: str = "discovered",
 ) -> RepositorySpec | None:
+    git_dir = _git_dir(directory)
+    if git_dir is None:
+        return None
+
     metadata = _git_metadata(directory)
     if metadata is not None:
         git_dir, raw_remote, head_ref, head_sha = metadata
     else:
-        git_dir = _git_dir(directory)
-        if git_dir is None:
-            return None
         raw_remote = _read_remote(git_dir)
         head_ref, head_sha = _read_head(git_dir)
 
