@@ -551,7 +551,7 @@ async def run_command_provider_async(
             exchange(),
             timeout=effective_timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if proc.returncode is None:
             _terminate_provider_tree(proc)
         await proc.wait()

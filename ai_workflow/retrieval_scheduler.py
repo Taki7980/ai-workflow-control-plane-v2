@@ -68,7 +68,7 @@ class BoundedRetrievalScheduler:
             try:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
-                    raise asyncio.TimeoutError
+                    raise TimeoutError
                 future = loop.run_in_executor(executor, call.fn)
                 value = await asyncio.wait_for(future, timeout=remaining)
                 return SchedulerOutcome(
@@ -76,7 +76,7 @@ class BoundedRetrievalScheduler:
                     value=value,
                     latency_ms=(time.perf_counter() - started) * 1000,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return SchedulerOutcome(
                     label=call.label,
                     latency_ms=(time.perf_counter() - started) * 1000,
