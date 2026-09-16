@@ -40,7 +40,7 @@ class CIQualityContractTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "coverage report --show-missing --fail-under=80",
+            "coverage report --fail-under=80 --show-missing",
             workflow,
         )
         self.assertNotIn("--fail-under=65", workflow)
