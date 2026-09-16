@@ -81,7 +81,10 @@ def _load_registry(root: Path) -> Mapping[str, Any]:
     return payload["providers"]
 
 
-def _validated_executable(root: Path, raw: Mapping[str, Any]) -> tuple[str, tuple[str, ...]]:
+def _validated_executable(
+    root: Path,
+    raw: Mapping[str, Any],
+) -> tuple[str, tuple[str, ...], str]:
     command = raw.get("command")
     if not isinstance(command, (list, tuple)) or not command:
         raise ValueError("trusted provider command must be a non-empty argv array")
@@ -90,6 +93,8 @@ def _validated_executable(root: Path, raw: Mapping[str, Any]) -> tuple[str, tupl
     executable = Path(argv[0]).expanduser()
     if not executable.is_absolute():
         raise ValueError("trusted provider executable must be an absolute path")
+    if executable.is_symlink():
+        raise ValueError("trusted provider executable path may not be a symlink")
     try:
         executable = executable.resolve(strict=True)
     except OSError as exc:
@@ -130,7 +135,7 @@ def _validated_executable(root: Path, raw: Mapping[str, Any]) -> tuple[str, tupl
                 "trusted provider command may not execute repository-owned path arguments"
             )
 
-    return str(executable), (str(executable), *argv[1:])
+    return str(executable), (str(executable), *argv[1:]), expected
 
 
 def _positive_cap(value: Any, fallback: int | float) -> int | float:
@@ -164,10 +169,15 @@ def resolve_trusted_provider(
     if not isinstance(trusted, dict):
         raise ValueError(f"trusted provider is not registered: {provider_id}")
 
-    _executable, argv = _validated_executable(root, trusted)
+    _executable, argv, executable_sha256 = _validated_executable(
+        root,
+        trusted,
+    )
     trusted_raw = dict(trusted)
     trusted_raw["name"] = str(trusted.get("name") or provider_id)
     trusted_raw["command"] = list(argv)
+    trusted_raw["sha256"] = executable_sha256
+    trusted_raw.setdefault("neutral_cwd", True)
     trusted_spec = command_provider_spec(trusted_raw, default_name=provider_id)
 
     requested_timeout = float(
@@ -194,6 +204,7 @@ def resolve_trusted_provider(
         max_output_bytes=min(trusted_spec.max_output_bytes, requested_output),
         intents=project_intents,
         executable_trust="trusted_registry_digest",
+        executable_sha256=executable_sha256,
     )
 
 
@@ -214,6 +225,14 @@ def resolve_project_provider(
             forbidden.append("env_allowlist")
         if raw.get("sha256") not in (None, ""):
             forbidden.append("sha256")
+        if raw.get("executable_sha256") not in (None, ""):
+            forbidden.append("executable_sha256")
+        if raw.get("neutral_cwd") is not None:
+            forbidden.append("neutral_cwd")
+        if raw.get("max_stderr_bytes") is not None:
+            forbidden.append("max_stderr_bytes")
+        if raw.get("version") not in (None, ""):
+            forbidden.append("version")
         if raw.get("semantics") not in (None, {}):
             forbidden.append("semantics")
         if forbidden:
