@@ -205,10 +205,31 @@ jobs:
         run: |
           python -m ai_workflow --root "$BENCHMARK_FIXTURE" benchmark-corpus snapshot \
             --repository . --strict > "$RUNNER_TEMP/research-snapshot.json"
-      - name: Build frozen fixture index and validate installation contract
+      - name: Build frozen fixture index and validate index contract
+        shell: bash
         run: |
           python -m ai_workflow --root "$BENCHMARK_FIXTURE" index
-          python -m ai_workflow --root "$BENCHMARK_FIXTURE" doctor --strict
+          # The frozen benchmark commit intentionally predates current repository
+          # hygiene policy. Validate index health without treating historical
+          # tracked artifacts as current-workspace hygiene failures.
+          python -m ai_workflow --root "$BENCHMARK_FIXTURE" doctor \
+            > "$RUNNER_TEMP/benchmark-doctor.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          data = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "benchmark-doctor.json").read_text()
+          )
+          assert data["index"]["present"] is True
+          assert data["index"]["stale_files"] == 0
+          assert data["repository_indexes"]
+          assert all(
+              row["present"] and row["stale_files"] == 0
+              for row in data["repository_indexes"]
+          )
+          PY
       - name: Verify fixture remains clean after index
         shell: bash
         run: |
