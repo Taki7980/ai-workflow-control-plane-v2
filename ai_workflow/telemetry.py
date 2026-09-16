@@ -213,7 +213,7 @@ def _resolve_config(root: Path, config: dict | None) -> dict:
     try:
         from .config import load_config
         return load_config(root)
-    except Exception:
+    except (OSError, ValueError, KeyError, TypeError):
         return {}
 
 
