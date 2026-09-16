@@ -8,7 +8,13 @@ from .code_review_graph import (
     graph_exists,
     graph_freshness,
 )
-from .indexer import load_state, row_fresh, sha256
+from .indexer import (
+    index_data_dir,
+    load_state,
+    nested_repository_paths,
+    row_fresh,
+    sha256,
+)
 from .repository_registry import load_registry
 from .workspace import registry_spec_to_root
 from .memory import search_memory
@@ -169,8 +175,9 @@ def _cap_items(items: list[ContextItem], chars: int, seen_keys: set[str] | None 
 
 def hot_cache(root: Path, query: str, limit: int) -> list[ContextItem]:
     rows = []
+    workspace = find_workspace_root(root)
     for name in ["hot-cache.jsonl", "incident-cache.jsonl"]:
-        for r in _jsonl(root / "ai-workspace" / "generated" / name):
+        for r in _jsonl(workspace / "ai-workspace" / "generated" / name):
             text = json.dumps(r, ensure_ascii=False, separators=(",", ":"))
             s = _score(query, text)
             if s: rows.append(ContextItem("hot_cache", text, float(s), False, {"cache": name}))
@@ -279,24 +286,26 @@ def lightweight(
     include_project_knowledge: bool = True,
 ) -> list[ContextItem]:
     state = load_state(root)
+    generated = index_data_dir(root)
+    workspace = find_workspace_root(root)
     out: list[ContextItem] = []
-    for r in _jsonl(root / "ai-workspace" / "generated" / "symbol-index.jsonl"):
+    for r in _jsonl(generated / "symbol-index.jsonl"):
         target = symbol or query
         s = 10 if symbol and r.get("symbol", "").lower() == symbol.lower() else _score(target, f"{r.get('symbol','')} {r.get('file','')}")
         if s:
             fresh = row_fresh(root, r, state)
             if fresh:
                 out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "symbol"}))
-    for r in _jsonl(root / "ai-workspace" / "generated" / "endpoint-index.jsonl"):
+    for r in _jsonl(generated / "endpoint-index.jsonl"):
         target = endpoint or query
         s = 10 if endpoint and endpoint.lower() in r.get("path", "").lower() else _score(target, f"{r.get('method','')} {r.get('path','')} {r.get('file','')}")
         if s and row_fresh(root, r, state):
             out.append(ContextItem("lightweight_index", json.dumps(r, separators=(",", ":")), float(s), False, {"kind": "endpoint"}))
     if include_project_knowledge:
-        out.extend(_domain_hints(root, query, limit))
-        out.extend(_research_hits(root, query, limit))
+        out.extend(_domain_hints(workspace, query, limit))
+        out.extend(_research_hits(workspace, query, limit))
         for m in search_memory(
-            root,
+            workspace,
             query,
             limit=limit,
             minimum_confidence=min_conf,
@@ -605,33 +614,113 @@ def crg_context(
     return results[:limit]
 
 
-def targeted_source(root: Path, query: str, limit: int) -> list[ContextItem]:
+def targeted_source(
+    root: Path,
+    query: str,
+    limit: int,
+) -> list[ContextItem]:
     terms = [x for x in re.split(r"\W+", query) if len(x) >= 4][:4]
     if not terms:
         return []
-    pattern = "|".join(re.escape(t) for t in terms)
+    pattern = "|".join(re.escape(term) for term in terms)
+    nested = nested_repository_paths(root)
+
     if shutil.which("rg"):
         try:
-            p = subprocess.run(["rg", "-n", "--no-heading", "-m", "2",
-                "--glob", "!ai-workspace/generated/**", "--glob", "!.ai/**", "--glob", "!**/.git/**", "--glob", "!**/node_modules/**",
-                pattern, "."], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=6, check=False)
-            lines = [x for x in p.stdout.splitlines() if not any(seg in x for seg in ("ai-workspace/generated", ".git/"))][:limit]
-            return [ContextItem("targeted_source", x, 1.0) for x in lines]
+            command = [
+                "rg",
+                "-n",
+                "--no-heading",
+                "-m",
+                "2",
+                "--glob",
+                "!ai-workspace/**",
+                "--glob",
+                "!.ai/**",
+                "--glob",
+                "!**/.git/**",
+                "--glob",
+                "!**/node_modules/**",
+            ]
+            for relative in nested:
+                command.extend(["--glob", f"!{relative}/**"])
+            command.extend([pattern, "."])
+            proc = subprocess.run(
+                command,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=6,
+                check=False,
+            )
+            lines = proc.stdout.splitlines()[:limit]
+            return [
+                ContextItem("targeted_source", line, 1.0)
+                for line in lines
+            ]
         except (OSError, subprocess.TimeoutExpired):
             pass
-    out = []
-    excluded = {".git", "node_modules", "dist", "build", "venv", ".venv", "__pycache__"}
-    for p in root.rglob("*"):
-        if len(out) >= limit: break
-        if not p.is_file() or any(x in excluded for x in p.relative_to(root).parts) or "ai-workspace/generated" in p.relative_to(root).as_posix(): continue
+
+    out: list[ContextItem] = []
+    excluded = {
+        ".git",
+        "node_modules",
+        "dist",
+        "build",
+        "venv",
+        ".venv",
+        "__pycache__",
+        "ai-workspace",
+        ".ai",
+    }
+
+    def inside_nested(relative: str) -> bool:
+        return any(
+            relative == prefix
+            or relative.startswith(prefix.rstrip("/") + "/")
+            for prefix in nested
+        )
+
+    for path in root.rglob("*"):
+        if len(out) >= limit:
+            break
+        if not path.is_file():
+            continue
         try:
-            if p.stat().st_size > 500_000: continue
-            for i, line in enumerate(p.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        relative_text = relative.as_posix()
+        if (
+            any(part in excluded for part in relative.parts)
+            or inside_nested(relative_text)
+        ):
+            continue
+        try:
+            if path.stat().st_size > 500_000:
+                continue
+            for line_number, line in enumerate(
+                path.read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                ).splitlines(),
+                1,
+            ):
                 if re.search(pattern, line, re.I):
-                    out.append(ContextItem("targeted_source", f"{p.relative_to(root).as_posix()}:{i}: {line.strip()}", 1.0))
-                    if len(out) >= limit: break
-        except OSError: continue
+                    out.append(
+                        ContextItem(
+                            "targeted_source",
+                            f"{relative_text}:{line_number}: {line.strip()}",
+                            1.0,
+                        )
+                    )
+                    if len(out) >= limit:
+                        break
+        except OSError:
+            continue
     return out
+
 
 def gather(root: Path, query: str, decision: RouteDecision, budget: ContextBudget, config: dict, providers: ProviderStatus, symbol: str | None = None, endpoint: str | None = None, changed_files: list[str] | None = None) -> list[ContextItem]:
     limit = int(config["context"].get("max_results_per_source", 6))
