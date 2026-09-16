@@ -44,7 +44,7 @@ class BM25Scorer:
         self._idf.clear()
         
         total_len = 0
-        for idx, (text, obj) in enumerate(zip(texts, objects)):
+        for idx, (text, obj) in enumerate(zip(texts, objects, strict=True)):
             tks = tokenize(text)
             tks_set = set(tks)
             term_freq = dict(Counter(tks))
