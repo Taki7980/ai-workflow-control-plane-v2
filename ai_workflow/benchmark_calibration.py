@@ -74,7 +74,7 @@ def deterministic_stratified_split(
 
     calibration: list[dict[str, Any]] = []
     holdout: list[dict[str, Any]] = []
-    for label, group in sorted(by_label.items()):
+    for _label, group in sorted(by_label.items()):
         ranked = sorted(
             group,
             key=lambda pair: (
@@ -177,7 +177,7 @@ def candidate_thresholds(rows: list[dict[str, Any]]) -> list[float]:
     if not scores:
         return []
     thresholds = {0.0, 1.0, *scores}
-    for left, right in zip(scores, scores[1:]):
+    for left, right in zip(scores, scores[1:], strict=False):
         thresholds.add((left + right) / 2.0)
     return sorted(thresholds)
 
