@@ -1,12 +1,55 @@
+# Python bytecode and environments
 __pycache__/
 *.py[cod]
+*.pyo
 .venv/
 venv/
+env/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / quality-tool state
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+junit*.xml
+
+# Editors / OS metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials/
+secrets/
+
+# Legacy / provider-local state
 .code-review-graph/
 .ai/
+
+# AI Workflow generated / machine-local state
 ai-workspace/code-review-graph/
 ai-workspace/generated/*
 !ai-workspace/generated/.gitkeep
+ai-workspace/indexes/
 ai-workspace/memory/*
 !ai-workspace/memory/README.md
+ai-workspace/config/repositories.json
+
+# Runtime logs
 *.log
