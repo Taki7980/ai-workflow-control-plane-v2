@@ -776,77 +776,143 @@ async def run_command_provider_async(
     source: str,
     metadata_defaults: Mapping[str, Any] | None = None,
 ) -> ProviderResult:
-    """Run a command provider with native asyncio subprocess handling."""
+    """Run a command provider with the same launch trust policy as sync."""
 
     started = time.perf_counter()
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *spec.command,
-            cwd=_provider_cwd(spec, request),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=build_provider_env(spec.env_allowlist),
-            **_provider_process_group_kwargs(),
-        )
-    except (OSError, ValueError) as exc:
+        with _provider_launch_cwd(spec, request) as cwd:
+            try:
+                command = _verified_command(spec, request.root)
+            except ProviderTrustError as exc:
+                return _provider_trust_result(spec, started, exc)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=cwd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=build_provider_env(spec.env_allowlist),
+                    **_provider_process_group_kwargs(),
+                )
+            except (OSError, ValueError) as exc:
+                return ProviderResult(
+                    provider=spec.name,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    error=f"provider could not be started: {type(exc).__name__}",
+                    error_kind="launch",
+                )
+
+            effective_timeout = min(
+                float(spec.timeout_seconds),
+                float(request.timeout_seconds),
+            )
+
+            async def exchange() -> tuple[bytes, bool, int, bytes, bool]:
+                assert proc.stdout is not None
+                assert proc.stderr is not None
+                stdout_task = asyncio.create_task(
+                    _bounded_async_reader(
+                        proc.stdout,
+                        spec.max_output_bytes,
+                    )
+                )
+                stderr_task = asyncio.create_task(
+                    _bounded_async_tail_reader(
+                        proc.stderr,
+                        spec.max_stderr_bytes,
+                    )
+                )
+                try:
+                    if proc.stdin is not None:
+                        try:
+                            proc.stdin.write(_request_payload(request))
+                            await proc.stdin.drain()
+                        except (
+                            BrokenPipeError,
+                            ConnectionResetError,
+                            OSError,
+                        ):
+                            pass
+                        finally:
+                            proc.stdin.close()
+
+                    output_bytes, output_exceeded = await stdout_task
+                    if output_exceeded and proc.returncode is None:
+                        _terminate_provider_tree(proc)
+                    stderr_bytes, stderr_was_truncated = await stderr_task
+                    returncode = await proc.wait()
+                    return (
+                        output_bytes,
+                        output_exceeded,
+                        returncode,
+                        stderr_bytes,
+                        stderr_was_truncated,
+                    )
+                finally:
+                    for task in (stdout_task, stderr_task):
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(
+                        stdout_task,
+                        stderr_task,
+                        return_exceptions=True,
+                    )
+
+            exchange_task = asyncio.create_task(exchange())
+            timed_out = False
+            try:
+                (
+                    output,
+                    exceeded,
+                    returncode,
+                    stderr_output,
+                    stderr_truncated,
+                ) = await asyncio.wait_for(
+                    asyncio.shield(exchange_task),
+                    timeout=effective_timeout,
+                )
+            except TimeoutError:
+                timed_out = True
+                if proc.returncode is None:
+                    _terminate_provider_tree(proc)
+                await proc.wait()
+                try:
+                    (
+                        output,
+                        exceeded,
+                        returncode,
+                        stderr_output,
+                        stderr_truncated,
+                    ) = await exchange_task
+                except Exception:
+                    output = b""
+                    exceeded = False
+                    returncode = proc.returncode
+                    stderr_output = b""
+                    stderr_truncated = False
+            except asyncio.CancelledError:
+                if proc.returncode is None:
+                    _terminate_provider_tree(proc)
+                await proc.wait()
+                if not exchange_task.done():
+                    exchange_task.cancel()
+                await asyncio.gather(
+                    exchange_task,
+                    return_exceptions=True,
+                )
+                raise
+    except OSError as exc:
         return ProviderResult(
             provider=spec.name,
             latency_ms=(time.perf_counter() - started) * 1000,
-            error=f"provider could not be started: {type(exc).__name__}",
+            error=f"provider cwd could not be created: {type(exc).__name__}",
             error_kind="launch",
         )
 
-    effective_timeout = min(
-        float(spec.timeout_seconds),
-        float(request.timeout_seconds),
-    )
-
-    async def exchange() -> tuple[bytes, bool, int]:
-        if proc.stdin is not None:
-            try:
-                proc.stdin.write(_request_payload(request))
-                await proc.stdin.drain()
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                pass
-            finally:
-                proc.stdin.close()
-        assert proc.stdout is not None
-        output, exceeded = await _bounded_async_reader(
-            proc.stdout,
-            spec.max_output_bytes,
-        )
-        if exceeded and proc.returncode is None:
-            _terminate_provider_tree(proc)
-        returncode = await proc.wait()
-        return output, exceeded, returncode
-
-    try:
-        output, exceeded, returncode = await asyncio.wait_for(
-            exchange(),
-            timeout=effective_timeout,
-        )
-    except TimeoutError:
-        if proc.returncode is None:
-            _terminate_provider_tree(proc)
-        await proc.wait()
-        return ProviderResult(
-            provider=spec.name,
-            latency_ms=(time.perf_counter() - started) * 1000,
-            error=f"provider timed out after {effective_timeout:g} seconds",
-            error_kind="timeout",
-            timed_out=True,
-            returncode=proc.returncode,
-        )
-    except asyncio.CancelledError:
-        if proc.returncode is None:
-            _terminate_provider_tree(proc)
-        await proc.wait()
-        raise
-
     latency_ms = (time.perf_counter() - started) * 1000
     if exceeded:
-        return ProviderResult(
+        result = ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
             error=f"provider output exceeded {spec.max_output_bytes} bytes",
@@ -854,20 +920,36 @@ async def run_command_provider_async(
             output_limited=True,
             returncode=returncode,
         )
-    if returncode != 0:
-        return ProviderResult(
+    elif timed_out:
+        result = ProviderResult(
+            provider=spec.name,
+            latency_ms=latency_ms,
+            error=f"provider timed out after {effective_timeout:g} seconds",
+            error_kind="timeout",
+            timed_out=True,
+            returncode=returncode,
+        )
+    elif returncode != 0:
+        result = ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
             error=f"provider exited with status {returncode}",
             error_kind="exit",
             returncode=returncode,
         )
-    return _result_from_bytes(
+    else:
+        result = _result_from_bytes(
+            spec,
+            request,
+            source,
+            metadata_defaults,
+            output,
+            latency_ms,
+            returncode,
+        )
+    return _attach_stderr(
+        result,
         spec,
-        request,
-        source,
-        metadata_defaults,
-        output,
-        latency_ms,
-        returncode,
+        stderr_output,
+        stderr_truncated,
     )
