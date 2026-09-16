@@ -1,12 +1,38 @@
 param(
-    [string]$Version = "2.3.0",
+    [string]$Version = "",
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\AIWorkflow")
 )
 
 $ErrorActionPreference = "Stop"
 $Repo = "Taki7980/ai-workflow-control-plane-v2"
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Headers = @{
+        "Accept" = "application/vnd.github+json"
+        "User-Agent" = "ai-workflow-installer"
+    }
+    $Release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers $Headers
+    $Tag = [string]$Release.tag_name
+    if ($Tag -notmatch '^v(?<Version>[0-9]+\.[0-9]+\.[0-9]+)$') {
+        throw "Unable to resolve a stable AI Workflow release from releases/latest"
+    }
+    $Version = $Matches.Version
+}
+
+if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+    throw "Invalid AI Workflow release version: $Version"
+}
+
 $Asset = "ai-workflow-v$Version-windows-x86_64.exe"
 $Base = "https://github.com/$Repo/releases/download/v$Version"
+if ($env:AI_WORKFLOW_TEST_RELEASE_BASE) {
+    $TestBase = [Uri]$env:AI_WORKFLOW_TEST_RELEASE_BASE
+    if ($TestBase.Scheme -ne "http" -or $TestBase.Host -notin @("127.0.0.1", "localhost")) {
+        throw "AI_WORKFLOW_TEST_RELEASE_BASE is restricted to localhost HTTP"
+    }
+    $Base = $env:AI_WORKFLOW_TEST_RELEASE_BASE.TrimEnd("/")
+}
+
 $Temp = Join-Path $env:TEMP "ai-workflow-$Version-$PID"
 New-Item -ItemType Directory -Force -Path $Temp | Out-Null
 
@@ -32,7 +58,11 @@ try {
         $NewPath = (@($Entries) + $InstallDir) -join ";"
         [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
     }
-    Write-Host "Installed $Target"
+
+    Write-Host "Installed AI Workflow $Version to $Target"
+    Write-Host "SHA-256 verified."
+    Write-Host "Build provenance:"
+    Write-Host "  gh attestation verify `"$Target`" --repo $Repo"
 } finally {
     Remove-Item -Recurse -Force $Temp -ErrorAction SilentlyContinue
 }

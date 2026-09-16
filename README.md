@@ -127,27 +127,36 @@ Running `ai-workflow setup` at `RevenueOS/` recursively discovers and activates 
 
 ## Install
 
-Requires Python 3.11+.
+Requires Python 3.11+. Python 3.12+ is recommended for new deployments.
 
-For normal use, install AI Workflow as an isolated command-line tool instead of adding it to your project's Python environment.
-
-**Recommended — pipx:**
+For a **published** release, the preferred isolated CLI install is uv:
 
 ```bash
-pipx install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
+uv tool install ai-workflow-control-plane
 ```
 
-**Alternative — uv:**
+pipx is also first-class:
+
+```bash
+pipx install ai-workflow-control-plane
+```
+
+This PR does not publish a package by itself. If no package release is available yet, install the current Git source:
 
 ```bash
 uv tool install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
+
+# or
+pipx install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
 ```
 
-For local development of AI Workflow itself, an editable install remains appropriate:
+For local development:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
+
+After installation, `ai-workflow setup` is the canonical project entry point. Full verification, upgrade and uninstall commands are in `docs/distribution.md`.
 
 ## Quick start
 

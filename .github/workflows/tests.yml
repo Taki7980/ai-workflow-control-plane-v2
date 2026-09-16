@@ -176,6 +176,61 @@ jobs:
           uv tool install dist/*.whl
           "$UV_TOOL_BIN_DIR/ai-workflow" --version
 
+  portable-binary-smoke:
+    name: portable binary smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            exe: ""
+          - os: windows-latest
+            exe: ".exe"
+          - os: macos-latest
+            exe: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build native portable executable
+        shell: bash
+        run: |
+          python -m pip install "pyinstaller==6.22.3"
+          python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
+      - name: Smoke portable executable
+        shell: bash
+        run: '"./dist/ai-workflow${{ matrix.exe }}" --version'
+
+  docker-install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build install-smoke image
+        run: docker build --tag ai-workflow-install-smoke .
+      - name: Smoke container CLI
+        run: docker run --rm ai-workflow-install-smoke --version
+
+  bootstrap-installer-smoke:
+    name: bootstrap installer smoke (${{ matrix.installer }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            installer: shell
+          - os: windows-latest
+            installer: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Run deterministic bootstrap installer smoke
+        run: python scripts/smoke_bootstrap_install.py --installer ${{ matrix.installer }}
+
   benchmark-regression:
     runs-on: ubuntu-latest
     steps:
