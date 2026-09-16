@@ -41,6 +41,7 @@ class ProviderSemanticsAndResourceTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.stdin = io.BytesIO()
                 self.stdout = io.BytesIO(b'[{"text":"evidence","score":1.0}]')
+                self.stderr = io.BytesIO()
                 self.returncode = 0
 
             def wait(self, timeout=None):
@@ -62,6 +63,7 @@ class ProviderSemanticsAndResourceTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertTrue(process.stdin.closed)
         self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
 
 
 class ProvenanceAndCacheTests(unittest.TestCase):
