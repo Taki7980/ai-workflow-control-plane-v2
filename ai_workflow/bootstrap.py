@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .code_review_graph import sync_workspace_graphs
 from .config import DEFAULT_RELATIVE, default_config, load_config
-from .indexer import build_indexes, incremental_indexes
+from .indexer import index_workspace
 from .io_utils import atomic_write_json, atomic_write_text
 from .repository_registry import refresh_registry, registry_payload
 
@@ -34,18 +34,12 @@ def _project_name(root: Path, explicit: str | None) -> str:
     return root.resolve().name or "Project"
 
 
-def _index(root: Path, mode: str) -> dict:
-    normalized = str(mode or "auto").lower()
-    if normalized not in {"auto", "full", "incremental", "none"}:
-        raise ValueError("index_mode must be auto, full, incremental, or none")
-    if normalized == "none":
-        return {"mode": "skipped", "reason": "disabled"}
-    state_path = root / "ai-workspace" / "generated" / "index-state.json"
-    effective = normalized
-    if normalized == "auto":
-        effective = "incremental" if state_path.exists() else "full"
-    result = incremental_indexes(root) if effective == "incremental" else build_indexes(root)
-    return {"mode": effective, **result}
+def _index(root: Path, mode: str, config: dict) -> dict:
+    return index_workspace(
+        root,
+        config,
+        mode=mode,
+    )
 
 
 def _write_project_rules(root: Path, name: str, legacy_root_files: bool, created: list[str], preserved: list[str]) -> None:
@@ -181,7 +175,7 @@ def setup(
         preserved=preserved,
     )
 
-    index = _index(root, index_mode)
+    index = _index(root, index_mode, config)
     crg = (
         sync_workspace_graphs(root, config)
         if sync_crg
