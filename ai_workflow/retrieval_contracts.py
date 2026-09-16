@@ -41,6 +41,8 @@ class ProviderResult:
     timed_out: bool = False
     output_limited: bool = False
     returncode: int | None = None
+    stderr_tail: str | None = None
+    stderr_truncated: bool = False
 
     @property
     def ok(self) -> bool:
@@ -55,6 +57,8 @@ class ProviderResult:
             "timed_out": self.timed_out,
             "output_limited": self.output_limited,
             "returncode": self.returncode,
+            "stderr_tail": self.stderr_tail,
+            "stderr_truncated": self.stderr_truncated,
         }
 
 
