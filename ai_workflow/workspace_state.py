@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .indexer import index_data_dir
 from .path_policy import PathOutsideWorkspace, resolve_within_root
 from .repository_registry import load_registry, remote_identity, repository_id
 from .workspace import workspace_roots
@@ -64,7 +65,7 @@ def _git_remote_identity(root: Path) -> str | None:
 
 
 def _stable_index_identity(root: Path) -> dict[str, Any] | None:
-    index_path = root / "ai-workspace" / "generated" / "index-state.json"
+    index_path = index_data_dir(root) / "index-state.json"
     if not index_path.exists():
         return None
     try:
