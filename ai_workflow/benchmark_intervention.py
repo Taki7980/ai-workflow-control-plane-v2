@@ -163,7 +163,7 @@ def build_seed_intervention_manifest(
 
     interventions: list[dict[str, Any]] = []
     for index, (case, row) in enumerate(
-        zip(benchmark_tasks, benchmark["cases"]),
+        zip(benchmark_tasks, benchmark["cases"], strict=True),
         1,
     ):
         gold_files = [
