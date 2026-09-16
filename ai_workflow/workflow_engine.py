@@ -209,7 +209,14 @@ def _structural_anchor(
 ) -> tuple[str | None, str | None, Path | None]:
     """Return the first bounded symbol/path anchor and its repository."""
 
-    for item in items:
+    for item in sorted(
+        items,
+        key=lambda candidate: (
+            bool(candidate.stale),
+            -candidate.score,
+            candidate.dedupe_key,
+        ),
+    ):
         metadata = dict(item.metadata)
         symbol = str(
             metadata.get("symbol")
