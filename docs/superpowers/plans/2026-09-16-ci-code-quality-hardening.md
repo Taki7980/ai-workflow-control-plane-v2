@@ -36,7 +36,7 @@
 **Interfaces:**
 - `ruff check ai_workflow tests security_tests scripts`
 - `[tool.ruff.lint]` owns the stable rule selection.
-- Initial stable rule families: `E4,E7,E9,F,UP,B,BLE,EXE,I,SIM,PERF,RUF`.
+- Initial blocking correctness families: `E9,F,B,BLE,EXE`. Import sorting and style-only modernization remain measured debt for later cleanup so this PR does not become a mass-format rewrite.
 - Narrow per-file ignores are allowed only where the code's trust-boundary behavior intentionally triggers a rule.
 
 - [ ] Add a failing workflow/config contract test proving the current workflow still enumerates files.
