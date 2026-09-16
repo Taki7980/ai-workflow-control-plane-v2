@@ -26,6 +26,8 @@ from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_STDERR_BYTES = 64 * 1024
+
+
 def _provider_process_group_kwargs() -> dict[str, Any]:
     """Launch each provider in an isolated OS process group/session."""
 
@@ -554,13 +556,13 @@ async def _bounded_async_tail_reader(
         output.extend(chunk)
 
 
-_BEARER_RE = re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+")
+_BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\\b(api[-_]?key|token|password|secret)\\b"
-    r"(\\s*[:=]\\s*)([^\\s,;]+)"
+    r"(?i)\b(api[-_]?key|token|password|secret)\b"
+    r"(\s*[:=]\s*)([^\s,;]+)"
 )
 _AUTHORIZATION_RE = re.compile(
-    r"(?i)\\b(authorization\\s*:\\s*)(?:bearer\\s+)?[^\\s]+"
+    r"(?i)\b(authorization\s*:\s*)(?:bearer\s+)?[^\s]+"
 )
 
 
