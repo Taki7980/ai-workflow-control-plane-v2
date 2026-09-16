@@ -383,7 +383,7 @@ class WorkflowEngine:
         base_items: list[ContextItem] = []
         provider_errors: dict[str, dict] = {}
         deadline_labels: list[str] = []
-        for outcome, candidate_root in zip(base_outcomes, selected_roots):
+        for outcome, candidate_root in zip(base_outcomes, selected_roots, strict=True):
             trace.stage_latency_ms[outcome.label] = round(outcome.latency_ms, 2)
             if outcome.ok and isinstance(outcome.value, list):
                 trace.candidates[outcome.label] = len(outcome.value)
@@ -470,10 +470,11 @@ class WorkflowEngine:
                     for call in specialist_calls
                 ]
 
-        for outcome, kind, provider_root in zip(
+        for outcome, _kind, provider_root in zip(
             specialist_outcomes,
             specialist_kinds,
             specialist_roots,
+            strict=True,
         ):
             if not outcome.ok or not isinstance(outcome.value, ProviderResult):
                 trace.stage_latency_ms[outcome.label] = round(outcome.latency_ms, 2)
