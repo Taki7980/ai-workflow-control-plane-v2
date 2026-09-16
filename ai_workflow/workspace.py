@@ -23,19 +23,43 @@ def _registry_roots(root: Path, config: dict) -> list[Path]:
     return roots
 
 
-def workspace_roots(root: Path, config: dict) -> list[Path]:
-    """Return existing, unique repository roots with the primary root first.
+def active_repository_roots(root: Path, config: dict) -> list[Path]:
+    """Return every active code repository without retrieval-root limits."""
 
-    Registry roots are fail-closed and confined to ``root``. Legacy
-    ``workspace.roots`` remain supported as an explicit compatibility escape
-    hatch, including their historical support for absolute paths.
+    workspace = Path(root).resolve()
+    registry_roots = _registry_roots(workspace, config)
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    if is_git_repository(workspace):
+        roots.append(workspace)
+        seen.add(workspace)
+
+    for candidate in registry_roots:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        roots.append(candidate)
+
+    if roots:
+        return roots
+
+    # Backward compatibility for non-Git single-folder projects and tests.
+    return [workspace]
+
+
+def workspace_roots(root: Path, config: dict) -> list[Path]:
+    """Return bounded retrieval roots for the active repository set.
+
+    A non-Git control root is omitted when accepted nested Git repositories
+    exist. Legacy workspace.roots remain an explicit compatibility escape hatch.
     """
     root = root.resolve()
     configured = ((config.get("workspace") or {}).get("roots") or [])
-    roots: list[Path] = [root]
-    seen = {root}
+    roots = list(active_repository_roots(root, config))
+    seen = set(roots)
     legacy = [Path(str(raw).strip()) for raw in configured if str(raw).strip()]
-    for candidate in [*_registry_roots(root, config), *legacy]:
+    for candidate in legacy:
         if not candidate.is_absolute():
             candidate = root / candidate
         try:
