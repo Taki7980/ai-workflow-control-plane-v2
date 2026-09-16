@@ -9,7 +9,12 @@ from typing import Any
 
 from .indexer import index_data_dir
 from .path_policy import PathOutsideWorkspace, resolve_within_root
-from .repository_registry import load_registry, remote_identity, repository_id
+from .repository_registry import (
+    RepositorySpec,
+    load_registry,
+    remote_identity,
+    repository_id,
+)
 from .workspace import active_repository_roots
 
 
@@ -221,17 +226,20 @@ def aggregate_workspace_fingerprint(
 
     workspace_root = Path(root).resolve()
     changed_map = changed_files_by_repo or {}
-    registry_by_path: dict[Path, Any] = {}
-    for spec in load_registry(workspace_root, config):
+    registry_by_path: dict[Path, RepositorySpec] = {}
+    for registry_spec in load_registry(workspace_root, config):
         try:
             repo_root = (
                 workspace_root
-                if spec.relative_path == "."
-                else resolve_within_root(workspace_root, spec.relative_path)
+                if registry_spec.relative_path == "."
+                else resolve_within_root(
+                    workspace_root,
+                    registry_spec.relative_path,
+                )
             )
         except (PathOutsideWorkspace, OSError):
             continue
-        registry_by_path[repo_root] = spec
+        registry_by_path[repo_root] = registry_spec
 
     snapshots: list[dict[str, Any]] = []
     for repo_root in active_repository_roots(workspace_root, config):

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from .budget import ContextBudget, truncate
 from .context_broker import (
@@ -372,12 +373,23 @@ class WorkflowEngine:
             label = "base" if index == 0 else f"workspace:{candidate_root.name}"
             trace.providers_attempted.append(label)
             candidate_changed = changed_for(candidate_root)
-            base_calls.append(ScheduledCall(
-                label,
-                lambda candidate_root=candidate_root, candidate_changed=candidate_changed: self.base_gather(
-                    candidate_root, query, decision, budget, config, providers, symbol, endpoint, candidate_changed
-                ),
-            ))
+            base_calls.append(
+                ScheduledCall(
+                    label,
+                    partial(
+                        self.base_gather,
+                        candidate_root,
+                        query,
+                        decision,
+                        budget,
+                        config,
+                        providers,
+                        symbol,
+                        endpoint,
+                        candidate_changed,
+                    ),
+                )
+            )
 
         base_outcomes = await scheduler.run(base_calls, max(0.001, remaining()))
         base_items: list[ContextItem] = []
@@ -427,13 +439,12 @@ class WorkflowEngine:
                 specialist_calls.append(
                     ScheduledCall(
                         label,
-                        lambda candidate_root=candidate_root: (
-                            self.semantic_provider(
-                                candidate_root,
-                                query,
-                                config,
-                                provider_limit,
-                            )
+                        partial(
+                            self.semantic_provider,
+                            candidate_root,
+                            query,
+                            config,
+                            provider_limit,
                         ),
                     )
                 )
@@ -447,10 +458,19 @@ class WorkflowEngine:
                 name = str(spec.get("name", "external"))
                 label = f"external:{name}"
                 trace.providers_attempted.append(label)
-                specialist_calls.append(ScheduledCall(
-                    label,
-                    lambda spec=spec: self.external_provider(root, query, plan.intent.value, spec, provider_limit),
-                ))
+                specialist_calls.append(
+                    ScheduledCall(
+                        label,
+                        partial(
+                            self.external_provider,
+                            root,
+                            query,
+                            plan.intent.value,
+                            spec,
+                            provider_limit,
+                        ),
+                    )
+                )
                 specialist_kinds.append(label)
                 specialist_roots.append(workspace_root)
 
@@ -688,7 +708,7 @@ class WorkflowEngine:
         trace.used_chars = sum(len(item.text) for item in selected)
 
         elapsed_ms = (time.perf_counter() - started) * 1000
-        diagnostics = {
+        diagnostics: dict[str, Any] = {
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
             "algorithm_policy": algorithm_policy,

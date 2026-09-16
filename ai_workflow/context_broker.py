@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ast, json, re, subprocess, shutil, concurrent.futures
 from pathlib import Path
+from typing import Any
 from .budget import ContextBudget, truncate
 from .code_review_graph import (
     crg_environment,
@@ -252,7 +253,7 @@ def _domain_hints(root: Path, query: str, limit: int) -> list[ContextItem]:
         score = sum(1 for kw in keywords if kw and kw in query_lower)
         if not score:
             continue
-        paths = []
+        paths: list[str] = []
         for k, value in b.items():
             if k in {"section", "module", "keywords"} or not isinstance(value, list):
                 continue
@@ -426,7 +427,7 @@ def _compact_crg_payload(
     pattern: str,
     limit: int,
 ) -> dict:
-    compact = {
+    compact: dict[str, Any] = {
         "status": "ok",
         "pattern": pattern,
     }
@@ -687,12 +688,12 @@ def targeted_source(
         if not path.is_file():
             continue
         try:
-            relative = path.relative_to(root)
+            relative_path = path.relative_to(root)
         except ValueError:
             continue
-        relative_text = relative.as_posix()
+        relative_text = relative_path.as_posix()
         if (
-            any(part in excluded for part in relative.parts)
+            any(part in excluded for part in relative_path.parts)
             or inside_nested(relative_text)
         ):
             continue
