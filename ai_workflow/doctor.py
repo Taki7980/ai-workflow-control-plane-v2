@@ -7,6 +7,7 @@ from .code_review_graph import workspace_health
 from .handoff import validate as validate_handoff
 from .indexer import index_data_dir, load_state, sha256
 from .providers import detect
+from .repository_hygiene import repository_hygiene
 from .sqlite_runtime import sqlite_wal_runtime_status
 from .workspace import active_repository_roots
 
@@ -95,7 +96,35 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
         else []
     )
 
+    hygiene = repository_hygiene(workspace)
+    hygiene_ok = (
+        not hygiene["applicable"]
+        or (
+            hygiene["clean"]
+            and hygiene["local_state_ignored"]
+        )
+    )
+
     recommendations: list[str] = []
+    if hygiene["applicable"] and not hygiene["local_state_ignored"]:
+        recommendations.append(
+            "Machine-local AI Workflow state is not fully ignored; "
+            "rerun `ai-workflow setup` to install repository-local Git "
+            "exclusions without editing the tracked .gitignore"
+        )
+    if hygiene["applicable"] and hygiene["tracked_forbidden"]:
+        recommendations.append(
+            "Tracked machine-local or sensitive runtime artifacts were found; "
+            "inspect `git ls-files -ci --exclude-standard` and the reported "
+            "paths, then remove only confirmed local/generated files from the "
+            "Git index after review"
+        )
+    elif hygiene["applicable"] and hygiene["ignored_tracked"]:
+        recommendations.append(
+            "Ignored paths are still tracked; inspect "
+            "`git ls-files -ci --exclude-standard` and remove only confirmed "
+            "generated/local files from the Git index after review"
+        )
     for row in repository_indexes:
         relative = str(row["relative_path"])
         if not row["present"]:
@@ -163,6 +192,7 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
         and indexes_present
         and not handoff_errors
         and stale == 0
+        and hygiene_ok
         and (
             not production_enabled
             or sqlite_wal["safe_for_wal"]
@@ -193,6 +223,7 @@ def run(root: Path, config: dict) -> tuple[dict, bool]:
             "stale_files": stale,
         },
         "repository_indexes": repository_indexes,
+        "repository_hygiene": hygiene,
         "handoff_errors": handoff_errors,
         "recommendations": recommendations,
         "exit_codes": {"ok": 0, "strict_failure": 1},
