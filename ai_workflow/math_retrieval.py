@@ -1,5 +1,6 @@
 import math
 import re
+from collections import Counter
 from typing import List, Dict, Set, Any, Callable
 from dataclasses import dataclass
 
@@ -9,6 +10,7 @@ class TokenizedDoc:
     text: str
     tokens: List[str]
     token_set: Set[str]
+    term_freq: Dict[str, int]
     length: int
     original_item: Any
 
@@ -45,7 +47,8 @@ class BM25Scorer:
         for idx, (text, obj) in enumerate(zip(texts, objects)):
             tks = tokenize(text)
             tks_set = set(tks)
-            doc = TokenizedDoc(idx, text, tks, tks_set, len(tks), obj)
+            term_freq = dict(Counter(tks))
+            doc = TokenizedDoc(idx, text, tks, tks_set, term_freq, len(tks), obj)
             self.docs.append(doc)
             total_len += doc.length
             
@@ -69,16 +72,11 @@ class BM25Scorer:
         # Precompute denominator length penalty
         len_norm = 1.0 - self.b + self.b * (doc_len / self.avgdl)
         
-        # Term frequencies in THIS document
-        tf = {}
+        # Term frequencies are precomputed once during fit.
         for qt in query_tokens:
-            if qt in doc.token_set:
-                tf[qt] = doc.tokens.count(qt)
-                
-        for qt in query_tokens:
-            if qt not in tf:
+            freq = doc.term_freq.get(qt, 0)
+            if not freq:
                 continue
-            freq = tf[qt]
             idf = self._idf.get(qt, 0.01) # Default tiny IDF if missing (smooths out unseen query words)
             numerator = freq * (self.k1 + 1)
             denominator = freq + self.k1 * len_norm

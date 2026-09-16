@@ -12,6 +12,7 @@ from .context_broker import (
     gather as default_base_gather,
 )
 from .context_selection import select_context
+from .config import estimate_tokens
 from .deployment_runtime import resolve_runtime_deployment
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .models import ContextItem, Lane, RouteDecision
@@ -175,6 +176,23 @@ def _adaptive_char_limit(budget: ContextBudget, score: float, config: dict) -> i
     minimum = int(cfg.get("minimum_chars", 900))
     fraction = high if score >= 0.86 else medium if score >= 0.72 else 1.0
     return min(budget.context_chars, max(minimum, int(budget.context_chars * fraction)))
+
+
+def _adaptive_token_limit(
+    budget: ContextBudget,
+    score: float,
+    config: dict,
+) -> int:
+    cfg = ((config.get("context") or {}).get("adaptive_budget") or {})
+    if not cfg.get("enabled", True):
+        return budget.estimated_tokens
+    high = float(cfg.get("high_sufficiency_fraction", 0.45))
+    medium = float(cfg.get("medium_sufficiency_fraction", 0.7))
+    fraction = high if score >= 0.86 else medium if score >= 0.72 else 1.0
+    return min(
+        budget.estimated_tokens,
+        max(1, int(budget.estimated_tokens * fraction)),
+    )
 
 
 def _evidence_state(decision: RouteDecision, sufficient: bool) -> str:
@@ -591,6 +609,7 @@ class WorkflowEngine:
             threshold=threshold,
         )
         adaptive_chars = _adaptive_char_limit(budget, suff.score, config)
+        adaptive_tokens = _adaptive_token_limit(budget, suff.score, config)
 
         selector_cfg = ((config.get("context") or {}).get("selector") or {})
         if selector_cfg.get("enabled", True):
@@ -611,12 +630,26 @@ class WorkflowEngine:
                 else ()
             )
             selected, selector = select_context(
-                query, candidates, adaptive_chars, config,
+                query,
+                candidates,
+                adaptive_chars,
+                config,
                 mandatory_sources=mandatory_sources,
+                budget_tokens=adaptive_tokens,
             )
             if not selected and candidates:
-                selected = _hard_cap(candidates, adaptive_chars)
-                selector["fallback"] = "hard_cap"
+                fallback = _hard_cap(candidates, adaptive_chars)
+                selected = []
+                fallback_tokens = 0
+                for item in fallback:
+                    item_tokens = estimate_tokens(item.text)
+                    if fallback_tokens + item_tokens > adaptive_tokens:
+                        continue
+                    selected.append(item)
+                    fallback_tokens += item_tokens
+                selector["fallback"] = "hard_cap_token_bounded"
+                selector["used_chars"] = sum(len(item.text) for item in selected)
+                selector["used_tokens"] = fallback_tokens
         else:
             selected = _hard_cap(candidates, adaptive_chars)
             selector = {"mode": "legacy_hard_cap", "selected_count": len(selected), "used_chars": sum(len(i.text) for i in selected)}
@@ -665,6 +698,8 @@ class WorkflowEngine:
             "selector": selector,
             "adaptive_context_chars": adaptive_chars,
             "hard_context_chars": budget.context_chars,
+            "adaptive_context_tokens": adaptive_tokens,
+            "hard_context_tokens": budget.estimated_tokens,
             "providers_attempted": trace.providers_attempted,
             "providers_skipped": trace.providers_skipped,
             "provider_errors": provider_errors,
