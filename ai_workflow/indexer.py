@@ -1,9 +1,11 @@
 from __future__ import annotations
-import ast, hashlib, json, re
+import ast, hashlib, json, os, re
 from pathlib import Path
 from datetime import datetime, timezone
 
 from .io_utils import atomic_write_json, atomic_write_jsonl
+from .repository_registry import is_git_repository
+from .workspace import active_repository_roots
 
 SOURCE_EXTS = {
     ".py", ".rs", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".cs",
@@ -63,14 +65,111 @@ def _stat_matches(path: Path, entry: dict) -> bool:
     return int(entry.get("size", -1)) == int(stat.st_size) and int(entry.get("mtime_ns", -1)) == int(stat.st_mtime_ns)
 
 
+def _find_control_root(start: Path) -> Path:
+    current = Path(start).resolve()
+    for candidate in (current, *current.parents):
+        if (
+            candidate
+            / "ai-workspace"
+            / "config"
+            / "control-plane.json"
+        ).is_file():
+            return candidate
+    return current
+
+
+def _repo_key(relative_path: str) -> str:
+    value = relative_path.strip().replace("\\", "/")
+    if value in {"", "."}:
+        return "root"
+    parts: list[str] = []
+    for raw in value.split("/"):
+        cleaned = re.sub(
+            r"[^A-Za-z0-9._-]+",
+            "-",
+            raw,
+        ).strip(".-_")
+        parts.append(cleaned or "repo")
+    return "__".join(parts)
+
+
+def index_data_dir(
+    repository_root: Path,
+    workspace_root: Path | None = None,
+) -> Path:
+    """Return the central lightweight-index directory for one repository."""
+
+    repository = Path(repository_root).resolve()
+    workspace = (
+        Path(workspace_root).resolve()
+        if workspace_root is not None
+        else _find_control_root(repository)
+    )
+    if repository == workspace:
+        return workspace / "ai-workspace" / "generated"
+    try:
+        relative = repository.relative_to(workspace).as_posix()
+    except ValueError:
+        # Legacy explicit external roots retain their historical local state.
+        return repository / "ai-workspace" / "generated"
+    return (
+        workspace
+        / "ai-workspace"
+        / "indexes"
+        / _repo_key(relative)
+    )
+
+
+def nested_repository_paths(root: Path) -> list[str]:
+    """Return nested Git roots relative to one repository root."""
+
+    base = Path(root).resolve()
+    found: list[str] = []
+    for directory, dirnames, _filenames in os.walk(base):
+        current = Path(directory)
+        filtered: list[str] = []
+        for name in dirnames:
+            if name in EXCLUDE:
+                continue
+            candidate = current / name
+            if is_git_repository(candidate):
+                try:
+                    found.append(
+                        candidate.resolve().relative_to(base).as_posix()
+                    )
+                except (OSError, ValueError):
+                    pass
+                continue
+            filtered.append(name)
+        dirnames[:] = filtered
+    return sorted(set(found))
+
+
 def iter_source(root: Path):
-    for p in root.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in SOURCE_EXTS:
-            continue
-        rel = p.relative_to(root)
-        if any(part in EXCLUDE for part in rel.parts):
-            continue
-        yield p, rel.as_posix()
+    base = Path(root).resolve()
+    for directory, dirnames, filenames in os.walk(base):
+        current = Path(directory)
+        filtered: list[str] = []
+        for name in dirnames:
+            if name in EXCLUDE:
+                continue
+            candidate = current / name
+            if is_git_repository(candidate):
+                continue
+            filtered.append(name)
+        dirnames[:] = filtered
+
+        for name in filenames:
+            path = current / name
+            if path.suffix.lower() not in SOURCE_EXTS:
+                continue
+            try:
+                rel = path.relative_to(base)
+            except ValueError:
+                continue
+            if any(part in EXCLUDE for part in rel.parts):
+                continue
+            yield path, rel.as_posix()
 
 
 def _python_symbols(text: str, rel: str, digest: str) -> list[dict] | None:
@@ -147,7 +246,7 @@ def _write_index_state(path: Path, files: dict[str, dict]) -> None:
 
 
 def build_indexes(root: Path) -> dict:
-    gen = root / "ai-workspace" / "generated"
+    gen = index_data_dir(root)
     gen.mkdir(parents=True, exist_ok=True)
     symbols, endpoints, state = [], [], {}
     ast_files = 0
@@ -169,7 +268,7 @@ def build_indexes(root: Path) -> dict:
 
 
 def load_state(root: Path) -> dict:
-    path = root / "ai-workspace" / "generated" / "index-state.json"
+    path = index_data_dir(root) / "index-state.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if data.get("version") == 2 else {}
@@ -195,7 +294,7 @@ def row_fresh(root: Path, row: dict, state: dict | None = None) -> bool:
 
 
 def incremental_indexes(root: Path, strict_hash: bool = False) -> dict:
-    gen = root / "ai-workspace" / "generated"
+    gen = index_data_dir(root)
     gen.mkdir(parents=True, exist_ok=True)
     old_state = load_state(root)
     old_files = old_state.get("files", {})
@@ -276,4 +375,98 @@ def incremental_indexes(root: Path, strict_hash: bool = False) -> dict:
         "stat_reused": stat_reused,
         "hashed": hashed,
         "ast_files_changed": ast_files,
+    }
+
+
+def _repository_relative_path(
+    workspace_root: Path,
+    repository_root: Path,
+) -> str:
+    workspace = Path(workspace_root).resolve()
+    repository = Path(repository_root).resolve()
+    if repository == workspace:
+        return "."
+    try:
+        return repository.relative_to(workspace).as_posix()
+    except ValueError:
+        return f"legacy:{repository.name}"
+
+
+def index_workspace(
+    root: Path,
+    config: dict,
+    *,
+    mode: str = "auto",
+    strict_hash: bool = False,
+) -> dict:
+    """Index every active repository while keeping repository state isolated."""
+
+    normalized = str(mode or "auto").lower()
+    if normalized not in {"auto", "full", "incremental", "none"}:
+        raise ValueError(
+            "index mode must be auto, full, incremental, or none"
+        )
+
+    workspace = Path(root).resolve()
+    repositories = active_repository_roots(workspace, config)
+    rows: list[dict] = []
+    totals = {
+        "files": 0,
+        "symbols": 0,
+        "endpoints": 0,
+        "ast_files": 0,
+    }
+    effective_modes: list[str] = []
+
+    for repository in repositories:
+        relative = _repository_relative_path(workspace, repository)
+        data_dir = index_data_dir(repository, workspace)
+        effective = normalized
+        if normalized == "auto":
+            effective = (
+                "incremental"
+                if (data_dir / "index-state.json").is_file()
+                else "full"
+            )
+        effective_modes.append(effective)
+
+        if effective == "none":
+            result = {
+                "files": 0,
+                "symbols": 0,
+                "endpoints": 0,
+                "skipped": True,
+                "reason": "disabled",
+            }
+        elif effective == "incremental":
+            result = incremental_indexes(
+                repository,
+                strict_hash=strict_hash,
+            )
+        else:
+            result = build_indexes(repository)
+
+        for key in totals:
+            totals[key] += int(result.get(key, 0) or 0)
+        rows.append(
+            {
+                "relative_path": relative,
+                "repository_root": str(repository),
+                "index_dir": str(data_dir),
+                "mode": effective,
+                **result,
+            }
+        )
+
+    distinct_modes = set(effective_modes)
+    aggregate_mode = (
+        next(iter(distinct_modes))
+        if len(distinct_modes) == 1
+        else "mixed"
+    )
+    return {
+        "mode": aggregate_mode,
+        "repository_count": len(rows),
+        "repositories": rows,
+        **totals,
     }
