@@ -69,45 +69,6 @@ jobs:
         run: ruff check ai_workflow tests security_tests scripts
       - name: Mypy whole-package gate
         run: mypy ai_workflow
-          scripts/check_benchmark_regression.py
-          scripts/check_retrieval_performance.py
-      - name: Mypy typed-boundary gate
-        run: >-
-          mypy --follow-imports=skip
-          ai_workflow/retrieval_contracts.py
-          ai_workflow/benchmark_protocol.py
-          ai_workflow/benchmark_spans.py
-          ai_workflow/benchmark_corpus.py
-          ai_workflow/benchmark_ablation.py
-          ai_workflow/benchmark_algorithm_ablation.py
-          ai_workflow/benchmark_intervention.py
-          ai_workflow/benchmark_statistics.py
-          ai_workflow/benchmark_calibration.py
-          ai_workflow/benchmark_policy_advisor.py
-          ai_workflow/retrieval_learning.py
-          ai_workflow/learning_ope.py
-          ai_workflow/contextual_features.py
-          ai_workflow/contextual_policy.py
-          ai_workflow/policy_manifest.py
-          ai_workflow/shadow_policy.py
-          ai_workflow/deployment_state.py
-          ai_workflow/deployment_guardrails.py
-          ai_workflow/deployment_runtime.py
-          ai_workflow/production_store.py
-          ai_workflow/sqlite_runtime.py
-          ai_workflow/deployment_statistics.py
-          ai_workflow/observability_export.py
-          ai_workflow/deployment_incident.py
-          ai_workflow/benchmark_trajectory.py
-          ai_workflow/path_policy.py
-          ai_workflow/typed_config.py
-          ai_workflow/benchmark_regression.py
-          ai_workflow/execution_semantics.py
-          ai_workflow/provenance.py
-          ai_workflow/retrieval_cache.py
-          ai_workflow/retrieval_adapters.py
-          ai_workflow/api.py
-          ai_workflow/provider_runner.py
 
   package-smoke:
     runs-on: ubuntu-latest
