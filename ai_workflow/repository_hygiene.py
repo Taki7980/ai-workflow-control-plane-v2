@@ -224,7 +224,9 @@ def _git_path_list(root: Path, *args: str, timeout: int = 5) -> list[str] | None
 
 
 def _is_explicitly_forbidden_tracked(path: str) -> bool:
-    normalized = str(path).replace("\\", "/").lstrip("./")
+    normalized = str(path).replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
     if not normalized:
         return False
     parts = normalized.split("/")
