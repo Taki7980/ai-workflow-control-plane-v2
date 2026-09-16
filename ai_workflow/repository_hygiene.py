@@ -190,3 +190,139 @@ def install_local_excludes(root: Path) -> dict:
         **health,
         "changed": changed,
     }
+
+
+LOCAL_STATE_PROBES = (
+    "ai-workspace/config/repositories.json",
+    "ai-workspace/generated/index-state.json",
+    "ai-workspace/indexes/repository/index-state.json",
+    "ai-workspace/code-review-graph/repository/graph.db",
+    "ai-workspace/memory/decisions.jsonl",
+)
+
+
+def _git_path_list(root: Path, *args: str, timeout: int = 5) -> list[str] | None:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [
+        value
+        for value in proc.stdout.split("\0")
+        if value
+    ]
+
+
+def _is_explicitly_forbidden_tracked(path: str) -> bool:
+    normalized = str(path).replace("\\", "/").lstrip("./")
+    if not normalized:
+        return False
+    parts = normalized.split("/")
+    name = parts[-1]
+
+    if name == ".env.example":
+        return False
+    if name == ".env" or name.startswith(".env."):
+        return True
+    if name.endswith(".pem") or name.endswith(".key"):
+        return True
+    if name.endswith(".log"):
+        return True
+    if "credentials" in parts or "secrets" in parts:
+        return True
+
+    if parts[0] in {".code-review-graph", ".ai"}:
+        return True
+
+    if parts[0] != "ai-workspace":
+        return False
+
+    if normalized == "ai-workspace/config/repositories.json":
+        return True
+    if normalized.startswith("ai-workspace/code-review-graph/"):
+        return True
+    if normalized.startswith("ai-workspace/indexes/"):
+        return True
+    if normalized.startswith("ai-workspace/generated/"):
+        return normalized != "ai-workspace/generated/.gitkeep"
+    if normalized.startswith("ai-workspace/memory/"):
+        return normalized != "ai-workspace/memory/README.md"
+    return False
+
+
+def _path_is_ignored(root: Path, relative: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "check-ignore",
+                "--no-index",
+                "-q",
+                relative,
+            ],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def repository_hygiene(root: Path) -> dict:
+    """Inspect tracked Git state for generated or machine-local pollution."""
+
+    root = Path(root).resolve()
+    tracked = _git_path_list(root, "ls-files", "-z")
+    if tracked is None:
+        return {
+            "applicable": False,
+            "clean": True,
+            "local_state_ignored": False,
+            "tracked_files": 0,
+            "tracked_forbidden": [],
+            "ignored_tracked": [],
+            "reason": "not_git_repository",
+        }
+
+    ignored_tracked = _git_path_list(
+        root,
+        "ls-files",
+        "-ci",
+        "--exclude-standard",
+        "-z",
+    )
+    if ignored_tracked is None:
+        ignored_tracked = []
+
+    tracked_forbidden = sorted(
+        path
+        for path in tracked
+        if _is_explicitly_forbidden_tracked(path)
+    )
+    ignored_tracked = sorted(set(ignored_tracked))
+    local_state_ignored = all(
+        _path_is_ignored(root, relative)
+        for relative in LOCAL_STATE_PROBES
+    )
+    return {
+        "applicable": True,
+        "clean": not tracked_forbidden and not ignored_tracked,
+        "local_state_ignored": local_state_ignored,
+        "tracked_files": len(tracked),
+        "tracked_forbidden": tracked_forbidden,
+        "ignored_tracked": ignored_tracked,
+        "reason": None,
+    }
