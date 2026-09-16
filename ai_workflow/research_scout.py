@@ -209,7 +209,7 @@ def corroborate_crossref(paper: Paper) -> Paper:
     params = urllib.parse.urlencode({"query.title": paper.title, "rows": "3", "select": "DOI,title,URL,published,author"})
     try:
         payload = json.loads(_request(CROSSREF_API + "?" + params).decode("utf-8"))
-    except Exception:
+    except (OSError, ValueError, UnicodeError):
         return paper
     for item in payload.get("message", {}).get("items", []):
         titles = item.get("title") or []
