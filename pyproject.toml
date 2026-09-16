@@ -7,7 +7,7 @@ name = "ai-workflow-control-plane"
 dynamic = ["version"]
 description = "Agent-agnostic adaptive efficiency control plane for AI-assisted software development"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE*"]
 authors = [{name = "Kisuke"}]
@@ -36,6 +36,6 @@ version = {attr = "ai_workflow._version.__version__"}
 include = ["ai_workflow*"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 check_untyped_defs = true
 warn_unused_configs = true
