@@ -83,9 +83,10 @@ def _registry_lock(path: Path):
         if os.name == "nt":
             import msvcrt
 
-            locking = getattr(msvcrt, "locking")
-            lock_mode = int(getattr(msvcrt, "LK_LOCK"))
-            unlock_mode = int(getattr(msvcrt, "LK_UNLCK"))
+            msvcrt_api = vars(msvcrt)
+            locking = msvcrt_api["locking"]
+            lock_mode = int(msvcrt_api["LK_LOCK"])
+            unlock_mode = int(msvcrt_api["LK_UNLCK"])
             locking(handle.fileno(), lock_mode, 1)
             try:
                 yield
