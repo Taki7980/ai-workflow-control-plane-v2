@@ -264,6 +264,28 @@ class RepositoryHygieneTests(unittest.TestCase):
                 result["tracked_forbidden"],
             )
 
+    def test_hygiene_rejects_generated_pollution_even_if_ignore_is_weakened(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            polluted = {
+                "dist/package.whl": "wheel\n",
+                ".pytest_cache/v/cache/nodeids": "[]\n",
+                ".DS_Store": "metadata\n",
+                ".vscode/settings.json": "{}\n",
+            }
+            for relative, value in polluted.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(value, encoding="utf-8")
+            self._git(root, "add", "-f", *polluted.keys())
+
+            result = self._repository_hygiene(root)
+
+            self.assertFalse(result["clean"])
+            for relative in polluted:
+                self.assertIn(relative, result["tracked_forbidden"])
+
     def test_hygiene_allows_deliberate_tracked_exceptions(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
