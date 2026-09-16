@@ -890,7 +890,11 @@ async def run_command_provider_async(
                 except (OSError, RuntimeError):
                     output = b""
                     exceeded = False
-                    returncode = proc.returncode
+                    returncode = (
+                        int(proc.returncode)
+                        if proc.returncode is not None
+                        else -1
+                    )
                     stderr_output = b""
                     stderr_truncated = False
             except asyncio.CancelledError:
