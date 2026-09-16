@@ -17,7 +17,6 @@ from ai_workflow.repository_registry import (
     registry_payload,
     remote_identity,
     repository_id,
-    set_repository_included,
     workspace_registry_fingerprint,
 )
 from ai_workflow.workspace import workspace_roots
@@ -181,7 +180,7 @@ class RepositoryRegistryTests(unittest.TestCase):
             registry = root / "ai-workspace/config/repositories.json"
             started = root / "child-started"
             finished = root / "child-finished"
-            registry_lock = getattr(repository_registry_module, "_registry_lock")
+            registry_lock = repository_registry_module._registry_lock
             script = (
                 "from pathlib import Path\n"
                 "import sys\n"
