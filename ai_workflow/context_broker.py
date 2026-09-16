@@ -13,7 +13,6 @@ from .indexer import (
     load_state,
     nested_repository_paths,
     row_fresh,
-    sha256,
 )
 from .repository_registry import load_registry
 from .workspace import registry_spec_to_root
