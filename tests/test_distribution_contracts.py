@@ -72,6 +72,7 @@ class DistributionContractTests(unittest.TestCase):
             r"(?ms)^  verify-release:\n.*?needs: finalize-release",
         )
         self.assertIn("gh attestation verify", workflow)
+        self.assertIn("attestations: read", workflow)
         self.assertIn("sha256sum --check", workflow)
         self.assertIn("install.sh", workflow)
 
