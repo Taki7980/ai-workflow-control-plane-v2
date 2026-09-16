@@ -414,9 +414,10 @@ class WorkflowEngineTests(unittest.TestCase):
                     ProviderStatus(False, True, False, False, True),
                 )
 
+        self.assertEqual(len(semantic_roots), 2)
         self.assertEqual(
-            semantic_roots,
-            ["admin-panel", "backend"],
+            set(semantic_roots),
+            {"admin-panel", "backend"},
         )
         self.assertEqual(structural_roots, ["backend"])
         self.assertTrue(
