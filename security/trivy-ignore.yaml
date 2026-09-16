@@ -1,0 +1,16 @@
+# Trivy vulnerability exception policy.
+#
+# No active exceptions are approved by default.
+# Any future entry must be narrowly scoped and include:
+# - id: CVE identifier
+# - paths and/or purls where possible
+# - statement: reviewed risk-acceptance rationale
+# - expired_at: YYYY-MM-DD expiry requiring re-review
+#
+# Example only (do not uncomment without review):
+# vulnerabilities:
+#   - id: CVE-2099-0001
+#     purls: ["pkg:pypi/example@1.0.0"]
+#     statement: "Temporary exception while upstream fix is validated."
+#     expired_at: 2099-01-31
+vulnerabilities: []

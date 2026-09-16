@@ -28,8 +28,8 @@ jobs:
         run: python -m unittest discover -s security_tests -v
       - name: Enforce test coverage floor
         run: |
-          coverage run --source=ai_workflow -m unittest discover -s tests -q
-          coverage report --fail-under=65
+          coverage run --branch --source=ai_workflow -m unittest discover -s tests -q
+          coverage report --show-missing --fail-under=80
       - name: Enforce runtime dependency license policy
         shell: bash
         run: |
@@ -79,12 +79,13 @@ jobs:
           curl --fail --silent --show-error --location --output "$asset" "$base/$asset"
           grep "  $asset$" "$checksums" | sha256sum --check -
           tar -xzf "$asset" trivy
-      - name: Block critical container vulnerabilities
+      - name: Block high and critical container vulnerabilities
         shell: bash
         run: >-
           "$RUNNER_TEMP/trivy" image
           --scanners vuln
-          --severity CRITICAL
+          --severity HIGH,CRITICAL
+          --ignorefile security/trivy-ignore.yaml
           --ignore-unfixed
           --exit-code 1
           --timeout 10m
