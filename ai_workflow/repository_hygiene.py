@@ -236,14 +236,43 @@ def _is_explicitly_forbidden_tracked(path: str) -> bool:
         return False
     if name == ".env" or name.startswith(".env."):
         return True
-    if name.endswith(".pem") or name.endswith(".key"):
+    if name.endswith((".pem", ".key", ".log", ".pyc", ".pyo", ".pyd")):
         return True
-    if name.endswith(".log"):
+    if name in {
+        ".coverage",
+        "coverage.xml",
+        ".DS_Store",
+        "Thumbs.db",
+    }:
         return True
-    if "credentials" in parts or "secrets" in parts:
+    if name.startswith(".coverage."):
+        return True
+    if name.startswith("junit") and name.endswith(".xml"):
         return True
 
-    if parts[0] in {".code-review-graph", ".ai"}:
+    forbidden_directories = {
+        "__pycache__",
+        ".venv",
+        "venv",
+        "env",
+        "build",
+        "dist",
+        ".eggs",
+        "htmlcov",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".hypothesis",
+        ".idea",
+        ".vscode",
+        "credentials",
+        "secrets",
+        ".code-review-graph",
+        ".ai",
+    }
+    if any(part in forbidden_directories for part in parts):
+        return True
+    if any(part.endswith(".egg-info") for part in parts):
         return True
 
     if parts[0] != "ai-workspace":
