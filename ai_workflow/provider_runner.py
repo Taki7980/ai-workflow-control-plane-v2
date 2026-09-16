@@ -409,15 +409,217 @@ def _result_from_bytes(
     )
 
 
-def _provider_cwd(spec: CommandProviderSpec, request: RetrievalRequest) -> Path:
-    """Choose a cwd that cannot turn repository files into provider code."""
+class ProviderTrustError(ValueError):
+    """Trusted provider identity changed or violates launch policy."""
 
+
+def _is_within(root: Path, candidate: Path) -> bool:
+    root = root.resolve()
+    candidate = candidate.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_provider_executable(
+    spec: CommandProviderSpec,
+    root: Path,
+) -> Path:
+    configured = Path(spec.command[0]).expanduser()
+    if spec.executable_trust != "trusted_registry_digest":
+        return configured
+    if not configured.is_absolute():
+        raise ProviderTrustError(
+            "trusted provider executable must remain an absolute path"
+        )
+    if configured.is_symlink():
+        raise ProviderTrustError(
+            "trusted provider executable path may not be a symlink"
+        )
+    try:
+        resolved = configured.resolve(strict=True)
+    except OSError as exc:
+        raise ProviderTrustError(
+            "trusted provider executable no longer exists"
+        ) from exc
+    if not resolved.is_file():
+        raise ProviderTrustError(
+            "trusted provider executable is no longer a regular file"
+        )
+    if _is_within(root, resolved):
+        raise ProviderTrustError(
+            "trusted provider executable may not move inside the repository"
+        )
+    expected = spec.executable_sha256
+    if not expected:
+        raise ProviderTrustError(
+            "trusted provider executable is missing its pinned digest"
+        )
+    actual = _sha256_file(resolved)
+    if not hmac.compare_digest(actual, expected):
+        raise ProviderTrustError(
+            "trusted provider executable digest mismatch at launch"
+        )
+    return resolved
+
+
+def _verified_command(
+    spec: CommandProviderSpec,
+    root: Path,
+) -> tuple[str, ...]:
+    if spec.executable_trust != "trusted_registry_digest":
+        return spec.command
+    executable = verify_provider_executable(spec, root)
+    return (str(executable), *spec.command[1:])
+
+
+def _legacy_provider_cwd(
+    spec: CommandProviderSpec,
+    request: RetrievalRequest,
+) -> Path:
     if spec.executable_trust == "trusted_registry_digest":
         try:
             return Path(spec.command[0]).resolve(strict=True).parent
         except OSError:
             return Path(spec.command[0]).expanduser().resolve().parent
     return request.root
+
+
+@contextmanager
+def _provider_launch_cwd(
+    spec: CommandProviderSpec,
+    request: RetrievalRequest,
+):
+    if spec.neutral_cwd:
+        with tempfile.TemporaryDirectory(
+            prefix="ai-workflow-provider-",
+        ) as td:
+            yield Path(td)
+        return
+    yield _legacy_provider_cwd(spec, request)
+
+
+def _bounded_tail_reader(
+    stream: Any,
+    limit: int,
+    output: bytearray,
+    truncated: threading.Event,
+) -> None:
+    try:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            if len(chunk) >= limit:
+                output[:] = chunk[-limit:]
+                truncated.set()
+                continue
+            overflow = len(output) + len(chunk) - limit
+            if overflow > 0:
+                del output[:overflow]
+                truncated.set()
+            output.extend(chunk)
+    except OSError:
+        return
+
+
+async def _bounded_async_tail_reader(
+    stream: asyncio.StreamReader,
+    limit: int,
+) -> tuple[bytes, bool]:
+    output = bytearray()
+    truncated = False
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            return bytes(output), truncated
+        if len(chunk) >= limit:
+            output[:] = chunk[-limit:]
+            truncated = True
+            continue
+        overflow = len(output) + len(chunk) - limit
+        if overflow > 0:
+            del output[:overflow]
+            truncated = True
+        output.extend(chunk)
+
+
+_BEARER_RE = re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+")
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\\b(api[-_]?key|token|password|secret)\\b"
+    r"(\\s*[:=]\\s*)([^\\s,;]+)"
+)
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)\\b(authorization\\s*:\\s*)(?:bearer\\s+)?[^\\s]+"
+)
+
+
+def _redact_stderr(
+    spec: CommandProviderSpec,
+    raw: bytes,
+    truncated: bool,
+) -> tuple[str | None, bool]:
+    if not raw:
+        return None, truncated
+    output = raw.decode("utf-8", errors="replace")
+    for key in spec.env_allowlist:
+        value = os.environ.get(key)
+        if value:
+            output = output.replace(value, "[REDACTED]")
+    output = _BEARER_RE.sub("Bearer [REDACTED]", output)
+    output = _AUTHORIZATION_RE.sub(
+        lambda match: match.group(1) + "[REDACTED]",
+        output,
+    )
+    output = _SECRET_ASSIGNMENT_RE.sub(
+        lambda match: match.group(1) + match.group(2) + "[REDACTED]",
+        output,
+    )
+    encoded = output.encode("utf-8")
+    if len(encoded) > spec.max_stderr_bytes:
+        output = encoded[-spec.max_stderr_bytes :].decode(
+            "utf-8",
+            errors="ignore",
+        )
+        truncated = True
+    return output or None, truncated
+
+
+def _attach_stderr(
+    result: ProviderResult,
+    spec: CommandProviderSpec,
+    raw: bytes,
+    truncated: bool,
+) -> ProviderResult:
+    tail, was_truncated = _redact_stderr(spec, raw, truncated)
+    return replace(
+        result,
+        stderr_tail=tail,
+        stderr_truncated=was_truncated,
+    )
+
+
+def _provider_trust_result(
+    spec: CommandProviderSpec,
+    started: float,
+    exc: ProviderTrustError,
+) -> ProviderResult:
+    return ProviderResult(
+        provider=spec.name,
+        latency_ms=(time.perf_counter() - started) * 1000,
+        error=str(exc),
+        error_kind="provider_trust",
+    )
 
 
 def run_command_provider(
@@ -427,77 +629,104 @@ def run_command_provider(
     source: str,
     metadata_defaults: Mapping[str, Any] | None = None,
 ) -> ProviderResult:
-    """Run a provider with bounded output, timeout and explicit env policy."""
+    """Run a provider with launch trust, bounded output and explicit env policy."""
 
     started = time.perf_counter()
     output = bytearray()
     exceeded = threading.Event()
+    stderr_output = bytearray()
+    stderr_truncated = threading.Event()
     timed_out = False
 
     try:
-        proc = subprocess.Popen(
-            spec.command,
-            cwd=_provider_cwd(spec, request),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=build_provider_env(spec.env_allowlist),
-            **_provider_process_group_kwargs(),
-        )
-    except (OSError, ValueError) as exc:
+        with _provider_launch_cwd(spec, request) as cwd:
+            try:
+                command = _verified_command(spec, request.root)
+            except ProviderTrustError as exc:
+                return _provider_trust_result(spec, started, exc)
+            try:
+                proc = subprocess.Popen(
+                    command,
+                    cwd=cwd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=build_provider_env(spec.env_allowlist),
+                    **_provider_process_group_kwargs(),
+                )
+            except (OSError, ValueError) as exc:
+                return ProviderResult(
+                    provider=spec.name,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    error=f"provider could not be started: {type(exc).__name__}",
+                    error_kind="launch",
+                )
+
+            stdout_reader = threading.Thread(
+                target=_bounded_reader,
+                args=(proc, spec.max_output_bytes, output, exceeded),
+                daemon=True,
+            )
+            assert proc.stderr is not None
+            stderr_reader = threading.Thread(
+                target=_bounded_tail_reader,
+                args=(
+                    proc.stderr,
+                    spec.max_stderr_bytes,
+                    stderr_output,
+                    stderr_truncated,
+                ),
+                daemon=True,
+            )
+            stdout_reader.start()
+            stderr_reader.start()
+            try:
+                assert proc.stdin is not None
+                try:
+                    proc.stdin.write(_request_payload(request))
+                    proc.stdin.close()
+                except (BrokenPipeError, OSError):
+                    pass
+
+                effective_timeout = min(
+                    float(spec.timeout_seconds),
+                    float(request.timeout_seconds),
+                )
+                try:
+                    returncode = proc.wait(timeout=effective_timeout)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    _terminate_provider_tree(proc)
+                    returncode = proc.wait()
+            finally:
+                for reader in (stdout_reader, stderr_reader):
+                    reader.join(timeout=1.0)
+                if stdout_reader.is_alive() or stderr_reader.is_alive():
+                    _terminate_provider_tree(proc)
+                    for reader in (stdout_reader, stderr_reader):
+                        reader.join(timeout=1.0)
+                if proc.stdin is not None and not proc.stdin.closed:
+                    try:
+                        proc.stdin.close()
+                    except OSError:
+                        pass
+                for stream in (proc.stdout, proc.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+    except OSError as exc:
         return ProviderResult(
             provider=spec.name,
             latency_ms=(time.perf_counter() - started) * 1000,
-            error=f"provider could not be started: {type(exc).__name__}",
+            error=f"provider cwd could not be created: {type(exc).__name__}",
             error_kind="launch",
         )
 
-    reader = threading.Thread(
-        target=_bounded_reader,
-        args=(proc, spec.max_output_bytes, output, exceeded),
-        daemon=True,
-    )
-    reader.start()
-    try:
-        assert proc.stdin is not None
-        try:
-            proc.stdin.write(_request_payload(request))
-            proc.stdin.close()
-        except (BrokenPipeError, OSError):
-            pass
-
-        effective_timeout = min(
-            float(spec.timeout_seconds),
-            float(request.timeout_seconds),
-        )
-        try:
-            returncode = proc.wait(timeout=effective_timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_provider_tree(proc)
-            returncode = proc.wait()
-    finally:
-        reader.join(timeout=1.0)
-        if reader.is_alive():
-            try:
-                _terminate_provider_tree(proc)
-            except OSError:
-                pass
-            reader.join(timeout=1.0)
-        if proc.stdin is not None and not proc.stdin.closed:
-            try:
-                proc.stdin.close()
-            except OSError:
-                pass
-        if proc.stdout is not None:
-            try:
-                proc.stdout.close()
-            except OSError:
-                pass
-
     latency_ms = (time.perf_counter() - started) * 1000
     if exceeded.is_set():
-        return ProviderResult(
+        result = ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
             error=f"provider output exceeded {spec.max_output_bytes} bytes",
@@ -505,8 +734,8 @@ def run_command_provider(
             output_limited=True,
             returncode=returncode,
         )
-    if timed_out:
-        return ProviderResult(
+    elif timed_out:
+        result = ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
             error=f"provider timed out after {effective_timeout:g} seconds",
@@ -514,22 +743,29 @@ def run_command_provider(
             timed_out=True,
             returncode=returncode,
         )
-    if returncode != 0:
-        return ProviderResult(
+    elif returncode != 0:
+        result = ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
             error=f"provider exited with status {returncode}",
             error_kind="exit",
             returncode=returncode,
         )
-    return _result_from_bytes(
+    else:
+        result = _result_from_bytes(
+            spec,
+            request,
+            source,
+            metadata_defaults,
+            bytes(output),
+            latency_ms,
+            returncode,
+        )
+    return _attach_stderr(
+        result,
         spec,
-        request,
-        source,
-        metadata_defaults,
-        bytes(output),
-        latency_ms,
-        returncode,
+        bytes(stderr_output),
+        stderr_truncated.is_set(),
     )
 
 
