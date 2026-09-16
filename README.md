@@ -127,7 +127,7 @@ Running `ai-workflow setup` at `RevenueOS/` recursively discovers and activates 
 
 ## Install
 
-Requires Python 3.10+.
+Requires Python 3.11+.
 
 For normal use, install AI Workflow as an isolated command-line tool instead of adding it to your project's Python environment.
 
@@ -741,7 +741,7 @@ python -m ai_workflow index
 python -m ai_workflow benchmark --tasks benchmarks/sample-tasks.json
 ```
 
-CI runs Python 3.10–3.14 on Linux, Python 3.14 on Windows, and the V2.2 benchmark smoke gate.
+CI runs Python 3.11–3.14 on Linux, Python 3.14 on Windows/macOS, and the benchmark regression gate.
 
 ## Research
 
