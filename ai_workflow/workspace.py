@@ -35,6 +35,11 @@ def active_repository_roots(root: Path, config: dict) -> list[Path]:
     if is_git_repository(workspace):
         roots.append(workspace)
         seen.add(workspace)
+    elif not registry_roots:
+        # Historical non-Git single-folder behavior remains when no accepted
+        # registry repository replaces the control root.
+        roots.append(workspace)
+        seen.add(workspace)
 
     for candidate in registry_roots:
         if candidate in seen:
