@@ -9,6 +9,9 @@ import unittest
 from pathlib import Path
 
 from ai_workflow.bootstrap import setup
+from ai_workflow.config import default_config, load_config
+from ai_workflow.doctor import run as doctor_run
+from ai_workflow.indexer import build_indexes
 import ai_workflow.repository_hygiene as repository_hygiene_module
 
 
@@ -349,6 +352,106 @@ class RepositoryHygieneTests(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertFalse(payload["clean"])
             self.assertIn(".env", payload["tracked_forbidden"])
+
+    def test_doctor_fails_when_git_local_state_is_not_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            (root / "app.py").write_text(
+                "def main():\n    return True\n",
+                encoding="utf-8",
+            )
+            build_indexes(root)
+
+            result, ok = doctor_run(root, default_config())
+
+            self.assertFalse(ok)
+            self.assertIn("repository_hygiene", result)
+            hygiene = result["repository_hygiene"]
+            self.assertTrue(hygiene["applicable"])
+            self.assertFalse(hygiene["local_state_ignored"])
+            self.assertTrue(
+                any(
+                    "ai-workflow setup" in item
+                    for item in result["recommendations"]
+                )
+            )
+
+    def test_doctor_hygiene_is_healthy_after_setup(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            (root / "app.py").write_text(
+                "def main():\n    return True\n",
+                encoding="utf-8",
+            )
+
+            setup(
+                root,
+                "Demo",
+                index_mode="full",
+                sync_crg=False,
+            )
+            result, ok = doctor_run(root, load_config(root))
+
+            self.assertTrue(ok, result)
+            hygiene = result["repository_hygiene"]
+            self.assertTrue(hygiene["applicable"])
+            self.assertTrue(hygiene["local_state_ignored"])
+            self.assertEqual(hygiene["tracked_forbidden"], [])
+            self.assertEqual(hygiene["ignored_tracked"], [])
+
+    def test_doctor_fails_for_forbidden_tracked_runtime_artifact(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            (root / "app.py").write_text(
+                "def main():\n    return True\n",
+                encoding="utf-8",
+            )
+            setup(
+                root,
+                "Demo",
+                index_mode="full",
+                sync_crg=False,
+            )
+            (root / ".env").write_text(
+                "TOKEN=do-not-track\n",
+                encoding="utf-8",
+            )
+            self._git(root, "add", ".env")
+
+            result, ok = doctor_run(root, load_config(root))
+
+            self.assertFalse(ok)
+            self.assertIn(
+                ".env",
+                result["repository_hygiene"]["tracked_forbidden"],
+            )
+            self.assertTrue(
+                any(
+                    "tracked machine-local" in item.lower()
+                    or "tracked forbidden" in item.lower()
+                    for item in result["recommendations"]
+                )
+            )
+            self.assertFalse(
+                any("git clean -fd" in item for item in result["recommendations"])
+            )
+
+    def test_doctor_non_git_workspace_treats_hygiene_as_not_applicable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "app.py").write_text(
+                "def main():\n    return True\n",
+                encoding="utf-8",
+            )
+            build_indexes(root)
+
+            result, ok = doctor_run(root, default_config())
+
+            self.assertTrue(ok, result)
+            self.assertFalse(result["repository_hygiene"]["applicable"])
 
     def test_setup_non_git_workspace_does_not_create_git_metadata(self):
         with tempfile.TemporaryDirectory() as td:
