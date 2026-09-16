@@ -8,7 +8,9 @@ from pathlib import Path
 from ai_workflow.bootstrap import setup
 from ai_workflow.code_review_graph import repository_data_dir
 from ai_workflow.config import load_config
+from ai_workflow.context_broker import lightweight, targeted_source
 from ai_workflow.doctor import run as doctor_run
+from ai_workflow.semantic import semantic_result
 from ai_workflow.workspace import workspace_roots
 
 
@@ -147,6 +149,49 @@ class MultiRepositoryIsolationTests(unittest.TestCase):
             self.assertFalse((admin / "ai-workspace").exists())
             self.assertFalse((backend / "ai-workspace").exists())
 
+    def test_nested_repository_retrieval_reads_only_its_central_index(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            admin, backend = self._revenue_workspace(root)
+            setup(
+                root,
+                "RevenueOS",
+                index_mode="full",
+                sync_crg=False,
+            )
+            config = load_config(root)
+
+            admin_items = lightweight(
+                admin,
+                "admin_dashboard",
+                "admin_dashboard",
+                None,
+                5,
+                0.55,
+                False,
+            )
+            self.assertTrue(admin_items)
+            self.assertTrue(
+                all("admin.py" in item.text for item in admin_items)
+            )
+            self.assertFalse(
+                any("service.py" in item.text for item in admin_items)
+            )
+
+            semantic = semantic_result(
+                backend,
+                "revenue service",
+                config,
+                5,
+            )
+            self.assertTrue(semantic.items)
+            self.assertTrue(
+                all(
+                    item.metadata.get("path") == "service.py"
+                    for item in semantic.items
+                )
+            )
+
     def test_parent_git_index_prunes_nested_repository_sources(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -220,6 +265,10 @@ class MultiRepositoryIsolationTests(unittest.TestCase):
             )
             self.assertTrue(child_state.is_file())
             self.assertFalse((child / "ai-workspace").exists())
+            self.assertEqual(
+                targeted_source(root, "child_only", 10),
+                [],
+            )
 
     def test_doctor_reports_and_validates_each_active_repository_index(self):
         with tempfile.TemporaryDirectory() as td:
