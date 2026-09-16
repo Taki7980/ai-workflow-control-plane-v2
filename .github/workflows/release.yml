@@ -108,7 +108,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install "pyinstaller==6.22.2"
+          python -m pip install "pyinstaller==6.22.3"
           python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
           version="${GITHUB_REF_NAME#v}"
           asset="ai-workflow-v${version}-${{ matrix.suffix }}${{ matrix.exe }}"
@@ -214,3 +214,57 @@ jobs:
           set -euo pipefail
           gh release upload "$GITHUB_REF_NAME" SHA256SUMS release-manifests/* --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  verify-release:
+    needs: finalize-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download published release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "$GITHUB_REF_NAME" --dir release-assets --clobber
+      - name: Verify published SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum --check SHA256SUMS
+      - name: Verify published artifact attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r _ name; do
+            test -n "$name"
+            gh attestation verify "release-assets/$name" --repo "$GITHUB_REPOSITORY"
+          done < release-assets/SHA256SUMS
+          for name in             SHA256SUMS             Taki7980.AIWorkflow.yaml             Taki7980.AIWorkflow.installer.yaml             Taki7980.AIWorkflow.locale.en-US.yaml             ai-workflow.rb             meta.yaml
+          do
+            gh attestation verify "release-assets/$name" --repo "$GITHUB_REPOSITORY"
+          done
+      - name: Verify published container attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          gh attestation verify "oci://$image:$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+      - name: Smoke checksum-verifying published bootstrap installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          AI_WORKFLOW_VERSION="$version"           AI_WORKFLOW_INSTALL_DIR="$RUNNER_TEMP/ai-workflow-bin"             ./install.sh
+          "$RUNNER_TEMP/ai-workflow-bin/ai-workflow" --version
+
