@@ -216,12 +216,16 @@ class ProviderBoundaryContractTests(unittest.TestCase):
                 "sys.stdin.read();"
                 "print(json.dumps({'items':[{'text':os.getcwd(),'score':1.0}]}))"
             )
+            executable = Path(sys.executable).resolve()
+            digest = hashlib.sha256(executable.read_bytes()).hexdigest()
             spec = runner.CommandProviderSpec(
                 name="trusted-cwd",
-                command=(sys.executable, "-c", code),
+                command=(str(executable), "-c", code),
                 timeout_seconds=2,
                 max_output_bytes=4096,
                 executable_trust="trusted_registry_digest",
+                executable_sha256=digest,
+                neutral_cwd=True,
             )
             result = runner.run_command_provider(
                 spec,
@@ -237,10 +241,11 @@ class ProviderBoundaryContractTests(unittest.TestCase):
             self.assertIsNone(result.error)
             actual_cwd = Path(result.items[0].text).resolve()
             self.assertNotEqual(actual_cwd, root_cwd)
-            self.assertEqual(
+            self.assertNotEqual(
                 actual_cwd,
                 Path(sys.executable).resolve().parent,
             )
+            self.assertFalse(actual_cwd.exists())
 
     def test_command_runner_returns_success_with_bounded_typed_result(self):
         runner = self._module("ai_workflow.provider_runner")
