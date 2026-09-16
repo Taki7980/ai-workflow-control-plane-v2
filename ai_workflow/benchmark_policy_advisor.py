@@ -83,7 +83,7 @@ def _paired_profile_deltas(
 
     grouped: dict[str, list[float]] = defaultdict(list)
     locked = 0
-    for left, right in zip(baseline_cases, candidate_cases):
+    for left, right in zip(baseline_cases, candidate_cases, strict=True):
         if not isinstance(left, dict) or not isinstance(right, dict):
             continue
         if str(left.get("risk", "")).strip().lower() in LOCKED_RISKS:
