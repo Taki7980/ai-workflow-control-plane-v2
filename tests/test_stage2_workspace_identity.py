@@ -338,7 +338,7 @@ class Stage2WorkspaceIdentityTests(unittest.TestCase):
             self.assertEqual(snapshots[0]["fingerprint"], snapshots[1]["fingerprint"])
             self.assertEqual(
                 [item["relative_path"] for item in snapshots[0]["repositories"]],
-                [".", "backend", "frontend"],
+                ["backend", "frontend"],
             )
 
     def test_aggregate_workspace_fingerprint_changes_when_one_repo_changes(self):
