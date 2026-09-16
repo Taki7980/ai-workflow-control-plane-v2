@@ -349,7 +349,21 @@ class WorkflowEngineTests(unittest.TestCase):
         def semantic(root, query, config, limit):
             semantic_roots.append(root.name)
             if root.name != "backend":
-                return ProviderResult("semantic", ())
+                return ProviderResult(
+                    "semantic",
+                    (
+                        ContextItem(
+                            "semantic",
+                            "admin.py:2 unrelated handler",
+                            0.2,
+                            False,
+                            {
+                                "path": "admin.py",
+                                "symbol": "AdminHandler",
+                            },
+                        ),
+                    ),
+                )
             return ProviderResult(
                 "semantic",
                 (
