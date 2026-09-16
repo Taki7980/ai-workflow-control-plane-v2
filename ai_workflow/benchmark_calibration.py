@@ -74,7 +74,7 @@ def deterministic_stratified_split(
 
     calibration: list[dict[str, Any]] = []
     holdout: list[dict[str, Any]] = []
-    for label_value, group in sorted(by_label.items()):
+    for _, group in sorted(by_label.items()):
         ranked = sorted(
             group,
             key=lambda pair: (
