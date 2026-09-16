@@ -139,7 +139,7 @@ def _compare(
     if not parity:
         return False, float("inf")
 
-    for reference_rows, optimized_rows in zip(reference, optimized):
+    for reference_rows, optimized_rows in zip(reference, optimized, strict=True):
         if len(reference_rows) != len(optimized_rows):
             parity = False
             continue
@@ -150,7 +150,7 @@ def _compare(
         for (reference_score, reference_id), (
             optimized_score,
             optimized_id,
-        ) in zip(reference_rows, optimized_rows):
+        ) in zip(reference_rows, optimized_rows, strict=True):
             if reference_id != optimized_id:
                 continue
             max_delta = max(
