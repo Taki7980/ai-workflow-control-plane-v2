@@ -29,7 +29,7 @@ jobs:
       - name: Enforce test coverage floor
         run: |
           coverage run --branch --source=ai_workflow -m unittest discover -s tests -q
-          coverage report --show-missing --fail-under=80
+          coverage report --fail-under=80 --show-missing
       - name: Enforce runtime dependency license policy
         shell: bash
         run: |
