@@ -24,10 +24,11 @@ def _registry_roots(root: Path, config: dict) -> list[Path]:
 
 
 def active_repository_roots(root: Path, config: dict) -> list[Path]:
-    """Return every active code repository without retrieval-root limits."""
+    """Return every active repository without retrieval-root limits."""
 
     workspace = Path(root).resolve()
     registry_roots = _registry_roots(workspace, config)
+    configured = ((config.get("workspace") or {}).get("roots") or [])
     roots: list[Path] = []
     seen: set[Path] = set()
 
@@ -41,27 +42,15 @@ def active_repository_roots(root: Path, config: dict) -> list[Path]:
         seen.add(candidate)
         roots.append(candidate)
 
-    if roots:
-        return roots
-
-    # Backward compatibility for non-Git single-folder projects and tests.
-    return [workspace]
-
-
-def workspace_roots(root: Path, config: dict) -> list[Path]:
-    """Return bounded retrieval roots for the active repository set.
-
-    A non-Git control root is omitted when accepted nested Git repositories
-    exist. Legacy workspace.roots remain an explicit compatibility escape hatch.
-    """
-    root = root.resolve()
-    configured = ((config.get("workspace") or {}).get("roots") or [])
-    roots = list(active_repository_roots(root, config))
-    seen = set(roots)
-    legacy = [Path(str(raw).strip()) for raw in configured if str(raw).strip()]
-    for candidate in legacy:
+    # Legacy roots are explicit user configuration and remain supported,
+    # including historical absolute paths outside the control workspace.
+    for raw in configured:
+        value = str(raw).strip()
+        if not value:
+            continue
+        candidate = Path(value)
         if not candidate.is_absolute():
-            candidate = root / candidate
+            candidate = workspace / candidate
         try:
             resolved = candidate.resolve()
         except OSError:
@@ -70,7 +59,24 @@ def workspace_roots(root: Path, config: dict) -> list[Path]:
             continue
         seen.add(resolved)
         roots.append(resolved)
-    max_roots = int((config.get("workspace") or {}).get("max_roots", len(roots)))
+
+    if roots:
+        return roots
+
+    # Backward compatibility for non-Git single-folder projects and tests.
+    return [workspace]
+
+
+def workspace_roots(root: Path, config: dict) -> list[Path]:
+    """Return bounded retrieval roots for the active repository set."""
+
+    roots = active_repository_roots(root, config)
+    max_roots = int(
+        (config.get("workspace") or {}).get(
+            "max_roots",
+            len(roots),
+        )
+    )
     return roots[:max(1, max_roots)]
 
 
