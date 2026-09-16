@@ -1,5 +1,7 @@
 # Distribution and release
 
+AI Workflow requires Python 3.11 or newer for Python-based installations. Python 3.12+ is the recommended deployment baseline.
+
 AI Workflow keeps its Python core dependency-free while offering isolated and portable installation paths.
 
 ## Preferred installation order
