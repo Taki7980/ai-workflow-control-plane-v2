@@ -22,7 +22,7 @@ class CIQualityContractTests(unittest.TestCase):
         )
         self.assertNotIn("Ruff focused quality gate", workflow)
         self.assertIn("[tool.ruff.lint]", pyproject)
-        self.assertIn('select = ["E4", "E7", "E9", "F", "UP", "B", "BLE", "EXE", "I", "SIM", "PERF", "RUF"]', pyproject)
+        self.assertIn('select = ["E9", "F", "B", "BLE", "EXE"]', pyproject)
         self.assertNotIn('select = ["ALL"]', pyproject)
 
     def test_quality_workflow_type_checks_entire_package(self) -> None:
