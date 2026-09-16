@@ -72,12 +72,13 @@ Every command provider is executed without a shell and receives:
 
 - an explicit timeout;
 - a hard stdout byte limit;
-- stderr redirected away from context ingestion;
+- a bounded stderr diagnostic tail;
 - a restricted environment instead of the full parent environment.
 
 Default stdout limit: `8 MiB` (`8388608` bytes).
+Default stderr diagnostic limit: `64 KiB` (`65536` bytes).
 
-If a process exceeds the stdout limit it is terminated and the provider result is marked `output_limit`.
+If stdout exceeds its limit, the provider process tree is terminated and the result is marked `output_limit`. stderr is drained independently so a noisy provider cannot block on a full pipe; only the configured tail is retained. stderr never becomes retrieval evidence.
 
 ## Trusted provider registry
 
@@ -127,9 +128,30 @@ Executable authority lives in a separate user/admin-owned JSON file outside the 
 }
 ```
 
-The registry must be outside the repository. Its executable must be an absolute regular-file path outside the repository and its SHA-256 digest must match before launch. Repository configuration can tighten timeout/output limits and choose intents, but it cannot provide an executable, digest, environment allowlist, or execution semantics. This prevents a malicious repository from converting data/configuration authority into local-code or credential authority.
+The registry must be outside the repository. Its executable must be an absolute, non-symlink regular-file path outside the repository and its SHA-256 digest must match during registry resolution. That digest is carried in the immutable provider spec and reverified immediately before both synchronous and asynchronous process launch. A changed, replaced, symlinked, or repository-moved executable fails closed with `provider_trust`.
+
+Repository configuration can tighten timeout/output limits and choose intents, but it cannot provide or override the executable, digest, environment allowlist, neutral-CWD policy, stderr cap, version identity, or execution semantics. This prevents a malicious repository from converting data/configuration authority into local-code or credential authority.
 
 A digest-pinned interpreter is also prevented from being pointed at an existing repository-owned script path. If a trusted provider needs a helper script, register it with an absolute path outside the project and treat that helper as part of the trusted provider installation.
+
+## Working-directory isolation
+
+Trusted registry providers default to an ephemeral neutral working directory that exists only for the lifetime of the provider process. The repository path is still supplied explicitly in the JSON request as `root`; it is not granted as ambient process state through the current working directory.
+
+A trusted user/admin registry may set `neutral_cwd=false` for a compatibility provider that genuinely requires the historical executable-directory CWD. Checked-in repository configuration cannot weaken this policy. Unsafe legacy repository-defined commands retain their historical repository CWD only behind `AI_WORKFLOW_ALLOW_REPO_PROVIDER_COMMANDS=1`.
+
+## stderr diagnostics
+
+Provider stderr is diagnostic data only. The runner:
+
+- drains stderr concurrently with stdout;
+- retains only the configured tail;
+- marks `stderr_truncated=true` when earlier data was discarded;
+- redacts literal values of environment variables explicitly passed through the trusted `env_allowlist`;
+- redacts common bearer, authorization, API-key, token, password and secret assignments;
+- exposes the result as `ProviderResult.stderr_tail` and `stderr_truncated`.
+
+stderr is never converted into `ContextItem` evidence.
 
 ## Environment policy
 
@@ -146,6 +168,7 @@ Direct `command` fields remain parseable for migration, but runtime execution is
 Typed `ProviderResult` values distinguish evidence from failures. Current failure kinds are:
 
 - `configuration` — invalid provider configuration;
+- `provider_trust` — trusted executable identity or path policy changed before launch;
 - `launch` — executable/cwd could not be started;
 - `timeout` — process exceeded its deadline;
 - `output_limit` — stdout exceeded the configured byte limit;
