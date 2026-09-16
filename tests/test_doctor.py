@@ -1,4 +1,4 @@
-import tempfile, unittest, json
+import tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from ai_workflow.doctor import run
