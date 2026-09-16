@@ -59,7 +59,8 @@ class DurableMemoryStoreTests(unittest.TestCase):
                 try:
                     row = self._record(f"mem-{index}"); row["created_at"] = f"2026-01-01T00:00:{index:02d}+00:00"; row["verified_at"] = row["created_at"]
                     SQLiteMemoryStore(root).insert(row)
-                except Exception as exc: errors.append(exc)
+                except Exception as exc:  # noqa: BLE001 - collect worker failures for assertion
+                    errors.append(exc)
             threads = [threading.Thread(target=write, args=(i,)) for i in range(10)]
             for thread in threads: thread.start()
             for thread in threads: thread.join()
