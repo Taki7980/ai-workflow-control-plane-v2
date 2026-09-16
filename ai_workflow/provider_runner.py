@@ -286,10 +286,10 @@ def _parse_records(raw: str) -> list[dict[str, Any]]:
                     "provider returned invalid JSON/JSONL payload"
                 ) from exc
             if not isinstance(row, dict):
-                raise ValueError("provider JSONL rows must be objects")
+                raise ValueError("provider JSONL rows must be objects") from None
             rows.append(row)
         if not rows and raw.strip():
-            raise ValueError("provider returned invalid JSON/JSONL payload")
+            raise ValueError("provider returned invalid JSON/JSONL payload") from None
         return rows
 
     if isinstance(payload, dict):
