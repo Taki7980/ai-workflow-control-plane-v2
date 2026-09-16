@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -19,7 +18,6 @@ from ai_workflow.repository_registry import (
     refresh_registry,
     registry_payload,
     registry_summary,
-    remote_identity,
     repository_id,
     set_repository_included,
 )
