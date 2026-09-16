@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from ai_workflow.bootstrap import setup
+import ai_workflow.repository_hygiene as repository_hygiene_module
 
 
 @unittest.skipUnless(shutil.which("git"), "git is not installed")
@@ -205,6 +206,89 @@ class RepositoryHygieneTests(unittest.TestCase):
                     "ai-workspace/config/repositories.json",
                 )
             )
+
+    def _repository_hygiene(self, root: Path) -> dict:
+        self.assertTrue(
+            hasattr(repository_hygiene_module, "repository_hygiene"),
+            "repository_hygiene() must exist",
+        )
+        return repository_hygiene_module.repository_hygiene(root)
+
+    def test_hygiene_rejects_tracked_ignored_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            (root / ".gitignore").write_text(
+                ".env\n",
+                encoding="utf-8",
+            )
+            (root / ".env").write_text(
+                "TOKEN=do-not-track\n",
+                encoding="utf-8",
+            )
+            self._git(root, "add", ".gitignore")
+            self._git(root, "add", "-f", ".env")
+
+            result = self._repository_hygiene(root)
+
+            self.assertFalse(result["clean"])
+            self.assertIn(".env", result["ignored_tracked"])
+            self.assertIn(".env", result["tracked_forbidden"])
+
+    def test_hygiene_rejects_machine_local_registry_even_if_ignore_is_weakened(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            registry = root / "ai-workspace/config/repositories.json"
+            registry.parent.mkdir(parents=True)
+            registry.write_text(
+                '{"version": 1, "repositories": []}\n',
+                encoding="utf-8",
+            )
+            self._git(
+                root,
+                "add",
+                "ai-workspace/config/repositories.json",
+            )
+
+            result = self._repository_hygiene(root)
+
+            self.assertFalse(result["clean"])
+            self.assertIn(
+                "ai-workspace/config/repositories.json",
+                result["tracked_forbidden"],
+            )
+
+    def test_hygiene_allows_deliberate_tracked_exceptions(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            paths = {
+                ".env.example": "TOKEN=example\n",
+                "ai-workspace/generated/.gitkeep": "",
+                "ai-workspace/memory/README.md": "# Memory contract\n",
+            }
+            for relative, value in paths.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(value, encoding="utf-8")
+            self._git(root, "add", *paths.keys())
+
+            result = self._repository_hygiene(root)
+
+            self.assertTrue(result["clean"], result)
+            self.assertEqual(result["tracked_forbidden"], [])
+            self.assertEqual(result["ignored_tracked"], [])
+
+    def test_current_repository_hygiene_is_clean(self):
+        root = Path(__file__).resolve().parents[1]
+
+        result = self._repository_hygiene(root)
+
+        self.assertTrue(result["clean"], result)
+        self.assertTrue(result["local_state_ignored"], result)
+        self.assertEqual(result["tracked_forbidden"], [])
+        self.assertEqual(result["ignored_tracked"], [])
 
     def test_setup_non_git_workspace_does_not_create_git_metadata(self):
         with tempfile.TemporaryDirectory() as td:
