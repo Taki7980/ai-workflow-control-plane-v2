@@ -206,8 +206,8 @@ def _fallback_label(label: str, kind: str) -> str:
 
 def _structural_anchor(
     items: list[ContextItem],
-) -> tuple[str | None, str | None]:
-    """Return the first bounded symbol/path anchor from ranked evidence."""
+) -> tuple[str | None, str | None, Path | None]:
+    """Return the first bounded symbol/path anchor and its repository."""
 
     for item in items:
         metadata = dict(item.metadata)
@@ -240,8 +240,14 @@ def _structural_anchor(
                 ).strip()
 
         if symbol or path:
-            return symbol or None, path or None
-    return None, None
+            raw_root = item.provenance.get("workspace_root")
+            repository = (
+                Path(str(raw_root)).resolve()
+                if raw_root
+                else None
+            )
+            return symbol or None, path or None, repository
+    return None, None, None
 
 
 class WorkflowEngine:
@@ -320,22 +326,27 @@ class WorkflowEngine:
         selected_roots = roots[:max_roots]
         base_calls: list[ScheduledCall] = []
         workspace_root = Path(root).resolve()
+
+        def changed_for(candidate_root: Path) -> list[str]:
+            if candidate_root == workspace_root:
+                return list(changed)
+            try:
+                relative_root = candidate_root.relative_to(
+                    workspace_root
+                ).as_posix()
+            except ValueError:
+                return []
+            prefix = relative_root.rstrip("/") + "/"
+            return [
+                path[len(prefix):]
+                for path in changed
+                if path.startswith(prefix)
+            ]
+
         for index, candidate_root in enumerate(selected_roots):
             label = "base" if index == 0 else f"workspace:{candidate_root.name}"
             trace.providers_attempted.append(label)
-            candidate_changed = changed if candidate_root == workspace_root else []
-            if candidate_root != workspace_root:
-                try:
-                    relative_root = candidate_root.relative_to(workspace_root).as_posix()
-                except ValueError:
-                    relative_root = ""
-                if relative_root:
-                    prefix = relative_root.rstrip("/") + "/"
-                    candidate_changed = [
-                        path[len(prefix):]
-                        for path in changed
-                        if path.startswith(prefix)
-                    ]
+            candidate_changed = changed_for(candidate_root)
             base_calls.append(ScheduledCall(
                 label,
                 lambda candidate_root=candidate_root, candidate_changed=candidate_changed: self.base_gather(
@@ -371,6 +382,7 @@ class WorkflowEngine:
         specialist_items: list[ContextItem] = []
         specialist_calls: list[ScheduledCall] = []
         specialist_kinds: list[str] = []
+        specialist_roots: list[Path] = []
 
         algorithm_policy = _algorithm_policy(effective_config)
         early_gate_open = (
@@ -380,12 +392,28 @@ class WorkflowEngine:
         should_semantic = plan.use_semantic and early_gate_open
         provider_limit = int(config["context"].get("max_results_per_source", 6))
         if should_semantic and providers.semantic:
-            trace.providers_attempted.append("semantic")
-            specialist_calls.append(ScheduledCall(
-                "semantic",
-                lambda: self.semantic_provider(root, query, config, provider_limit),
-            ))
-            specialist_kinds.append("semantic")
+            for candidate_root in selected_roots:
+                label = (
+                    "semantic"
+                    if len(selected_roots) == 1
+                    else f"semantic:{candidate_root.name}"
+                )
+                trace.providers_attempted.append(label)
+                specialist_calls.append(
+                    ScheduledCall(
+                        label,
+                        lambda candidate_root=candidate_root: (
+                            self.semantic_provider(
+                                candidate_root,
+                                query,
+                                config,
+                                provider_limit,
+                            )
+                        ),
+                    )
+                )
+                specialist_kinds.append("semantic")
+                specialist_roots.append(candidate_root)
         elif plan.use_semantic:
             trace.providers_skipped["semantic"] = "provider not configured" if not providers.semantic else "base evidence sufficient"
 
@@ -399,6 +427,7 @@ class WorkflowEngine:
                     lambda spec=spec: self.external_provider(root, query, plan.intent.value, spec, provider_limit),
                 ))
                 specialist_kinds.append(label)
+                specialist_roots.append(workspace_root)
 
         specialist_outcomes: list[SchedulerOutcome] = []
         if specialist_calls:
@@ -416,7 +445,11 @@ class WorkflowEngine:
                     for call in specialist_calls
                 ]
 
-        for outcome, kind in zip(specialist_outcomes, specialist_kinds):
+        for outcome, kind, provider_root in zip(
+            specialist_outcomes,
+            specialist_kinds,
+            specialist_roots,
+        ):
             if not outcome.ok or not isinstance(outcome.value, ProviderResult):
                 trace.stage_latency_ms[outcome.label] = round(outcome.latency_ms, 2)
                 trace.candidates[outcome.label] = 0
@@ -434,7 +467,10 @@ class WorkflowEngine:
                 provider_errors[outcome.label] = result.error_dict() or {"kind": "provider_error", "message": result.error}
                 error_kind = result.error_kind or "provider_error"
                 trace.fallbacks.append(_fallback_label(outcome.label, error_kind))
-            specialist_items.extend(_provenance(item, root) for item in result.items)
+            specialist_items.extend(
+                _provenance(item, provider_root)
+                for item in result.items
+            )
 
         pre_expansion_suff = evaluate_sufficiency(
             query,
@@ -449,17 +485,31 @@ class WorkflowEngine:
                     "provider not configured"
                 )
             else:
-                discovered_symbol, anchor_path = _structural_anchor(
+                (
+                    discovered_symbol,
+                    anchor_path,
+                    anchor_root,
+                ) = _structural_anchor(
                     [*specialist_items, *base_items]
                 )
                 anchor_symbol = symbol or discovered_symbol
-                structural_files = list(changed)
+                structural_root = anchor_root
+                if structural_root is None and len(selected_roots) == 1:
+                    structural_root = selected_roots[0]
+                structural_files = (
+                    changed_for(structural_root)
+                    if structural_root is not None
+                    else []
+                )
                 if not structural_files and anchor_path:
                     structural_files = [anchor_path]
                 can_expand = bool(
-                    anchor_symbol
-                    or structural_files
-                    or "architecture" in plan.structural_patterns
+                    structural_root is not None
+                    and (
+                        anchor_symbol
+                        or structural_files
+                        or "architecture" in plan.structural_patterns
+                    )
                 )
                 if can_expand:
                     label = "structural-expansion"
@@ -471,7 +521,7 @@ class WorkflowEngine:
                                 ScheduledCall(
                                     label,
                                     lambda: self.structural_provider(
-                                        root,
+                                        structural_root,
                                         query,
                                         anchor_symbol,
                                         structural_files,
@@ -501,7 +551,7 @@ class WorkflowEngine:
                     if outcome.ok and isinstance(outcome.value, list):
                         trace.candidates[label] = len(outcome.value)
                         specialist_items.extend(
-                            _provenance(item, root)
+                            _provenance(item, structural_root)
                             for item in outcome.value
                         )
                     else:
@@ -515,7 +565,7 @@ class WorkflowEngine:
                             deadline_labels.append(label)
                 else:
                     trace.providers_skipped["structural-expansion"] = (
-                        "no symbol or file anchor"
+                        "no unambiguous repository anchor"
                     )
 
         limit = provider_limit * 3
