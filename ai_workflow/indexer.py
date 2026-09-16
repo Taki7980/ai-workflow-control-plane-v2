@@ -460,13 +460,18 @@ def index_workspace(
 
     distinct_modes = set(effective_modes)
     aggregate_mode = (
-        next(iter(distinct_modes))
+        "skipped"
+        if normalized == "none"
+        else next(iter(distinct_modes))
         if len(distinct_modes) == 1
         else "mixed"
     )
-    return {
+    result = {
         "mode": aggregate_mode,
         "repository_count": len(rows),
         "repositories": rows,
         **totals,
     }
+    if normalized == "none":
+        result["reason"] = "disabled"
+    return result
