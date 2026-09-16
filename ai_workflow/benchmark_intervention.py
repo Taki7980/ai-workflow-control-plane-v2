@@ -326,7 +326,7 @@ def run_intervention_runner(
             "error": "runner must return one JSON object",
         }
 
-    raw_events = decoded.get("trajectory_events") or []
+    raw_events = decoded.get("trajectory_events", [])
     if not isinstance(raw_events, list):
         return {
             "status": "invalid_output",
