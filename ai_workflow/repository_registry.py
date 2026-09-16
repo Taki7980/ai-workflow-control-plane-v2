@@ -4,6 +4,7 @@ import configparser
 import hashlib
 import json
 import os
+import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -96,6 +97,70 @@ def _registry_lock(path: Path):
                 yield
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _git_text(
+    repo: Path,
+    *args: str,
+    timeout: int = 3,
+) -> str | None:
+    """Read repository metadata through Git when available."""
+
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    value = proc.stdout.strip()
+    return value or None
+
+
+def _git_metadata(
+    repo: Path,
+) -> tuple[Path, str | None, str | None, str | None] | None:
+    """Return Git-native metadata for one repository root.
+
+    Git is authoritative when it can describe the repository. This avoids
+    depending on the on-disk ref backend (files, packed-refs, reftable, etc.).
+    """
+
+    top_level = _git_text(repo, "rev-parse", "--show-toplevel")
+    git_dir_raw = _git_text(repo, "rev-parse", "--absolute-git-dir")
+    if not top_level or not git_dir_raw:
+        return None
+    try:
+        top = Path(top_level).resolve()
+        candidate = Path(repo).resolve()
+        git_dir = Path(git_dir_raw).resolve()
+    except OSError:
+        return None
+    if top != candidate or not git_dir.is_dir():
+        return None
+
+    head_ref = _git_text(repo, "symbolic-ref", "--quiet", "HEAD")
+    head_sha = _git_text(repo, "rev-parse", "--verify", "HEAD")
+    remote = _git_text(repo, "config", "--get", "remote.origin.url")
+    if remote is None:
+        names = _git_text(repo, "remote")
+        if names:
+            first = names.splitlines()[0].strip()
+            if first:
+                remote = _git_text(
+                    repo,
+                    "config",
+                    "--get",
+                    f"remote.{first}.url",
+                )
+    return git_dir, remote, head_ref, head_sha
 
 
 def _relative_or_none(path: Path, root: Path) -> str | None:
@@ -254,14 +319,19 @@ def _spec_for_directory(
     included: bool = False,
     reason: str = "discovered",
 ) -> RepositorySpec | None:
-    git_dir = _git_dir(directory)
-    if git_dir is None:
-        return None
+    metadata = _git_metadata(directory)
+    if metadata is not None:
+        git_dir, raw_remote, head_ref, head_sha = metadata
+    else:
+        git_dir = _git_dir(directory)
+        if git_dir is None:
+            return None
+        raw_remote = _read_remote(git_dir)
+        head_ref, head_sha = _read_head(git_dir)
+
     rel = _relative_or_none(directory, base)
     if rel is None:
         return None
-    raw_remote = _read_remote(git_dir)
-    head_ref, head_sha = _read_head(git_dir)
     return RepositorySpec(
         name=directory.name,
         relative_path=rel,
