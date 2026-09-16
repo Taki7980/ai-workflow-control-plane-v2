@@ -6,6 +6,7 @@ from .code_review_graph import sync_workspace_graphs
 from .config import DEFAULT_RELATIVE, default_config, load_config
 from .indexer import index_workspace
 from .io_utils import atomic_write_json, atomic_write_text
+from .repository_hygiene import install_local_excludes
 from .repository_registry import refresh_registry, registry_payload
 
 
@@ -164,6 +165,7 @@ def setup(
         created.append(DEFAULT_RELATIVE.as_posix())
 
     config = load_config(root)
+    local_excludes = install_local_excludes(root)
     _write_project_rules(root, name, legacy_root_files, created, preserved)
     _write_project_marker(root, legacy_root_files, created, preserved)
     registry = _write_repository_registry(
@@ -195,6 +197,7 @@ def setup(
         "created": created,
         "preserved": preserved,
         "repository_registry": registry,
+        "repository_hygiene": {"local_excludes": local_excludes},
         "index": index,
         "code_review_graph": crg,
         "next": 'ai-workflow brief "your task" --format prompt',
