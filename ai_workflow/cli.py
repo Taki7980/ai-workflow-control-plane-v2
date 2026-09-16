@@ -49,7 +49,7 @@ from .deployment_state import (
 )
 from .doctor import run as doctor_run
 from .handoff import handoff_path, render as render_handoff, validate as validate_handoff
-from .indexer import build_indexes, incremental_indexes
+from .indexer import index_workspace
 from .io_utils import atomic_write_json, atomic_write_text
 from .observability_export import (
     build_deployment_metrics,
@@ -161,7 +161,11 @@ def cmd_init(args):
             "status": "initialized",
             "project": args.project_name,
             "root": str(root),
-            "index": build_indexes(root),
+            "index": index_workspace(
+                root,
+                load_config(root),
+                mode="full",
+            ),
         }
     )
 
@@ -370,15 +374,18 @@ def cmd_context(args):
 
 def cmd_index(args):
     root = _root(args)
-    if getattr(args, "incremental", False):
-        _json(
-            incremental_indexes(
-                root,
-                strict_hash=bool(getattr(args, "strict_hash", False)),
-            )
+    _json(
+        index_workspace(
+            root,
+            load_config(root),
+            mode=(
+                "incremental"
+                if getattr(args, "incremental", False)
+                else "full"
+            ),
+            strict_hash=bool(getattr(args, "strict_hash", False)),
         )
-    else:
-        _json(build_indexes(root))
+    )
 
 
 def cmd_doctor(args):
