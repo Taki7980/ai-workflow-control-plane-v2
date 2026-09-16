@@ -5,6 +5,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_workflow.context_selection import select_context
 from ai_workflow.math_retrieval import BM25Scorer, tokenize
@@ -71,6 +72,31 @@ class TokenAwareSelectorContractTests(unittest.TestCase):
         self.assertEqual(diagnostics["used_tokens"], 1)
         self.assertEqual(diagnostics["budget_tokens"], 1)
         self.assertLessEqual(diagnostics["used_chars"], 100)
+
+    def test_default_token_cost_uses_shared_estimator_boundary(self) -> None:
+        items = [
+            ContextItem("verbose", "payment verbose", 5.0),
+            ContextItem("compact", "payment compact", 5.0),
+        ]
+
+        def shared_estimate(text: str, estimator=None) -> int:
+            return 1 if "compact" in text else 10
+
+        with patch(
+            "ai_workflow.context_selection.estimate_tokens",
+            side_effect=shared_estimate,
+        ) as estimate:
+            selected, diagnostics = select_context(
+                "payment",
+                items,
+                budget_chars=100,
+                budget_tokens=1,
+                config={"context": {"selector": {"tight_budget_fraction": 0.5}}},
+            )
+
+        self.assertEqual([item.source for item in selected], ["compact"])
+        self.assertEqual(diagnostics["used_tokens"], 1)
+        self.assertGreaterEqual(estimate.call_count, 2)
 
     def test_token_budget_never_bypasses_character_hard_cap(self) -> None:
         item = ContextItem("compact", "payment compact evidence", 10.0)
