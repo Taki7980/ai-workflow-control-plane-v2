@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +25,7 @@ from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 
 DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+DEFAULT_MAX_STDERR_BYTES = 64 * 1024
 def _provider_process_group_kwargs() -> dict[str, Any]:
     """Launch each provider in an isolated OS process group/session."""
 
@@ -100,9 +106,12 @@ class CommandProviderSpec:
     command: tuple[str, ...]
     timeout_seconds: float = 8.0
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
+    max_stderr_bytes: int = DEFAULT_MAX_STDERR_BYTES
     intents: tuple[str, ...] = ("all",)
     env_allowlist: tuple[str, ...] = ()
     executable_trust: str = "configured_local_executable"
+    executable_sha256: str | None = None
+    neutral_cwd: bool = False
     version: str = "unknown"
     semantics: ProviderSemantics = field(default_factory=ProviderSemantics)
 
@@ -119,6 +128,21 @@ class CommandProviderSpec:
             raise ValueError(
                 f"provider {self.name!r} max_output_bytes must be > 0"
             )
+        if self.max_stderr_bytes <= 0:
+            raise ValueError(
+                f"provider {self.name!r} max_stderr_bytes must be > 0"
+            )
+        if self.executable_sha256 is not None:
+            digest = self.executable_sha256.strip().lower()
+            if digest.startswith("sha256:"):
+                digest = digest.removeprefix("sha256:")
+            if len(digest) != 64 or any(
+                ch not in "0123456789abcdef" for ch in digest
+            ):
+                raise ValueError(
+                    f"provider {self.name!r} executable_sha256 must be a SHA-256 digest"
+                )
+            object.__setattr__(self, "executable_sha256", digest)
         if not self.version.strip():
             raise ValueError(f"provider {self.name!r} version must not be blank")
 
@@ -165,6 +189,16 @@ def command_provider_spec(
     if semantics_raw is not None and not isinstance(semantics_raw, Mapping):
         raise ValueError("provider semantics must be an object")
 
+    neutral_cwd = raw.get("neutral_cwd", False)
+    if not isinstance(neutral_cwd, bool):
+        raise ValueError("provider neutral_cwd must be a boolean")
+
+    executable_sha256 = str(
+        raw.get("executable_sha256") or raw.get("sha256") or ""
+    ).strip().lower()
+    if executable_sha256.startswith("sha256:"):
+        executable_sha256 = executable_sha256.removeprefix("sha256:")
+
     return CommandProviderSpec(
         name=str(raw.get("name") or default_name),
         command=argv,
@@ -172,8 +206,13 @@ def command_provider_spec(
         max_output_bytes=int(
             raw.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)
         ),
+        max_stderr_bytes=int(
+            raw.get("max_stderr_bytes", DEFAULT_MAX_STDERR_BYTES)
+        ),
         intents=tuple(intents),
         env_allowlist=tuple(env_allowlist),
+        executable_sha256=executable_sha256 or None,
+        neutral_cwd=neutral_cwd,
         version=str(raw.get("version") or "unknown"),
         semantics=ProviderSemantics.from_mapping(semantics_raw),
     )
