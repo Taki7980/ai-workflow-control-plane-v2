@@ -887,7 +887,7 @@ async def run_command_provider_async(
                         stderr_output,
                         stderr_truncated,
                     ) = await exchange_task
-                except Exception:
+                except (OSError, RuntimeError):
                     output = b""
                     exceeded = False
                     returncode = proc.returncode
