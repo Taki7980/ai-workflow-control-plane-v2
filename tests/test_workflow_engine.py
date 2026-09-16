@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_workflow.budget import ContextBudget
 from ai_workflow.config import default_config
@@ -319,6 +320,108 @@ class WorkflowEngineTests(unittest.TestCase):
             )
 
         self.assertEqual(seen, ["ProcessPayment"])
+
+
+    def test_multirepo_semantic_anchor_expands_graph_in_own_repository(self):
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        cfg["context"]["sufficiency"]["threshold"] = 0.4
+        decision = RouteDecision(
+            Lane.FULL,
+            Risk.MEDIUM,
+            structural_context=True,
+            confidence=0.9,
+        )
+        budget = ContextBudget(6000, 1200, 24000, {})
+        semantic_roots = []
+        structural_roots = []
+
+        def base(root, *args, **kwargs):
+            return [
+                ContextItem(
+                    "lightweight_index",
+                    f"{root.name} weak payment evidence",
+                    0.1,
+                )
+            ]
+
+        def semantic(root, query, config, limit):
+            semantic_roots.append(root.name)
+            if root.name != "backend":
+                return ProviderResult("semantic", ())
+            return ProviderResult(
+                "semantic",
+                (
+                    ContextItem(
+                        "semantic",
+                        "service.py:10 payment retry handler",
+                        0.95,
+                        False,
+                        {
+                            "path": "service.py",
+                            "symbol": "ProcessPayment",
+                        },
+                    ),
+                ),
+            )
+
+        def structural(
+            root,
+            query,
+            symbol,
+            changed_files,
+            limit,
+            *,
+            patterns=(),
+        ):
+            structural_roots.append(root.name)
+            return [
+                ContextItem(
+                    "code_review_graph",
+                    "backend impact evidence",
+                    9.0,
+                    False,
+                    {
+                        "pattern": "impact",
+                        "structural_valid": True,
+                        "result_count": 1,
+                    },
+                )
+            ]
+
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            admin = workspace / "admin-panel"
+            backend = workspace / "backend"
+            admin.mkdir()
+            backend.mkdir()
+            engine = WorkflowEngine(
+                base_gather=base,
+                semantic_provider=semantic,
+                structural_provider=structural,
+            )
+            with patch(
+                "ai_workflow.workflow_engine.workspace_roots",
+                return_value=[admin.resolve(), backend.resolve()],
+            ):
+                _, diagnostics = engine.gather_detailed(
+                    workspace,
+                    "What breaks if the payment retry handler changes?",
+                    decision,
+                    budget,
+                    cfg,
+                    ProviderStatus(False, True, False, False, True),
+                )
+
+        self.assertEqual(
+            semantic_roots,
+            ["admin-panel", "backend"],
+        )
+        self.assertEqual(structural_roots, ["backend"])
+        self.assertTrue(
+            diagnostics["sufficiency"]["structural_complete"]
+        )
 
 
 if __name__ == "__main__":
