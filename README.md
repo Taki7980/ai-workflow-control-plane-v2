@@ -164,6 +164,29 @@ ai-workflow brief "refactor payment retry handling" --format prompt
 
 You do **not** need to copy or clone this repository into the project being managed. Install the CLI once with pipx/uv, then run `ai-workflow setup` from the parent workspace.
 
+### Repository hygiene
+
+When the control workspace is itself a Git repository, `ai-workflow setup` installs an idempotent AI Workflow block in Git's repository-local common `info/exclude`. This protects machine-local state such as the discovered repository registry, generated indexes/traces, managed CRG data and runtime memory without editing your tracked `.gitignore`. Linked worktrees share the same common exclude file, so the protection follows Git's own common-directory model.
+
+Team-shareable project material remains trackable: `ai-workspace/config/control-plane.json`, agent instructions, project markers, templates and documentation are not hidden by the local exclude block.
+
+The repository also ships a project-wide `.gitignore` for common build/test/editor/credential/runtime artifacts. CI runs:
+
+```bash
+python scripts/check_repository_hygiene.py --root .
+```
+
+to reject tracked machine-local/generated artifacts even if an ignore rule is later weakened.
+
+Cleanup is deliberately non-destructive. Preview ignored local files first:
+
+```bash
+git clean -ndX
+git ls-files -ci --exclude-standard
+```
+
+Review those results before removing anything. AI Workflow does not automatically run destructive `git clean -fdX`, history rewrites, or bulk `git rm --cached` cleanup.
+
 For scripts or automation, request JSON explicitly:
 
 ```bash
