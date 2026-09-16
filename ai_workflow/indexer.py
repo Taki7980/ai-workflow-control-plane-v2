@@ -2,6 +2,7 @@ from __future__ import annotations
 import ast, hashlib, json, os, re
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Any
 
 from .io_utils import atomic_write_json, atomic_write_jsonl
 from .repository_registry import is_git_repository
@@ -350,12 +351,12 @@ def incremental_indexes(root: Path, strict_hash: bool = False) -> dict:
     endpoints = [r for r in old_endpoints if r.get("file") in keep_files]
     ast_files = 0
     for rel in sorted(changed):
-        path = current_files.get(rel)
+        changed_path = current_files.get(rel)
         entry = new_state.get(rel)
-        if path is None or entry is None:
+        if changed_path is None or entry is None:
             continue
         digest = entry["sha256"]
-        new_sym, new_ep = _parse_file(path, rel, digest)
+        new_sym, new_ep = _parse_file(changed_path, rel, digest)
         if any(row.get("parser") == "python-ast" for row in new_sym):
             ast_files += 1
         symbols.extend(new_sym)
@@ -430,6 +431,7 @@ def index_workspace(
             )
         effective_modes.append(effective)
 
+        result: dict[str, Any]
         if effective == "none":
             result = {
                 "files": 0,

@@ -978,6 +978,8 @@ def cmd_learning_record_outcome(args):
         args.decision_id,
         success=bool(args.success),
         source=args.source,
+        verifier_identity=args.verifier_identity,
+        evidence_digest=args.evidence_digest,
         reward=args.reward,
         realized_cost=args.realized_cost,
         config=load_config(root),
@@ -1331,6 +1333,8 @@ def build_parser():
     outcome.add_argument("--success", action="store_true")
     outcome.add_argument("--failure", action="store_true")
     l.add_argument("--source", required=True)
+    l.add_argument("--verifier-identity", required=True)
+    l.add_argument("--evidence-digest", required=True)
     l.add_argument("--reward", type=float)
     l.add_argument("--realized-cost", type=float, default=0.0)
     l.set_defaults(func=cmd_learning_record_outcome)

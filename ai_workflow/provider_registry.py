@@ -187,6 +187,7 @@ def resolve_trusted_provider(
         _positive_cap(project_spec.get("max_output_bytes"), trusted_spec.max_output_bytes)
     )
     intents = project_spec.get("intents", trusted_spec.intents)
+    project_intents: tuple[str, ...]
     if isinstance(intents, str):
         project_intents = (intents,)
     elif isinstance(intents, (list, tuple)) and all(
