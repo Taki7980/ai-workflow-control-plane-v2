@@ -92,7 +92,8 @@ class RepositoryRegistryTests(unittest.TestCase):
                 root,
                 {"workspace": {"registry": "ai-workspace/config/repositories.json", "roots": [], "max_roots": 4}},
             )
-            self.assertEqual(roots, [root.resolve(), backend.resolve()])
+            self.assertEqual(roots, [backend.resolve()])
+            self.assertNotIn(root.resolve(), roots)
             self.assertNotIn(frontend.resolve(), roots)
 
     def test_registry_requires_explicit_review_gate(self):
