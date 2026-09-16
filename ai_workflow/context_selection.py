@@ -3,9 +3,10 @@ from __future__ import annotations
 import heapq
 from dataclasses import dataclass
 
+from .config import estimate_tokens
 from .math_retrieval import tokenize
 from .models import ContextItem
-from .token_estimator import CharacterTokenEstimator, TokenEstimator
+from .token_estimator import TokenEstimator
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ def _dedupe(items: list[ContextItem]) -> list[ContextItem]:
 def _candidates(
     query: str,
     items: list[ContextItem],
-    estimator: TokenEstimator,
+    estimator: TokenEstimator | None,
 ) -> list[_Candidate]:
     unique = _dedupe(items)
     if not unique:
@@ -61,7 +62,7 @@ def _candidates(
                 relevance=relevance,
                 tokens=tokens,
                 char_cost=max(1, len(item.text)),
-                token_cost=max(1, estimator.estimate(item.text)),
+                token_cost=max(1, estimate_tokens(item.text, estimator)),
             )
         )
     return rows
@@ -138,7 +139,7 @@ def select_context(
         None if budget_tokens is None else max(0, int(budget_tokens))
     )
     token_aware = token_limit is not None
-    estimator = token_estimator or CharacterTokenEstimator()
+    estimator = token_estimator
     selector_cfg = (((config or {}).get("context") or {}).get("selector") or {})
     requested_limit = (
         max_selector_candidates
