@@ -10,7 +10,7 @@ from typing import Any
 from .indexer import index_data_dir
 from .path_policy import PathOutsideWorkspace, resolve_within_root
 from .repository_registry import load_registry, remote_identity, repository_id
-from .workspace import workspace_roots
+from .workspace import active_repository_roots
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -234,7 +234,7 @@ def aggregate_workspace_fingerprint(
         registry_by_path[repo_root] = spec
 
     snapshots: list[dict[str, Any]] = []
-    for repo_root in workspace_roots(workspace_root, config):
+    for repo_root in active_repository_roots(workspace_root, config):
         spec = registry_by_path.get(repo_root)
         if repo_root == workspace_root:
             relative = "."
