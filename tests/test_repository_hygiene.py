@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 
@@ -289,6 +291,64 @@ class RepositoryHygieneTests(unittest.TestCase):
         self.assertTrue(result["local_state_ignored"], result)
         self.assertEqual(result["tracked_forbidden"], [])
         self.assertEqual(result["ignored_tracked"], [])
+
+    def test_repository_hygiene_script_reports_clean_repository(self):
+        root = Path(__file__).resolve().parents[1]
+        script = root / "scripts/check_repository_hygiene.py"
+        self.assertTrue(script.is_file(), "hygiene CLI script must exist")
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(root),
+                "--json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertTrue(payload["clean"])
+        self.assertTrue(payload["local_state_ignored"])
+
+    def test_repository_hygiene_script_fails_for_forbidden_tracked_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            (root / ".env").write_text(
+                "TOKEN=do-not-track\n",
+                encoding="utf-8",
+            )
+            self._git(root, "add", "-f", ".env")
+            script = (
+                Path(__file__).resolve().parents[1]
+                / "scripts/check_repository_hygiene.py"
+            )
+            self.assertTrue(script.is_file(), "hygiene CLI script must exist")
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--root",
+                    str(root),
+                    "--json",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            payload = json.loads(proc.stdout)
+            self.assertFalse(payload["clean"])
+            self.assertIn(".env", payload["tracked_forbidden"])
 
     def test_setup_non_git_workspace_does_not_create_git_metadata(self):
         with tempfile.TemporaryDirectory() as td:
