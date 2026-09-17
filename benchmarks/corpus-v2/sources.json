@@ -5,14 +5,15 @@
       "id": "agent-retrieval-bench",
       "paper": "https://arxiv.org/abs/2607.24882",
       "repository": "https://github.com/eyuansu62/agent-retrieval-bench",
-      "integration_status": "source-registered-not-vendored",
+      "integration_status": "adapter-supported-not-vendored",
+      "supported_format": "benchmark JSONL file-level cases with frozen base_commit identity",
       "license_note": "Verify benchmark metadata and every referenced repository license before redistribution."
     },
     {
       "id": "contextbench",
       "paper": "https://arxiv.org/abs/2602.05892",
       "repository": "https://github.com/EuniAI/ContextBench",
-      "integration_status": "source-registered-not-vendored",
+      "integration_status": "source-registered-future-span-trajectory-adapter",
       "license_note": "Use upstream data under its published terms; do not infer redistribution rights."
     },
     {
@@ -25,7 +26,9 @@
     {
       "id": "core-bench",
       "paper": "https://arxiv.org/abs/2606.11864",
-      "integration_status": "source-registered-not-vendored",
+      "repository": "https://github.com/zhangfw123/CORE-Bench-Eval",
+      "integration_status": "adapter-supported-not-vendored",
+      "supported_format": "repository-scoped queries.jsonl, qrels.jsonl and corpus.jsonl",
       "license_note": "Verify upstream dataset and repository licenses before materialization."
     }
   ]
