@@ -1,6 +1,6 @@
 import unittest
 
-from ai_workflow.cli import build_parser
+from ai_workflow.benchmark_external_cli import build_parser, handles
 
 
 class ExternalBenchmarkCliTests(unittest.TestCase):
@@ -27,6 +27,7 @@ class ExternalBenchmarkCliTests(unittest.TestCase):
         self.assertEqual(args.benchmark_corpus_command, "import-arb")
         self.assertEqual(args.input, "arb.jsonl")
         self.assertEqual(args.output, "normalized.json")
+        self.assertTrue(handles(["benchmark-corpus", "import-arb"]))
 
     def test_import_core_parser_contract(self):
         args = build_parser().parse_args(
@@ -59,6 +60,7 @@ class ExternalBenchmarkCliTests(unittest.TestCase):
         self.assertEqual(args.benchmark_corpus_command, "import-core")
         self.assertEqual(args.repository_id, "example/project")
         self.assertEqual(args.base_commit, "a" * 40)
+        self.assertTrue(handles(["benchmark-corpus", "import-core"]))
 
     def test_external_report_parser_contract(self):
         args = build_parser().parse_args(
@@ -77,6 +79,8 @@ class ExternalBenchmarkCliTests(unittest.TestCase):
         self.assertEqual(args.benchmark_corpus_command, "external-report")
         self.assertEqual(args.input, ["arb.json", "core.json"])
         self.assertEqual(args.minimum_languages, 2)
+        self.assertTrue(handles(["benchmark-corpus", "external-report"]))
+        self.assertFalse(handles(["benchmark-corpus", "validate"]))
 
 
 if __name__ == "__main__":
