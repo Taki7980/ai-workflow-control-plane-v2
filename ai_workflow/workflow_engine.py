@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
 from .budget import ContextBudget, truncate
+from .code_review_graph import workspace_graph_fingerprint
 from .context_broker import (
     crg_context as default_structural_provider,
     gather as default_base_gather,
@@ -18,6 +20,7 @@ from .deployment_runtime import resolve_runtime_deployment
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .models import ContextItem, Lane, RouteDecision
 from .orchestration import build_orchestration_contract
+from .provenance import config_digest
 from .providers import ProviderStatus
 from .retrieval_contracts import ProviderResult
 from .retrieval_policy import classify_retrieval_intent, evaluate_sufficiency
@@ -28,6 +31,7 @@ from .retrieval_learning import (
 )
 from .retrieval_scheduler import BoundedRetrievalScheduler, ScheduledCall, SchedulerOutcome
 from .retriever_plugins import configured_retrievers, run_retriever_result as default_external_provider
+from .run_journal import write_run_journal
 from .semantic import semantic_result as default_semantic_provider
 from .scip import scip_context as default_scip_provider
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
@@ -308,8 +312,18 @@ class WorkflowEngine:
         changed_files: list[str] | None = None,
         *,
         write_telemetry: bool = False,
+        run_id: str | None = None,
     ) -> tuple[list[ContextItem], dict]:
         changed = changed_files or []
+        execution_run_id = (
+            str(run_id).strip() if run_id else str(uuid.uuid4())
+        )
+        policy_identity: dict[str, Any] = {
+            "config_digest": config_digest(config),
+            "retrieval_policy_version": str(
+                config.get("version", "unknown")
+            ),
+        }
         plan = classify_retrieval_intent(
             query,
             decision,
@@ -340,7 +354,17 @@ class WorkflowEngine:
             config,
             learning_decision.chosen_arm,
         )
-        trace = RetrievalTrace(query, decision.lane.value, decision.risk.value, plan.intent.value, budget_chars=budget.context_chars)
+        algorithm_policy = _algorithm_policy(effective_config)
+        policy_identity["algorithm_policy"] = dict(algorithm_policy)
+        trace = RetrievalTrace(
+            query,
+            decision.lane.value,
+            decision.risk.value,
+            plan.intent.value,
+            run_id=execution_run_id,
+            policy_identity=dict(policy_identity),
+            budget_chars=budget.context_chars,
+        )
         max_concurrency, global_deadline = _scheduler_settings(config)
         scheduler = BoundedRetrievalScheduler(max_concurrency)
         started = time.perf_counter()
@@ -424,7 +448,6 @@ class WorkflowEngine:
         specialist_kinds: list[str] = []
         specialist_roots: list[Path] = []
 
-        algorithm_policy = _algorithm_policy(effective_config)
         early_gate_open = (
             not suff.sufficient
             or algorithm_policy["disable_early_sufficiency_gate"]
@@ -726,6 +749,13 @@ class WorkflowEngine:
         )
         state = _evidence_state(decision, final_suff.sufficient)
         snapshot = workspace_fingerprint(root, changed)
+        graph_state = workspace_graph_fingerprint(root, config)
+        trace.workspace_fingerprint = str(
+            snapshot.get("fingerprint", "")
+        )
+        trace.graph_fingerprint = str(
+            graph_state.get("fingerprint", "")
+        )
 
         trace.selected = {source: sum(1 for item in selected if item.source == source) for source in {i.source for i in selected}}
         trace.sufficiency = {
@@ -747,11 +777,14 @@ class WorkflowEngine:
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         diagnostics: dict[str, Any] = {
+            "run_id": execution_run_id,
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
             "algorithm_policy": algorithm_policy,
+            "policy_identity": policy_identity,
             "workspace_roots": [str(path) for path in roots],
             "workspace_state": snapshot,
+            "graph_state": graph_state,
             "evidence_state": state,
             "sufficiency": trace.sufficiency,
             "selector": selector,
@@ -808,6 +841,89 @@ class WorkflowEngine:
                 diagnostics["learning"]["observation_path"] = None
         if write_telemetry and trace_enabled(config, decision.lane.value):
             diagnostics["trace"] = write_trace(root, trace, config)
+            safe_error_kinds = {
+                name: {
+                    "kind": str(error.get("kind") or "provider_error"),
+                    "timed_out": bool(error.get("timed_out", False)),
+                }
+                for name, error in provider_errors.items()
+            }
+            safe_metadata_keys = {
+                "path",
+                "file",
+                "line",
+                "start_line",
+                "end_line",
+                "sha256",
+                "symbol",
+                "endpoint",
+                "pattern",
+                "role",
+                "language",
+            }
+            safe_provenance_keys = {
+                "path",
+                "file",
+                "line",
+                "start_line",
+                "end_line",
+                "sha256",
+                "retriever",
+                "fresh",
+                "trust",
+            }
+            journal_record = {
+                "run_id": execution_run_id,
+                "policy_identity": policy_identity,
+                "workspace_state": {
+                    "fingerprint": snapshot.get("fingerprint"),
+                    "git_head": snapshot.get("git_head"),
+                },
+                "graph_state": graph_state,
+                "changed_files": list(changed),
+                "retrieval": {
+                    "retrieval_intent": plan.intent.value,
+                    "retrieval_reason": plan.reason,
+                    "evidence_state": state,
+                    "providers_attempted": list(
+                        trace.providers_attempted
+                    ),
+                    "providers_skipped": dict(
+                        trace.providers_skipped
+                    ),
+                    "provider_errors": safe_error_kinds,
+                    "algorithm_policy": algorithm_policy,
+                    "sufficiency": dict(trace.sufficiency),
+                    "selector": selector,
+                    "fallbacks": list(trace.fallbacks),
+                    "scheduler": dict(diagnostics["scheduler"]),
+                },
+                "selected_evidence": [
+                    {
+                        "source": item.source,
+                        "dedupe_key": item.dedupe_key,
+                        "stale": item.stale,
+                        "metadata": {
+                            key: value
+                            for key, value in item.metadata.items()
+                            if key in safe_metadata_keys
+                        },
+                        "provenance": {
+                            key: value
+                            for key, value in item.provenance.items()
+                            if key in safe_provenance_keys
+                        },
+                    }
+                    for item in selected
+                ],
+            }
+            try:
+                diagnostics["journal"] = write_run_journal(
+                    root,
+                    journal_record,
+                )
+            except (OSError, ValueError):
+                diagnostics["journal"] = None
         return selected, diagnostics
 
     def gather_detailed(self, *args, **kwargs):
