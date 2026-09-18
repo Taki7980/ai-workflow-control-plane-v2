@@ -29,6 +29,7 @@ from .retrieval_learning import (
 from .retrieval_scheduler import BoundedRetrievalScheduler, ScheduledCall, SchedulerOutcome
 from .retriever_plugins import configured_retrievers, run_retriever_result as default_external_provider
 from .semantic import semantic_result as default_semantic_provider
+from .scip import scip_context as default_scip_provider
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
 from .workspace_state import workspace_fingerprint
@@ -41,7 +42,7 @@ def _provenance(item: ContextItem, workspace_root: Path | None = None) -> Contex
     provenance.setdefault("fresh", not item.stale)
     if workspace_root is not None:
         provenance.setdefault("workspace_root", str(workspace_root))
-    if item.source in {"lightweight_index", "targeted_source", "code_review_graph", "semantic", "test_resolver"} or item.source.startswith("external:"):
+    if item.source in {"lightweight_index", "targeted_source", "code_review_graph", "scip", "semantic", "test_resolver"} or item.source.startswith("external:"):
         provenance.setdefault("trust", "untrusted_repository_content")
     elif item.source in {"durable_memory", "hot_cache", "research_cache"}:
         provenance.setdefault("trust", "generated_or_cached_context")
@@ -285,11 +286,13 @@ class WorkflowEngine:
         base_gather: Callable = default_base_gather,
         semantic_provider: Callable = default_semantic_provider,
         structural_provider: Callable = default_structural_provider,
+        scip_provider: Callable = default_scip_provider,
         external_provider: Callable = default_external_provider,
     ) -> None:
         self.base_gather = base_gather
         self.semantic_provider = semantic_provider
         self.structural_provider = structural_provider
+        self.scip_provider = scip_provider
         self.external_provider = external_provider
 
     async def gather_detailed_async(
@@ -526,39 +529,74 @@ class WorkflowEngine:
             threshold=threshold,
         )
         if plan.use_structural and not pre_expansion_suff.structural_complete:
-            if not providers.code_review_graph:
+            (
+                discovered_symbol,
+                anchor_path,
+                anchor_root,
+            ) = _structural_anchor([*specialist_items, *base_items])
+            anchor_symbol = symbol or discovered_symbol
+            structural_root = anchor_root
+            if structural_root is None and len(selected_roots) == 1:
+                structural_root = selected_roots[0]
+
+            structural_files = (
+                changed_for(structural_root)
+                if structural_root is not None
+                else []
+            )
+            if not structural_files and anchor_path:
+                structural_files = [anchor_path]
+            can_expand = bool(
+                structural_root is not None
+                and (
+                    anchor_symbol
+                    or structural_files
+                    or "architecture" in plan.structural_patterns
+                    or "references_to" in plan.structural_patterns
+                )
+            )
+
+            if not can_expand or structural_root is None:
                 trace.providers_skipped["structural-expansion"] = (
-                    "provider not configured"
+                    "no unambiguous repository anchor"
                 )
-            else:
-                (
-                    discovered_symbol,
-                    anchor_path,
-                    anchor_root,
-                ) = _structural_anchor(
-                    [*specialist_items, *base_items]
-                )
-                anchor_symbol = symbol or discovered_symbol
-                structural_root = anchor_root
-                if structural_root is None and len(selected_roots) == 1:
-                    structural_root = selected_roots[0]
-                structural_files = (
-                    changed_for(structural_root)
-                    if structural_root is not None
-                    else []
-                )
-                if not structural_files and anchor_path:
-                    structural_files = [anchor_path]
-                can_expand = bool(
-                    structural_root is not None
-                    and (
-                        anchor_symbol
-                        or structural_files
-                        or "architecture" in plan.structural_patterns
+                if "references_to" in plan.structural_patterns:
+                    trace.providers_skipped["scip-structural-expansion"] = (
+                        "no unambiguous repository anchor"
                     )
-                )
-                if can_expand:
-                    label = "structural-expansion"
+            else:
+                structural_steps = [
+                    (
+                        "structural-expansion",
+                        providers.code_review_graph,
+                        self.structural_provider,
+                        True,
+                    ),
+                    (
+                        "scip-structural-expansion",
+                        providers.scip,
+                        self.scip_provider,
+                        "references_to" in plan.structural_patterns,
+                    ),
+                ]
+                for label, enabled, provider, relevant in structural_steps:
+                    current_suff = evaluate_sufficiency(
+                        query,
+                        [*base_items, *specialist_items],
+                        structural_required=True,
+                        structural_patterns=plan.structural_patterns,
+                        threshold=threshold,
+                    )
+                    if current_suff.structural_complete:
+                        break
+                    if not relevant:
+                        continue
+                    if not enabled:
+                        trace.providers_skipped[label] = (
+                            "provider not configured"
+                        )
+                        continue
+
                     trace.providers_attempted.append(label)
                     time_left = remaining()
                     if time_left > 0:
@@ -566,7 +604,8 @@ class WorkflowEngine:
                             [
                                 ScheduledCall(
                                     label,
-                                    lambda: self.structural_provider(
+                                    partial(
+                                        provider,
                                         structural_root,
                                         query,
                                         anchor_symbol,
@@ -609,10 +648,6 @@ class WorkflowEngine:
                         )
                         if outcome.timed_out:
                             deadline_labels.append(label)
-                else:
-                    trace.providers_skipped["structural-expansion"] = (
-                        "no unambiguous repository anchor"
-                    )
 
         limit = provider_limit * 3
         candidates = _hybrid_rank(
@@ -634,18 +669,25 @@ class WorkflowEngine:
 
         selector_cfg = ((config.get("context") or {}).get("selector") or {})
         if selector_cfg.get("enabled", True):
+            structural_sources = tuple(
+                dict.fromkeys(
+                    item.source
+                    for item in candidates
+                    if bool(item.metadata.get("structural_valid"))
+                    and (
+                        not plan.structural_patterns
+                        or str(item.metadata.get("pattern") or "")
+                        in plan.structural_patterns
+                    )
+                )
+            )
             mandatory_sources = (
-                ("code_review_graph",)
+                structural_sources
                 if (
                     plan.use_structural
                     and selector_cfg.get(
                         "mandatory_structural_evidence",
                         True,
-                    )
-                    and any(
-                        item.source == "code_review_graph"
-                        and bool(item.metadata.get("structural_valid"))
-                        for item in candidates
                     )
                 )
                 else ()
@@ -697,11 +739,7 @@ class WorkflowEngine:
         }
         if plan.use_semantic and not any(item.source == "semantic" for item in specialist_items) and not final_suff.sufficient and "semantic" not in provider_errors:
             trace.fallbacks.append("semantic unavailable or returned no candidates")
-        if plan.use_structural and not any(
-            item.source == "code_review_graph"
-            and bool(item.metadata.get("structural_valid"))
-            for item in selected
-        ):
+        if plan.use_structural and not final_suff.structural_complete:
             trace.fallbacks.append(
                 "structural evidence incomplete; source fallback used"
             )
