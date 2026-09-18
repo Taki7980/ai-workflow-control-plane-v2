@@ -70,7 +70,7 @@ def scip_data_dir(workspace_root: Path, repository_root: Path) -> Path:
 
 
 def _has_source(root: Path, suffixes: set[str]) -> bool:
-    for current, dirs, files in os.walk(root):
+    for _current, dirs, files in os.walk(root):
         dirs[:] = [name for name in dirs if name not in _SKIP_DIRS]
         if any(Path(name).suffix.lower() in suffixes for name in files):
             return True
