@@ -20,10 +20,10 @@ from ..benchmark_calibration import calibrate_sufficiency_threshold
 from ..benchmark_policy_advisor import build_safe_policy_advisor
 from ..benchmark_protocol import capture_repository_snapshot
 from ..benchmark_statistics import analyze_seed_report
-from ..config import estimate_tokens, find_project_root, load_config
-from ..io_utils import atomic_write_json, atomic_write_text
+from ..config import load_config
+from ..io_utils import atomic_write_json
 
-from .common import _json, _root
+from .common import _json, _load_json_object, _root
 
 def cmd_benchmark_corpus_validate(args):
     document = load_corpus_document(Path(args.input))
