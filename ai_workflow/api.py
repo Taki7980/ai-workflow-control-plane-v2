@@ -100,17 +100,30 @@ class WorkflowClient:
             if isinstance(workspace_state, Mapping)
             else "unknown"
         )
-        run = RunMetadata.create(
-            control_plane_version=__version__,
-            workspace_fingerprint=fingerprint,
-            git_head=git_head(root),
-            changed_files_digest=changed_files_digest(task.changed_files),
-            config_digest=config_digest(config),
-            retrieval_policy_version=str(config.get("version", "unknown")),
-            index_manifest_digest=index_manifest_digest(root),
-            provider_versions=provider_versions_from_config(config),
-            artifacts=task.artifacts,
+        graph_state = retrieval.get("graph_state")
+        graph_fingerprint = (
+            str(graph_state.get("fingerprint", "unknown"))
+            if isinstance(graph_state, Mapping)
+            else "unknown"
         )
+        run_kwargs: dict[str, Any] = {
+            "control_plane_version": __version__,
+            "workspace_fingerprint": fingerprint,
+            "graph_fingerprint": graph_fingerprint,
+            "git_head": git_head(root),
+            "changed_files_digest": changed_files_digest(task.changed_files),
+            "config_digest": config_digest(config),
+            "retrieval_policy_version": str(
+                config.get("version", "unknown")
+            ),
+            "index_manifest_digest": index_manifest_digest(root),
+            "provider_versions": provider_versions_from_config(config),
+            "artifacts": task.artifacts,
+        }
+        retrieval_run_id = str(retrieval.get("run_id") or "").strip()
+        if retrieval_run_id:
+            run_kwargs["run_id"] = retrieval_run_id
+        run = RunMetadata.create(**run_kwargs)
         if self.persist_runs:
             store = self.run_store or LocalRunStore(
                 root / "ai-workspace" / "runs"
