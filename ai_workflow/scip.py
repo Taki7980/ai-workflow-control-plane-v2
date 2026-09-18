@@ -90,7 +90,7 @@ def _indexer_for(root: Path, language: str) -> ScipIndexer | None:
     if name == "java":
         return ScipIndexer("java", "scip-java", ("index",))
     if name == "go":
-        return ScipIndexer("go", "scip-go", ())
+        return ScipIndexer("go", "scip-go", ("./...",))
     return None
 
 
@@ -370,13 +370,6 @@ def scip_context(
     )
 
 
-def _write_bytes_atomic(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_bytes(data)
-    os.replace(temporary, path)
-
-
 def sync_scip_index(
     workspace_root: Path,
     repository_root: Path,
@@ -391,80 +384,86 @@ def sync_scip_index(
     except (PathOutsideWorkspace, OSError) as exc:
         return {"ready": False, "reason": f"unsafe SCIP state path: {exc}"}
 
-    data_dir.mkdir(parents=True, exist_ok=True)
-    source_index = repository / "index.scip"
-    existed_before = source_index.is_file()
     indexer = detect_indexer(repository, language)
+    if indexer is None:
+        return {
+            "ready": False,
+            "reason": "no unambiguous supported SCIP indexer detected",
+        }
+
     scip_executable = shutil.which("scip")
+    indexer_executable = shutil.which(indexer.executable)
     if scip_executable is None:
         return {"ready": False, "reason": "scip CLI is not installed"}
+    if indexer_executable is None:
+        return {
+            "ready": False,
+            "reason": f"{indexer.executable} is not installed",
+            "language": indexer.language,
+        }
 
-    generated = False
-    indexer_name = "existing-index"
-    if not existed_before:
-        if indexer is None:
-            return {
-                "ready": False,
-                "reason": "no unambiguous supported SCIP indexer detected",
-            }
-        executable = shutil.which(indexer.executable)
-        if executable is None:
-            return {
-                "ready": False,
-                "reason": f"{indexer.executable} is not installed",
-                "language": indexer.language,
-            }
-        indexer_name = indexer.executable
-        try:
-            proc = subprocess.run(
-                [executable, *indexer.args],
-                cwd=repository,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return {"ready": False, "reason": str(exc), "language": indexer.language}
-        generated = source_index.is_file()
-        if proc.returncode != 0 or not generated:
-            if generated:
-                try:
-                    source_index.unlink()
-                except OSError:
-                    pass
-            message = (proc.stderr or proc.stdout).strip()[:500]
-            return {
-                "ready": False,
-                "reason": message or "SCIP indexer did not create index.scip",
-                "language": indexer.language,
-            }
-
-    try:
-        index_bytes = source_index.read_bytes()
-    except OSError as exc:
-        return {"ready": False, "reason": f"cannot read index.scip: {exc}"}
-    finally:
-        if generated:
-            try:
-                source_index.unlink()
-            except OSError:
-                pass
-
+    data_dir.mkdir(parents=True, exist_ok=True)
     central_index = data_dir / "index.scip"
-    _write_bytes_atomic(central_index, index_bytes)
+    temporary_index = data_dir / "index.scip.tmp"
     try:
-        with central_index.open("rb") as handle:
-            printed = subprocess.run(
-                [scip_executable, "print", "--json"],
-                stdin=handle,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=min(timeout_seconds, 60),
-                check=False,
-            )
+        temporary_index.unlink(missing_ok=True)
+    except OSError as exc:
+        return {"ready": False, "reason": f"cannot prepare SCIP output: {exc}"}
+
+    command = [indexer_executable, *indexer.args]
+    if indexer.language == "go":
+        command = [
+            indexer_executable,
+            "--output",
+            str(temporary_index),
+            *indexer.args,
+        ]
+    else:
+        command.extend(["--output", str(temporary_index)])
+
+    try:
+        indexed = subprocess.run(
+            command,
+            cwd=repository,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ready": False, "reason": str(exc), "language": indexer.language}
+
+    if (
+        indexed.returncode != 0
+        or not temporary_index.is_file()
+        or temporary_index.is_symlink()
+    ):
+        try:
+            temporary_index.unlink(missing_ok=True)
+        except OSError:
+            pass
+        message = (indexed.stderr or indexed.stdout).strip()[:500]
+        return {
+            "ready": False,
+            "reason": message or "SCIP indexer did not create a safe index",
+            "language": indexer.language,
+        }
+
+    try:
+        os.replace(temporary_index, central_index)
+    except OSError as exc:
+        return {"ready": False, "reason": f"cannot publish SCIP index: {exc}"}
+
+    try:
+        printed = subprocess.run(
+            [scip_executable, "print", "--json", str(central_index)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=min(timeout_seconds, 60),
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ready": False, "reason": f"scip print failed: {exc}"}
     if printed.returncode != 0 or not printed.stdout.strip():
@@ -488,8 +487,8 @@ def sync_scip_index(
         "repository_relative_path": relative,
         "repository_fingerprint": fingerprint["fingerprint"],
         "git_head": fingerprint.get("git_head"),
-        "language": indexer.language if indexer is not None else (language or "unknown"),
-        "indexer": indexer_name,
+        "language": indexer.language,
+        "indexer": indexer.executable,
         "index_sha256": _sha256_file(central_index),
         "json_sha256": _sha256_file(json_path),
     }
