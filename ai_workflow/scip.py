@@ -144,11 +144,11 @@ def scip_status(workspace_root: Path, repository_root: Path) -> dict[str, Any]:
     if not index_path.is_file():
         result["reason"] = "index.scip is missing"
         return result
-    if not json_path.is_file():
-        result["reason"] = "index.json is missing"
-        return result
     if not manifest_path.is_file():
         result["reason"] = "manifest.json is missing"
+        return result
+    if not json_path.is_file():
+        result["reason"] = "index.json is missing"
         return result
 
     try:
