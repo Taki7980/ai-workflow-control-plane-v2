@@ -51,8 +51,12 @@ _SEMANTIC = re.compile(
     r"behaviour|concept|meaning)\b",
     re.I,
 )
+_REFERENCES = re.compile(
+    r"\b(references?\s+to|find\s+references?|usages?\s+of)\b",
+    re.I,
+)
 _CALLERS = re.compile(
-    r"\b(who\s+calls?|callers?|called\s+by|references?\s+to|dependents?)\b",
+    r"\b(who\s+calls?|callers?|called\s+by|dependents?)\b",
     re.I,
 )
 _CALLEES = re.compile(
@@ -76,13 +80,14 @@ _ARCHITECTURE = re.compile(
 
 
 def structural_requirements(query: str) -> tuple[str, ...]:
-    """Return the minimum CRG relationship evidence requested by *query*."""
+    """Return the minimum structural relationship evidence requested by *query*."""
 
     text = " ".join(query.strip().split())
     patterns: list[str] = []
     for pattern, matcher in (
         ("impact", _IMPACT),
         ("tests_for", _TESTS),
+        ("references_to", _REFERENCES),
         ("callers_of", _CALLERS),
         ("callees_of", _CALLEES),
         ("architecture", _ARCHITECTURE),
@@ -209,10 +214,7 @@ def evaluate_sufficiency(
         if normalized_query and normalized_query in normalized_text:
             exact_match = True
 
-        if (
-            item.source == "code_review_graph"
-            and bool(item.metadata.get("structural_valid"))
-        ):
+        if bool(item.metadata.get("structural_valid")):
             pattern = str(item.metadata.get("pattern") or "").strip()
             if pattern:
                 matched_structural.add(pattern)
