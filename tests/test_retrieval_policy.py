@@ -84,6 +84,12 @@ class RetrievalPolicyTests(unittest.TestCase):
             ),
             ("callers_of",),
         )
+        self.assertEqual(
+            structural_requirements(
+                "Find references to ProcessPayment"
+            ),
+            ("references_to",),
+        )
 
     def test_sufficiency_is_bounded_and_requires_structural_evidence(self):
         items = [
@@ -125,10 +131,10 @@ class RetrievalPolicyTests(unittest.TestCase):
             )
         ]
         result = evaluate_sufficiency(
-            "Who calls ProcessPayment?",
+            "Find references to ProcessPayment",
             items,
             structural_required=True,
-            structural_patterns=("callers_of",),
+            structural_patterns=("references_to",),
             threshold=0.1,
         )
         self.assertFalse(result.structural_complete)
@@ -166,7 +172,7 @@ class RetrievalPolicyTests(unittest.TestCase):
                 9.0,
                 False,
                 {
-                    "pattern": "callers_of",
+                    "pattern": "references_to",
                     "structural_valid": True,
                     "role": "reference",
                     "result_count": 1,
