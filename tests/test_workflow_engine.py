@@ -611,5 +611,44 @@ class WorkflowEngineTests(unittest.TestCase):
         )
 
 
+    def test_run_identity_and_policy_identity_are_returned(self):
+        from ai_workflow.provenance import config_digest
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        decision = RouteDecision(Lane.ANSWER, Risk.LOW, confidence=0.9)
+        budget = ContextBudget(1200, 400, 4800, {})
+        engine = WorkflowEngine(
+            base_gather=lambda *args, **kwargs: [
+                ContextItem(
+                    "lightweight_index",
+                    "answer evidence",
+                    3.0,
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            _, diagnostics = engine.gather_detailed(
+                Path(td),
+                "answer evidence",
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(False, False, False, False, False),
+            )
+
+        self.assertTrue(diagnostics["run_id"])
+        self.assertEqual(
+            diagnostics["policy_identity"]["config_digest"],
+            config_digest(cfg),
+        )
+        self.assertEqual(
+            diagnostics["policy_identity"]["retrieval_policy_version"],
+            str(cfg["version"]),
+        )
+        self.assertIn("fingerprint", diagnostics["graph_state"])
+
+
 if __name__ == "__main__":
     unittest.main()
