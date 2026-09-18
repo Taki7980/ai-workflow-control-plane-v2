@@ -31,6 +31,7 @@ _DEFAULT_CONFIG = {
             "structural_keywords": ["caller", "callee", "dependency", "dependents", "impact", "blast radius", "flow", "architecture", "tests for", "refactor", "what breaks", "affected"],
             "min_source_files": 250, "changed_files_threshold": 3,
         },
+        "scip": {"mode": "auto"},
         "semantic": {
             "mode": "auto", "provider_id": "builtin-local", "command": "",
             "timeout_seconds": 8, "max_results": 6,
@@ -225,6 +226,12 @@ def validate_config(data: dict[str, Any]) -> None:
         _positive_int(int(spec.get("timeout_seconds", 8)), f"{prefix}.timeout_seconds")
         _positive_int(int(spec.get("max_output_bytes", 8388608)), f"{prefix}.max_output_bytes")
         _string_list(spec.get("env_allowlist", []), f"{prefix}.env_allowlist")
+
+    scip = data["context"].get("scip", {"mode": "auto"})
+    if not isinstance(scip, dict):
+        raise ValueError("context.scip must be an object")
+    if scip.get("mode", "auto") not in {"auto", "on", "off"}:
+        raise ValueError("context.scip.mode must be auto, on, or off")
 
     semantic = data["context"]["semantic"]
     if semantic.get("mode", "auto") not in {"auto", "on", "off"}:
