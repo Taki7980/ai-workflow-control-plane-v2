@@ -265,5 +265,26 @@ class TelemetryTests(unittest.TestCase):
                     self.assertTrue((root / path).exists())
 
 
+    def test_trace_persists_shared_run_identity(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            self._clean_env(),
+            clear=True,
+        ):
+            root = Path(td)
+            trace = RetrievalTrace(
+                "task",
+                "small",
+                "low",
+                "exact",
+                run_id="run-123",
+            )
+            path = write_trace(root, trace)
+            payload = json.loads(
+                (root / path).read_text(encoding="utf-8")
+            )
+        self.assertEqual(payload["run_id"], "run-123")
+
+
 if __name__ == "__main__":
     unittest.main()
