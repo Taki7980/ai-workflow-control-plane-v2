@@ -1,9 +1,13 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from ai_workflow.benchmark_external import (
     adapt_agent_retrieval_bench,
     adapt_core_bench,
     external_validation_report,
+    load_jsonl,
 )
 
 
@@ -156,6 +160,136 @@ class ExternalValidationReportTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate corpus_id"):
             external_validation_report([first, second])
+
+
+class JsonlLoaderTests(unittest.TestCase):
+    def test_load_jsonl_skips_blank_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "records.jsonl"
+            path.write_text('{"id": 1}\n\n{"id": 2}\n', encoding="utf-8")
+
+            self.assertEqual(load_jsonl(path), [{"id": 1}, {"id": 2}])
+
+    def test_load_jsonl_rejects_invalid_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "records.jsonl"
+            path.write_text("{bad json}\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "invalid JSONL"):
+                load_jsonl(path)
+
+            path.write_text("[]\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "must be an object"):
+                load_jsonl(path)
+
+
+class ExternalAdapterEdgeCaseTests(unittest.TestCase):
+    def test_arb_fallback_task_and_comment_context_gold(self):
+        record = {
+            **ARB_RECORD,
+            "query": {"issue": 42, "flag": True},
+            "task_type": "comment2context",
+            "gold": {
+                "supporting_files": ["src/support.py", "src/support.py"],
+                "root_cause_files": ["src/root.py"],
+            },
+            "metadata": {},
+        }
+
+        document = adapt_agent_retrieval_bench(
+            [record],
+            corpus_id="arb-fallback",
+            source_url="https://example.test/arb",
+            license_statement="test",
+            split="test",
+        )
+        case = document["cases"][0]
+
+        self.assertIn("flag: True", case["task"])
+        self.assertIn("issue: 42", case["task"])
+        self.assertEqual(case["gold_files"], ["src/support.py", "src/root.py"])
+        self.assertEqual(case["label_source"], "agent-retrieval-bench")
+        self.assertEqual(case["language"], "unknown")
+
+    def test_arb_rejects_unsupported_or_empty_gold(self):
+        unsupported = {**ARB_RECORD, "task_type": "unknown"}
+        with self.assertRaisesRegex(ValueError, "unsupported Agent Retrieval Bench"):
+            adapt_agent_retrieval_bench(
+                [unsupported],
+                corpus_id="arb-unsupported",
+                source_url="https://example.test/arb",
+                license_statement="test",
+                split="test",
+            )
+
+        empty_gold = {
+            **ARB_RECORD,
+            "gold": {"related_tests": []},
+        }
+        with self.assertRaisesRegex(ValueError, "no file-level gold"):
+            adapt_agent_retrieval_bench(
+                [empty_gold],
+                corpus_id="arb-empty",
+                source_url="https://example.test/arb",
+                license_statement="test",
+                split="test",
+            )
+
+    def test_core_aliases_default_score_and_top_level_path(self):
+        document = adapt_core_bench(
+            queries=[{"query_id": "q1", "query": "Find auth flow"}],
+            qrels=[{"query_id": "q1", "doc_id": "doc-a"}],
+            corpus=[{"corpus_id": "doc-a", "path": "src/auth.py"}],
+            repository_id="example/project",
+            base_commit="c" * 40,
+            corpus_id="core-aliases",
+            source_url="https://example.test/core",
+            license_statement="test",
+            split="test",
+            language="Python",
+        )
+
+        case = document["cases"][0]
+        self.assertEqual(case["task"], "Find auth flow")
+        self.assertEqual(case["gold_files"], ["src/auth.py"])
+        self.assertEqual(case["language"], "Python")
+
+    def test_core_rejects_bad_scores_and_missing_positive_qrels(self):
+        with self.assertRaisesRegex(ValueError, "not numeric"):
+            adapt_core_bench(
+                queries=[{"_id": "q1", "text": "Fix auth"}],
+                qrels=[{"query-id": "q1", "corpus-id": "doc-a", "score": "bad"}],
+                corpus=[{"_id": "doc-a", "path": "src/auth.py"}],
+                repository_id="example/project",
+                base_commit="d" * 40,
+                corpus_id="core-bad-score",
+                source_url="https://example.test/core",
+                license_statement="test",
+                split="test",
+            )
+
+        with self.assertRaisesRegex(ValueError, "no positive qrels"):
+            adapt_core_bench(
+                queries=[{"_id": "q1", "text": "Fix auth"}],
+                qrels=[{"query-id": "q1", "corpus-id": "doc-a", "score": 0}],
+                corpus=[{"_id": "doc-a", "path": "src/auth.py"}],
+                repository_id="example/project",
+                base_commit="e" * 40,
+                corpus_id="core-no-positive",
+                source_url="https://example.test/core",
+                license_statement="test",
+                split="test",
+            )
+
+    def test_external_report_not_ready_and_minimum_validation(self):
+        report = external_validation_report([], minimum_languages=1)
+        self.assertFalse(report["ready"])
+        self.assertIn("missing_source:agent-retrieval-bench", report["blockers"])
+        self.assertIn("missing_source:core-bench", report["blockers"])
+        self.assertIn("language_diversity:0<1", report["blockers"])
+        self.assertIn("no_cases", report["blockers"])
+
+        with self.assertRaisesRegex(ValueError, "minimum_languages"):
+            external_validation_report([], minimum_languages=0)
 
 
 if __name__ == "__main__":
