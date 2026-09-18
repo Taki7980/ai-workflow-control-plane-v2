@@ -22,6 +22,16 @@ class BenchmarkAblationTests(unittest.TestCase):
         self.assertEqual(result["context"]["external_retrievers"], [])
         self.assertNotEqual(config["context"]["semantic"]["command"], "")
 
+    def test_base_scip_isolates_scip_structural_family(self):
+        config = default_config()
+        config["context"]["scip"] = {"mode": "auto"}
+        result = profile_config(config, "base_scip")
+
+        self.assertEqual(result["context"]["semantic"]["mode"], "off")
+        self.assertEqual(result["context"]["crg"]["mode"], "off")
+        self.assertEqual(result["context"]["scip"]["mode"], "auto")
+        self.assertEqual(result["context"]["external_retrievers"], [])
+
     def test_adaptive_profile_preserves_original_config(self):
         config = default_config()
         config["context"]["external_retrievers"] = [
@@ -60,7 +70,13 @@ class BenchmarkAblationTests(unittest.TestCase):
     def test_profile_order_is_stable(self):
         self.assertEqual(
             PROFILE_ORDER,
-            ("adaptive", "base_only", "base_semantic", "base_structural"),
+            (
+                "adaptive",
+                "base_only",
+                "base_semantic",
+                "base_structural",
+                "base_scip",
+            ),
         )
 
 
