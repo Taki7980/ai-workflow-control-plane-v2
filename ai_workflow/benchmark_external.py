@@ -74,6 +74,7 @@ def _arb_task(query: Mapping[str, Any]) -> str:
 
 
 def _arb_gold_files(task_type: str, gold: Mapping[str, Any]) -> list[str]:
+    fields: tuple[str, ...]
     if task_type == "code2test":
         fields = ("related_tests",)
     elif task_type == "comment2context":
@@ -269,12 +270,12 @@ def adapt_core_bench(
                 ),
                 "qrel corpus id",
             )
-            record = corpus_by_id.get(corpus_id_value)
-            if record is None:
+            corpus_record = corpus_by_id.get(corpus_id_value)
+            if corpus_record is None:
                 raise ValueError(
                     f"qrel {query_id}/{corpus_id_value} references missing corpus row"
                 )
-            path = _corpus_file(record)
+            path = _corpus_file(corpus_record)
             if not path:
                 raise ValueError(
                     f"qrel {query_id}/{corpus_id_value} corpus row has no file path"
