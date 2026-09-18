@@ -439,5 +439,177 @@ class WorkflowEngineTests(unittest.TestCase):
         )
 
 
+    def test_scip_structural_fallback_when_crg_is_unavailable(self):
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        cfg["context"]["sufficiency"]["threshold"] = 0.1
+        decision = RouteDecision(
+            Lane.FULL,
+            Risk.MEDIUM,
+            structural_context=True,
+            confidence=0.9,
+        )
+        budget = ContextBudget(6000, 1200, 24000, {})
+        scip_calls = []
+
+        def base(*args, **kwargs):
+            return [
+                ContextItem(
+                    "lightweight_index",
+                    "ProcessPayment billing.py",
+                    0.4,
+                    False,
+                    {"path": "billing.py", "symbol": "ProcessPayment"},
+                )
+            ]
+
+        def scip(
+            root,
+            query,
+            symbol,
+            changed_files,
+            limit,
+            *,
+            patterns=(),
+        ):
+            scip_calls.append(
+                {
+                    "symbol": symbol,
+                    "changed_files": list(changed_files or []),
+                    "patterns": tuple(patterns),
+                }
+            )
+            return [
+                ContextItem(
+                    "scip",
+                    "CheckoutService references ProcessPayment",
+                    9.0,
+                    False,
+                    {
+                        "pattern": "callers_of",
+                        "structural_valid": True,
+                        "role": "reference",
+                        "result_count": 1,
+                    },
+                )
+            ]
+
+        with tempfile.TemporaryDirectory() as td:
+            engine = WorkflowEngine(
+                base_gather=base,
+                scip_provider=scip,
+            )
+            items, diagnostics = engine.gather_detailed(
+                Path(td),
+                "Who calls ProcessPayment?",
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    scip=True,
+                ),
+                symbol="ProcessPayment",
+            )
+
+        self.assertEqual(len(scip_calls), 1)
+        self.assertIn(
+            "scip-structural-expansion",
+            diagnostics["providers_attempted"],
+        )
+        self.assertTrue(diagnostics["sufficiency"]["structural_complete"])
+        self.assertTrue(any(item.source == "scip" for item in items))
+
+    def test_crg_stays_primary_when_it_completes_structural_evidence(self):
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        cfg["context"]["sufficiency"]["threshold"] = 0.1
+        decision = RouteDecision(
+            Lane.FULL,
+            Risk.MEDIUM,
+            structural_context=True,
+            confidence=0.9,
+        )
+        budget = ContextBudget(6000, 1200, 24000, {})
+        scip_calls = []
+
+        def base(*args, **kwargs):
+            return [
+                ContextItem(
+                    "lightweight_index",
+                    "ProcessPayment billing.py",
+                    0.4,
+                    False,
+                    {"path": "billing.py", "symbol": "ProcessPayment"},
+                )
+            ]
+
+        def structural(
+            root,
+            query,
+            symbol,
+            changed_files,
+            limit,
+            *,
+            patterns=(),
+        ):
+            return [
+                ContextItem(
+                    "code_review_graph",
+                    "CheckoutService -> ProcessPayment",
+                    9.0,
+                    False,
+                    {
+                        "pattern": "callers_of",
+                        "structural_valid": True,
+                        "result_count": 1,
+                    },
+                )
+            ]
+
+        def scip(*args, **kwargs):
+            scip_calls.append(True)
+            return []
+
+        with tempfile.TemporaryDirectory() as td:
+            engine = WorkflowEngine(
+                base_gather=base,
+                structural_provider=structural,
+                scip_provider=scip,
+            )
+            _, diagnostics = engine.gather_detailed(
+                Path(td),
+                "Who calls ProcessPayment?",
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(
+                    False,
+                    True,
+                    False,
+                    False,
+                    False,
+                    scip=True,
+                ),
+                symbol="ProcessPayment",
+            )
+
+        self.assertEqual(scip_calls, [])
+        self.assertIn(
+            "structural-expansion",
+            diagnostics["providers_attempted"],
+        )
+        self.assertNotIn(
+            "scip-structural-expansion",
+            diagnostics["providers_attempted"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
