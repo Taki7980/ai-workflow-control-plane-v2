@@ -11,6 +11,7 @@ PROFILE_ORDER = (
     "base_only",
     "base_semantic",
     "base_structural",
+    "base_scip",
 )
 
 
@@ -25,6 +26,7 @@ def profile_config(config: dict[str, Any], profile: str) -> dict[str, Any]:
     context = out.setdefault("context", {})
     semantic = context.setdefault("semantic", {})
     crg = context.setdefault("crg", {})
+    scip = context.setdefault("scip", {"mode": "auto"})
 
     if name == "adaptive":
         return out
@@ -35,11 +37,17 @@ def profile_config(config: dict[str, Any], profile: str) -> dict[str, Any]:
         semantic["mode"] = "off"
         semantic["command"] = ""
         crg["mode"] = "off"
+        scip["mode"] = "off"
     elif name == "base_semantic":
         crg["mode"] = "off"
+        scip["mode"] = "off"
     elif name == "base_structural":
         semantic["mode"] = "off"
         semantic["command"] = ""
+    elif name == "base_scip":
+        semantic["mode"] = "off"
+        semantic["command"] = ""
+        crg["mode"] = "off"
 
     return out
 
@@ -127,7 +135,8 @@ def run_ablation_suite(
         "note": (
             "Profiles isolate provider families, not ranking mathematics inside "
             "the native base broker. base_only disables semantic, external, and "
-            "CRG providers; base_semantic disables CRG/external; "
-            "base_structural disables semantic/external."
+            "CRG/SCIP providers; base_semantic disables CRG/SCIP/external; "
+            "base_structural disables semantic/external; base_scip disables "
+            "semantic/CRG/external."
         ),
     }
