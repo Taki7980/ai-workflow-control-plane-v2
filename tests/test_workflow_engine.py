@@ -487,7 +487,7 @@ class WorkflowEngineTests(unittest.TestCase):
                     9.0,
                     False,
                     {
-                        "pattern": "callers_of",
+                        "pattern": "references_to",
                         "structural_valid": True,
                         "role": "reference",
                         "result_count": 1,
@@ -502,7 +502,7 @@ class WorkflowEngineTests(unittest.TestCase):
             )
             items, diagnostics = engine.gather_detailed(
                 Path(td),
-                "Who calls ProcessPayment?",
+                "Find references to ProcessPayment",
                 decision,
                 budget,
                 cfg,
