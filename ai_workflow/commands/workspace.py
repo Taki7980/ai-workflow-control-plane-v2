@@ -3,20 +3,19 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from ..adaptive_broker import gather_detailed
 from ..bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, bootstrap, setup
 from ..budget import budget_for
 from ..classifier import classify
 from ..compress import compress_text
 from ..config import estimate_tokens, load_config
-from ..context_broker import detect_changed_files
 from ..doctor import run as doctor_run
 from ..handoff import handoff_path, render as render_handoff, validate as validate_handoff
 from ..indexer import index_workspace
 from ..io_utils import atomic_write_json, atomic_write_text
-from ..providers import detect, execution_provider, model_tier
 from ..repository_registry import refresh_registry, registry_summary, set_repository_included
-from ..telemetry import policy_recommendations, summarize_traces
+from ..provider import detect, execution_provider, model_tier
+from ..retrieval import detect_changed_files, gather_detailed
+from ..state import policy_recommendations, summarize_traces
 from ..verify import verify
 
 from .common import _json, _root
