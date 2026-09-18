@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from ..config import estimate_tokens, find_project_root, load_config
+from ..config import load_config
 from ..deployment_guardrails import evaluate_live_guardrails
 from ..deployment_incident import (
     create_incident_bundle,
@@ -15,17 +15,12 @@ from ..deployment_state import (
     verify_deployment_state,
     write_new_deployment_state,
 )
-from ..io_utils import atomic_write_json, atomic_write_text
+from ..io_utils import atomic_write_json
 from ..observability_export import (
     build_deployment_metrics,
     write_deployment_metrics,
 )
-from ..production_store import (
-    mirror_learning_event,
-    production_store_status,
-    reconcile_learning_store,
-    sync_learning_store,
-)
+from ..production_store import mirror_learning_event
 
 from .common import _json, _load_json_object, _root, _signing_key_from_env
 
