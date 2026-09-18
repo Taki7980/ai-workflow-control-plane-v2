@@ -105,11 +105,11 @@ class ScipPayloadTests(unittest.TestCase):
             items = items_from_scip_payload(
                 root,
                 payload,
-                "Who calls ProcessPayment?",
+                "Find references to ProcessPayment",
                 "ProcessPayment",
                 [],
                 20,
-                patterns=("callers_of",),
+                patterns=("references_to",),
             )
 
         self.assertEqual(
@@ -118,7 +118,7 @@ class ScipPayloadTests(unittest.TestCase):
         )
         self.assertTrue(all(item.source == "scip" for item in items))
         self.assertTrue(all(item.metadata["structural_valid"] for item in items))
-        self.assertTrue(all(item.metadata["pattern"] == "callers_of" for item in items))
+        self.assertTrue(all(item.metadata["pattern"] == "references_to" for item in items))
         self.assertTrue(any(item.metadata["role"] == "reference" for item in items))
 
     def test_accepts_snake_case_json_fields(self):
