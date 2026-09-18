@@ -137,6 +137,10 @@ class RetrievalTrace:
     lane: str
     risk: str
     intent: str
+    run_id: str = ""
+    policy_identity: dict[str, Any] = field(default_factory=dict)
+    workspace_fingerprint: str = ""
+    graph_fingerprint: str = ""
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     providers_attempted: list[str] = field(default_factory=list)
     providers_skipped: dict[str, str] = field(default_factory=dict)
