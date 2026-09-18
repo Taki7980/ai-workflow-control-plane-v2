@@ -6,6 +6,8 @@ from ._version import __version__
 from .benchmark_external_cli import handles as external_handles
 from .benchmark_external_cli import main as external_main
 from .cli import main as cli_main
+from .run_cli import handles as run_handles
+from .run_cli import main as run_main
 from .scip_cli import handles as scip_handles
 from .scip_cli import main as scip_main
 
@@ -22,5 +24,8 @@ def main() -> None:
         return
     if scip_handles(argv):
         scip_main(argv)
+        return
+    if run_handles(argv):
+        run_main(argv)
         return
     cli_main()
