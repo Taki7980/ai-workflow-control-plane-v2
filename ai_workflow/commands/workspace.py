@@ -8,7 +8,7 @@ from ..bootstrap import WORKSPACE_AGENTS_RELATIVE, WORKSPACE_PROJECT_RELATIVE, b
 from ..budget import budget_for
 from ..classifier import classify
 from ..compress import compress_text
-from ..config import estimate_tokens, find_project_root, load_config
+from ..config import estimate_tokens, load_config
 from ..context_broker import detect_changed_files
 from ..doctor import run as doctor_run
 from ..handoff import handoff_path, render as render_handoff, validate as validate_handoff
