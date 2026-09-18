@@ -581,7 +581,7 @@ def crg_context(
                 )
 
     for pattern in requested:
-        if pattern in {"impact", "architecture"}:
+        if pattern in {"impact", "architecture", "references_to"}:
             continue
         if not anchor:
             continue
