@@ -1,6 +1,11 @@
+import io
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
-from ai_workflow.benchmark_external_cli import build_parser, handles
+from ai_workflow.benchmark_external_cli import build_parser, handles, main
 
 
 class ExternalBenchmarkCliTests(unittest.TestCase):
@@ -81,6 +86,176 @@ class ExternalBenchmarkCliTests(unittest.TestCase):
         self.assertEqual(args.minimum_languages, 2)
         self.assertTrue(handles(["benchmark-corpus", "external-report"]))
         self.assertFalse(handles(["benchmark-corpus", "validate"]))
+
+
+    def test_command_execution_writes_imports_and_report(self):
+        arb_record = {
+            "base_commit": "a" * 40,
+            "gold": {"related_tests": ["tests/test_auth.py"]},
+            "id": "arb-1",
+            "query": {"pr_title": "Find auth tests"},
+            "repo": "example/project",
+            "task_type": "code2test",
+            "version": 1,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            arb_input = root / "arb.jsonl"
+            arb_output = root / "arb.json"
+            arb_input.write_text(json.dumps(arb_record) + "\n", encoding="utf-8")
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "benchmark-corpus",
+                        "import-arb",
+                        "--input",
+                        str(arb_input),
+                        "--output",
+                        str(arb_output),
+                        "--corpus-id",
+                        "arb-cli",
+                        "--source-url",
+                        "https://example.test/arb",
+                        "--license-statement",
+                        "test",
+                        "--split",
+                        "test",
+                    ]
+                )
+
+            self.assertTrue(arb_output.exists())
+            self.assertEqual(
+                json.loads(arb_output.read_text(encoding="utf-8"))["source"]["id"],
+                "agent-retrieval-bench",
+            )
+
+            queries = root / "queries.jsonl"
+            qrels = root / "qrels.jsonl"
+            corpus = root / "corpus.jsonl"
+            core_output = root / "core.json"
+            queries.write_text(
+                json.dumps({"_id": "q1", "text": "Find handler"}) + "\n",
+                encoding="utf-8",
+            )
+            qrels.write_text(
+                json.dumps({"query-id": "q1", "corpus-id": "doc-a", "score": 1}) + "\n",
+                encoding="utf-8",
+            )
+            corpus.write_text(
+                json.dumps({"_id": "doc-a", "path": "handler.go"}) + "\n",
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "benchmark-corpus",
+                        "import-core",
+                        "--queries",
+                        str(queries),
+                        "--qrels",
+                        str(qrels),
+                        "--corpus",
+                        str(corpus),
+                        "--output",
+                        str(core_output),
+                        "--repository-id",
+                        "example/go-project",
+                        "--base-commit",
+                        "b" * 40,
+                        "--corpus-id",
+                        "core-cli",
+                        "--source-url",
+                        "https://example.test/core",
+                        "--license-statement",
+                        "test",
+                        "--split",
+                        "test",
+                        "--language",
+                        "go",
+                    ]
+                )
+
+            report_output = root / "report.json"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "benchmark-corpus",
+                        "external-report",
+                        "--input",
+                        str(arb_output),
+                        "--input",
+                        str(core_output),
+                        "--minimum-languages",
+                        "1",
+                        "--output",
+                        str(report_output),
+                    ]
+                )
+
+            report = json.loads(report_output.read_text(encoding="utf-8"))
+            self.assertTrue(report["ready"])
+            self.assertEqual(
+                report["sources"],
+                ["agent-retrieval-bench", "core-bench"],
+            )
+
+    def test_external_report_require_ready_exits_nonzero(self):
+        arb_record = {
+            "base_commit": "a" * 40,
+            "gold": {"related_tests": ["tests/test_auth.py"]},
+            "id": "arb-1",
+            "query": {"pr_title": "Find auth tests"},
+            "repo": "example/project",
+            "task_type": "code2test",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "arb.jsonl"
+            document = root / "arb.json"
+            source.write_text(json.dumps(arb_record) + "\n", encoding="utf-8")
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "benchmark-corpus",
+                        "import-arb",
+                        "--input",
+                        str(source),
+                        "--output",
+                        str(document),
+                        "--corpus-id",
+                        "arb-only",
+                        "--source-url",
+                        "https://example.test/arb",
+                        "--license-statement",
+                        "test",
+                        "--split",
+                        "test",
+                    ]
+                )
+
+            with self.assertRaises(SystemExit):
+                with redirect_stdout(io.StringIO()):
+                    main(
+                        [
+                            "benchmark-corpus",
+                            "external-report",
+                            "--input",
+                            str(document),
+                            "--minimum-languages",
+                            "2",
+                            "--require-ready",
+                        ]
+                    )
+
+    def test_handles_short_and_unrelated_argv(self):
+        self.assertFalse(handles([]))
+        self.assertFalse(handles(["benchmark-corpus"]))
+        self.assertFalse(handles(["other", "import-arb"]))
 
 
 if __name__ == "__main__":
