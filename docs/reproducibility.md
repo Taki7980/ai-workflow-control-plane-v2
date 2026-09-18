@@ -40,6 +40,7 @@ The default local store writes one JSON document per run under `ai-workspace/run
 
 - control-plane version;
 - workspace fingerprint and Git HEAD when available;
+- aggregate Code Review Graph fingerprint;
 - changed-file digest;
 - canonical configuration digest;
 - retrieval-policy/config schema version;
@@ -82,3 +83,41 @@ Defaults are conservative: a provider with no declaration is not cache eligible.
 ## Async interoperability
 
 `AsyncRetriever` mirrors the synchronous `Retriever` result contract. `SyncRetrieverAdapter` can run a legacy synchronous retriever without changing its output semantics, while `CommandRetrieverAdapter` uses the native asyncio subprocess path. This provides a migration boundary without forcing the existing control-plane scheduler or every local filesystem operation to become async.
+
+
+## Unified run identity and replay checks
+
+Retrieval diagnostics, local retrieval traces, and `RunMetadata` share one
+control-plane `run_id`. The identifier correlates one preparation event; it is
+not presented as a W3C `trace-id` or OpenTelemetry span identifier.
+
+When retrieval telemetry is enabled, AI Workflow also writes one immutable
+debug record per run under:
+
+```
+ai-workspace/generated/run-journal/<run-id>.json
+```
+
+The journal contains policy/config identity, workspace and graph fingerprints,
+bounded retrieval diagnostics, and selected evidence descriptors. It does not
+store raw task text or raw `ContextItem.text`.
+
+Inspect a stored record:
+
+```bash
+ai-workflow run inspect <run-id>
+```
+
+Verify whether current local state is compatible with that recorded run:
+
+```bash
+ai-workflow run verify <run-id>
+```
+
+Verification compares the current configuration digest, config/policy version,
+workspace fingerprint, and aggregate graph fingerprint with the recorded
+identities. It is a replay-precondition/debug check only: it does not execute
+retrievers, tools, models, or providers.
+
+The journal lives below `ai-workspace/generated/`, which remains ignored
+machine-local state.
