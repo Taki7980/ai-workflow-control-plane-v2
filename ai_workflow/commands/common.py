@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from ..config import estimate_tokens, find_project_root, load_config
+from ..config import find_project_root
 
 def _root(args) -> Path:
     return Path(args.root).resolve() if getattr(args, "root", None) else find_project_root()
