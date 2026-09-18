@@ -89,10 +89,18 @@ class ProvenanceAndCacheTests(unittest.TestCase):
                 ),
             ),
         )
-        first = RunMetadata.create(**kwargs)
-        second = RunMetadata.create(**kwargs)
+        first = RunMetadata.create(**kwargs, graph_fingerprint="graph-a")
+        second = RunMetadata.create(**kwargs, graph_fingerprint="graph-a")
+        changed_graph = RunMetadata.create(
+            **kwargs,
+            graph_fingerprint="graph-b",
+        )
         self.assertNotEqual(first.run_id, second.run_id)
         self.assertEqual(first.reproducibility_key(), second.reproducibility_key())
+        self.assertNotEqual(
+            first.reproducibility_key(),
+            changed_graph.reproducibility_key(),
+        )
         self.assertNotIn("task", first.to_dict())
         self.assertIn("python", first.runtime)
         self.assertIn("platform", first.runtime)
@@ -183,9 +191,11 @@ class PublicLibraryApiTests(unittest.TestCase):
             async def gather_detailed_async(self, root, query, decision, budget, config, providers, *args, **kwargs):
                 self.write_telemetry = kwargs.get("write_telemetry")
                 return [ContextItem("test", "context", 1.0)], {
+                    "run_id": "run-123",
                     "retrieval_intent": "exact",
                     "evidence_state": "sufficient",
                     "workspace_state": {"fingerprint": "fp"},
+                    "graph_state": {"fingerprint": "graph-fp"},
                     "orchestration": {"agent_slots": 1},
                 }
 
@@ -201,6 +211,8 @@ class PublicLibraryApiTests(unittest.TestCase):
             self.assertEqual(result.task.text, "explain this")
             self.assertEqual(result.context[0].text, "context")
             self.assertEqual(result.run.control_plane_version, __version__)
+            self.assertEqual(result.run.run_id, "run-123")
+            self.assertEqual(result.run.graph_fingerprint, "graph-fp")
             self.assertFalse(write_telemetry)
             self.assertFalse((root / "ai-workspace" / "runs").exists())
 
