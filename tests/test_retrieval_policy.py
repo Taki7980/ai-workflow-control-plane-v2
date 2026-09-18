@@ -158,6 +158,31 @@ class RetrievalPolicyTests(unittest.TestCase):
         self.assertTrue(result.structural_complete)
         self.assertTrue(result.sufficient)
 
+    def test_matching_scip_relation_can_complete_structural_requirement(self):
+        items = [
+            ContextItem(
+                "scip",
+                "CheckoutService references ProcessPayment",
+                9.0,
+                False,
+                {
+                    "pattern": "callers_of",
+                    "structural_valid": True,
+                    "role": "reference",
+                    "result_count": 1,
+                },
+            )
+        ]
+        result = evaluate_sufficiency(
+            "Who calls ProcessPayment?",
+            items,
+            structural_required=True,
+            structural_patterns=("callers_of",),
+            threshold=0.1,
+        )
+        self.assertTrue(result.structural_complete)
+        self.assertTrue(result.sufficient)
+
     def test_verified_empty_relation_is_structurally_complete(self):
         items = [
             ContextItem(
