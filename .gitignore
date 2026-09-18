@@ -44,6 +44,7 @@ secrets/
 
 # AI Workflow generated / machine-local state
 ai-workspace/code-review-graph/
+ai-workspace/scip/
 ai-workspace/generated/*
 !ai-workspace/generated/.gitkeep
 ai-workspace/indexes/
