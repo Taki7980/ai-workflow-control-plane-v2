@@ -115,6 +115,7 @@ class RunMetadata:
     index_manifest_digest: str
     provider_versions: Mapping[str, str]
     artifacts: tuple[ArtifactReference, ...] = ()
+    graph_fingerprint: str = "unknown"
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     schema_version: int = 1
     created_at: str = field(
@@ -132,6 +133,7 @@ class RunMetadata:
                 "schema_version": self.schema_version,
                 "control_plane_version": self.control_plane_version,
                 "workspace_fingerprint": self.workspace_fingerprint,
+                "graph_fingerprint": self.graph_fingerprint,
                 "git_head": self.git_head,
                 "changed_files_digest": self.changed_files_digest,
                 "config_digest": self.config_digest,
@@ -150,6 +152,7 @@ class RunMetadata:
             "created_at": self.created_at,
             "control_plane_version": self.control_plane_version,
             "workspace_fingerprint": self.workspace_fingerprint,
+            "graph_fingerprint": self.graph_fingerprint,
             "git_head": self.git_head,
             "changed_files_digest": self.changed_files_digest,
             "config_digest": self.config_digest,
@@ -208,6 +211,7 @@ class RunMetadata:
             created_at=str(raw["created_at"]),
             control_plane_version=str(raw["control_plane_version"]),
             workspace_fingerprint=str(raw["workspace_fingerprint"]),
+            graph_fingerprint=str(raw.get("graph_fingerprint", "unknown")),
             git_head=(
                 str(raw["git_head"])
                 if raw.get("git_head") is not None
