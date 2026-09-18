@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from ..config import load_config
-from ..contextual_features import DEFAULT_POLICY_FIELDS, FEATURE_FIELDS
+from ..contextual_features import DEFAULT_POLICY_FIELDS
 from ..contextual_policy import build_contextual_policy_report
 from ..io_utils import atomic_write_json
 from ..learning_ope import evaluate_learning_policies
@@ -10,11 +10,7 @@ from ..policy_manifest import (
     create_policy_manifest,
     verify_policy_manifest,
 )
-from ..retrieval_learning import (
-    SAFE_EXPLORATION_ARMS,
-    learning_status,
-    record_verified_outcome,
-)
+from ..retrieval_learning import learning_status, record_verified_outcome
 from ..shadow_policy import evaluate_shadow_policy
 
 from .common import _json, _load_json_object, _root, _signing_key_from_env
