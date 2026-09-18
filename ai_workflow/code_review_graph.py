@@ -294,6 +294,68 @@ def graph_freshness(
     return result
 
 
+def workspace_graph_fingerprint(
+    workspace_root: Path,
+    config: dict | None = None,
+) -> dict[str, Any]:
+    """Return a checkout-path-independent identity for current CRG state."""
+
+    root = Path(workspace_root).resolve()
+    repositories: list[dict[str, Any]] = []
+    try:
+        rows = managed_repositories(root, config)
+    except (PathOutsideWorkspace, OSError):
+        rows = []
+
+    for row in rows:
+        relative = str(row["relative_path"])
+        try:
+            freshness = graph_freshness(root, row["repository_root"])
+        except (GraphValidationError, OSError):
+            freshness = {"fresh": False, "reason": "unavailable"}
+
+        schema_version: int | None = None
+        try:
+            manifest = json.loads(
+                (Path(row["data_dir"]) / "manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            if isinstance(manifest, dict):
+                raw_schema = manifest.get("crg_schema_version")
+                if raw_schema is not None:
+                    schema_version = int(raw_schema)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+        repositories.append(
+            {
+                "relative_path": relative,
+                "fresh": bool(freshness.get("fresh")),
+                "reason": str(freshness.get("reason") or ""),
+                "graph_sha256": freshness.get("graph_sha256"),
+                "repository_fingerprint": freshness.get(
+                    "repository_fingerprint"
+                ),
+                "git_head": freshness.get("git_head"),
+                "crg_schema_version": schema_version,
+            }
+        )
+
+    repositories.sort(key=lambda item: item["relative_path"].casefold())
+    identity = {"schema": 1, "repositories": repositories}
+    encoded = json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return {
+        **identity,
+        "fingerprint": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
 def any_graph_ready(workspace_root: Path, config: dict | None = None) -> bool:
     if shutil.which("code-review-graph") is None:
         return False
