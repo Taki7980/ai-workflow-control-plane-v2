@@ -100,19 +100,36 @@ def detect_indexer(root: Path, language: str | None = None) -> ScipIndexer | Non
         return _indexer_for(root, language)
 
     candidates: list[ScipIndexer] = []
-    if (root / "go.mod").is_file() and _has_source(root, {".go"}):
-        candidates.append(_indexer_for(root, "go"))
-    if any((root / marker).exists() for marker in ("pom.xml", "build.gradle", "build.gradle.kts", "gradlew")) and _has_source(root, {".java"}):
-        candidates.append(_indexer_for(root, "java"))
-    if (root / "tsconfig.json").is_file() and _has_source(root, {".ts", ".tsx"}):
-        candidates.append(_indexer_for(root, "typescript"))
-    if any((root / marker).is_file() for marker in ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")) and _has_source(root, {".py"}):
-        candidates.append(_indexer_for(root, "python"))
-    if (root / "package.json").is_file() and _has_source(root, {".js", ".jsx"}):
-        candidates.append(_indexer_for(root, "javascript"))
 
-    resolved = [candidate for candidate in candidates if candidate is not None]
-    return resolved[0] if len(resolved) == 1 else None
+    def add_candidate(language_name: str) -> None:
+        candidate = _indexer_for(root, language_name)
+        if candidate is not None:
+            candidates.append(candidate)
+
+    if (root / "go.mod").is_file() and _has_source(root, {".go"}):
+        add_candidate("go")
+    if any(
+        (root / marker).exists()
+        for marker in ("pom.xml", "build.gradle", "build.gradle.kts", "gradlew")
+    ) and _has_source(root, {".java"}):
+        add_candidate("java")
+    if (root / "tsconfig.json").is_file() and _has_source(
+        root,
+        {".ts", ".tsx"},
+    ):
+        add_candidate("typescript")
+    if any(
+        (root / marker).is_file()
+        for marker in ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
+    ) and _has_source(root, {".py"}):
+        add_candidate("python")
+    if (root / "package.json").is_file() and _has_source(
+        root,
+        {".js", ".jsx"},
+    ):
+        add_candidate("javascript")
+
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _sha256_file(path: Path) -> str:
