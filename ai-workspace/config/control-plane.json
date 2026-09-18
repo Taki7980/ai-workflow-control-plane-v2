@@ -21,6 +21,7 @@
       "min_source_files": 250,
       "changed_files_threshold": 3
     },
+    "scip": {"mode": "auto"},
     "semantic": {"mode": "auto", "provider_id": "builtin-local", "command": "", "timeout_seconds": 8, "max_results": 6, "max_output_bytes": 8388608, "env_allowlist": []},
     "external_retrievers": [],
     "sufficiency": {"threshold": 0.72},
