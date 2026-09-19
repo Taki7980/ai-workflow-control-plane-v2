@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "benchmark": "crg-semantic-golden-v1",
+  "crg_version": "2.3.8",
+  "measured_from": {
+    "commit": "03333fa7b7cc6a2f4b271f52c252bb9d00f45a1c",
+    "workflow_run": 35453146321
+  },
+  "minimums": {
+    "mean_precision_at_k": 0.6,
+    "mean_recall_at_k": 0.6,
+    "mean_mrr": 0.6,
+    "full_recall_rate": 0.6,
+    "lifecycle_pass_rate": 0.75,
+    "stale_graph_block_rate": 1.0
+  },
+  "maximums": {
+    "mean_estimated_context_tokens": 220.0,
+    "latency_p95_ms": 500.0
+  },
+  "category_minimum_recall": {
+    "async_chain": 1.0,
+    "cross_language": 1.0,
+    "duplicate_symbol": 1.0,
+    "generated_code": 1.0,
+    "inheritance_override": 1.0
+  },
+  "known_misses": [
+    "py-alias-call",
+    "py-callback",
+    "py-dynamic-import",
+    "py-tests-for",
+    "rename_delete"
+  ]
+}
