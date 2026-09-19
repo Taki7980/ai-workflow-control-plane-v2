@@ -1,32 +1,46 @@
 # Contributing
 
-AI Workflow is a dependency-light Python 3.10+ control plane. Changes should preserve deterministic safety behavior, bounded resource use, cross-platform support, and compatibility unless a breaking change is explicitly justified.
+AI Workflow is a dependency-light Python 3.11+ control plane. Changes should preserve deterministic safety behavior, bounded resource use, cross-platform support, and compatibility unless a breaking change is explicitly justified.
 
 ## Development setup
 
-Clone the repository, create a virtual environment, then install the development extras:
+The repository commits a universal `uv.lock`. Use the same pinned resolver version as CI (`uv 0.12.14`) and sync from the lock instead of resolving development tools independently:
 
 ```bash
-python -m pip install -e ".[dev]"
+uv sync --locked
+uv lock --check
 ```
+
+`uv sync` performs an exact sync by default. Do not use `--upgrade` in normal development or CI; dependency updates should be deliberate changes to `pyproject.toml` and `uv.lock`.
 
 Run the full unit suite:
 
 ```bash
-python -m unittest discover -s tests -v
+uv run --locked --no-sync python -m unittest discover -s tests -v
 ```
 
 Run the same focused quality checks used by CI:
 
 ```bash
-python -m compileall -q ai_workflow
-ruff check --select E,F,UP,BLE,EXE ai_workflow scripts
-mypy --follow-imports=skip ai_workflow/retrieval_contracts.py ai_workflow/path_policy.py ai_workflow/typed_config.py ai_workflow/benchmark_regression.py ai_workflow/execution_semantics.py ai_workflow/provenance.py ai_workflow/retrieval_cache.py ai_workflow/retrieval_adapters.py ai_workflow/api.py ai_workflow/provider_runner.py
+uv run --locked --no-sync python -m compileall -q ai_workflow
+uv run --locked --no-sync ruff check ai_workflow tests security_tests scripts
+uv run --locked --no-sync mypy ai_workflow
 ```
 
 The mypy gate is intentionally an incremental typed-boundary gate. `--follow-imports=skip` keeps explicitly listed modules fully checked while preventing unrelated legacy implementation modules from becoming implicit targets merely because a public facade imports them. Add a module to the explicit list when its boundary is brought under the typed contract.
 
 Before proposing changes to routing, retrieval, indexing, provider boundaries, persistence, releases, or verification, add or update a test that demonstrates the required behavior. Prefer the smallest change that satisfies the invariant.
+
+## Hermetic package build
+
+The build frontend and backend are also locked. To reproduce the package build used by CI:
+
+```bash
+uv sync --locked --only-group build
+uv run --locked --no-sync python -m build --no-isolation
+```
+
+The `--no-isolation` flag is intentional here: build dependencies have already been installed exactly from `uv.lock`. Running a normal isolated build would resolve a second build environment independently.
 
 ## Pull requests
 
