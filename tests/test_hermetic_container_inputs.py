@@ -95,6 +95,7 @@ class HermeticContainerInputTests(unittest.TestCase):
                 )
                 self.assertIn("SOURCE_DATE_EPOCH", workflow)
                 self.assertIn("--build-arg SOURCE_DATE_EPOCH", workflow)
+                self.assertIn("rewrite-timestamp=true", workflow)
 
     def test_ci_rebuilds_twice_and_compares_image_identity(self) -> None:
         workflow = self._read(".github/workflows/tests.yml")
