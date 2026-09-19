@@ -8,6 +8,9 @@
 /uv.lock @Taki7980
 /scripts/record_python_toolchain.py @Taki7980
 /Dockerfile @Taki7980
+/packaging/container/ @Taki7980
+/scripts/verify_container_attestations.py @Taki7980
+/.github/dependabot.yml @Taki7980
 /install.sh @Taki7980
 /install.ps1 @Taki7980
 /ai_workflow/provider_registry.py @Taki7980
