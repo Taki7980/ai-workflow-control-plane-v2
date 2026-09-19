@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "dockerfile_frontend": {
+    "ref": "docker/dockerfile:1.27.0",
+    "index_digest": "sha256:bde3983e9c939224420ddaf6b784cc30e09b035a4dea01f581230c50809f372e",
+    "linux_amd64_digest": "sha256:3103efd3bcfbdba49a003fb7ffa453047a4e59d432236ca4cca37e8079fb165e"
+  },
+  "python_base": {
+    "ref": "python:3.12.14-slim-trixie",
+    "index_digest": "sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9",
+    "linux_amd64_digest": "sha256:44ff437bba879d4941b710a369a8f19266aea34b29002807f0c487fabc9eec9b"
+  },
+  "uv_image": {
+    "ref": "ghcr.io/astral-sh/uv:0.12.14",
+    "index_digest": "sha256:1946145b8706ad9e5c0e79a513f9e324b58d5e38126bb2c8b7dbfca61febeb45",
+    "linux_amd64_digest": "sha256:503548e4f528126e55a4834114fea2ea80ccd8c113147b9121b8766ace6394a6"
+  },
+  "builder": {
+    "setup_buildx_action": "docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e",
+    "buildx_version": "v0.37.0",
+    "buildkit_ref": "moby/buildkit:v0.33.0",
+    "buildkit_index_digest": "sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3",
+    "buildkit_linux_amd64_digest": "sha256:a461e7f0ce921972028acfbed628d45663d83e67ac1230722c2b34cf72760a0d"
+  },
+  "debian_snapshot": "20260919T000000Z",
+  "runtime_packages": {
+    "git": "1:2.47.3-0+deb13u1",
+    "ripgrep": "14.1.1-1+b4"
+  }
+}
