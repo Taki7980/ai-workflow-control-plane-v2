@@ -349,7 +349,7 @@ class ProviderBoundaryContractTests(unittest.TestCase):
         self.assertEqual(spec.command[0], sys.executable)
         self.assertEqual(spec.intents, ("exact", "semantic"))
 
-    def test_malformed_provider_score_is_coerced_instead_of_crashing(self):
+    def test_malformed_provider_score_is_rejected_fail_closed(self):
         runner = self._module("ai_workflow.provider_runner")
         contracts = self._module("ai_workflow.retrieval_contracts")
         with tempfile.TemporaryDirectory() as td:
@@ -364,8 +364,8 @@ class ProviderBoundaryContractTests(unittest.TestCase):
                 contracts.RetrievalRequest("q", root, 1, "semantic", 1),
                 source="external:score",
             )
-            self.assertIsNone(result.error)
-            self.assertEqual(result.items[0].score, 0.0)
+            self.assertEqual(result.error_kind, "invalid_payload")
+            self.assertEqual(result.items, ())
 
     def test_memory_rejects_file_references_outside_workspace(self):
         from ai_workflow.memory import add_memory
