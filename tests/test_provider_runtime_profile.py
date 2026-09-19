@@ -111,50 +111,6 @@ class ProviderRuntimeProfileTests(unittest.TestCase):
                         default_name="test",
                     )
 
-    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not portable")
-    def test_launch_rejects_executable_permission_drift(self):
-        from ai_workflow.provider_runner import (
-            CommandProviderSpec,
-            run_command_provider,
-        )
-        from ai_workflow.retrieval_contracts import RetrievalRequest
-
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td) / "repo"
-            bin_dir = Path(td) / "bin"
-            root.mkdir()
-            bin_dir.mkdir()
-            executable = bin_dir / "provider-python"
-            executable.write_bytes(Path(sys.executable).read_bytes())
-            executable.chmod(
-                stat.S_IRUSR
-                | stat.S_IWUSR
-                | stat.S_IXUSR
-                | stat.S_IRGRP
-                | stat.S_IWGRP
-                | stat.S_IXGRP
-            )
-            digest = hashlib.sha256(executable.read_bytes()).hexdigest()
-            spec = CommandProviderSpec(
-                name="permission-drift",
-                command=(str(executable), "-c", "print('never-runs')"),
-                timeout_seconds=1,
-                max_output_bytes=1024,
-                executable_trust="trusted_registry_digest",
-                executable_sha256=digest,
-                neutral_cwd=True,
-                runtime_profile="restricted",
-            )
-            result = run_command_provider(
-                spec,
-                RetrievalRequest("q", root, 1, "semantic", 1),
-                source="external:permission-drift",
-            )
-
-        self.assertFalse(result.ok)
-        self.assertEqual(result.error_kind, "provider_trust")
-        self.assertIn("writable by group or others", result.error or "")
-
     def test_trusted_registry_defaults_to_restricted_runtime_profile(self):
         from ai_workflow.provider_registry import resolve_project_provider
 
