@@ -111,7 +111,12 @@ class HermeticPythonInputTests(unittest.TestCase):
             self.assertIn("python -m build --no-isolation", content)
 
         self.assertIn("COPY pyproject.toml uv.lock", dockerfile)
-        self.assertIn('"uv==0.12.14"', dockerfile)
+        self.assertIn(
+            "ghcr.io/astral-sh/uv:0.12.14@sha256:",
+            dockerfile,
+        )
+        self.assertIn("COPY --from=uv /uv /usr/local/bin/uv", dockerfile)
+        self.assertNotIn("pip install --no-cache-dir \"uv==", dockerfile)
         self.assertIn("uv sync --locked --only-group build", dockerfile)
         self.assertIn("python -m build --wheel --no-isolation", dockerfile)
         self.assertNotIn("pip install --no-cache-dir build", dockerfile)
