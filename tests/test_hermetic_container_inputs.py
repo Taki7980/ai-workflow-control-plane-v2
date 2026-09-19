@@ -101,11 +101,18 @@ class HermeticContainerInputTests(unittest.TestCase):
                 )
                 self.assertIn("SOURCE_DATE_EPOCH", workflow)
                 self.assertIn("--build-arg SOURCE_DATE_EPOCH", workflow)
+                self.assertIn("rewrite-timestamp=true", workflow)
+
+        for relative in (
+            ".github/workflows/tests.yml",
+            ".github/workflows/release.yml",
+        ):
+            with self.subTest(deterministic_image_export=relative):
+                workflow = self._read(relative)
                 self.assertIn(
                     "--build-arg BUILDKIT_MULTI_PLATFORM=1",
                     workflow,
                 )
-                self.assertIn("rewrite-timestamp=true", workflow)
 
     def test_ci_rebuilds_twice_and_compares_release_image_digest(self) -> None:
         workflow = self._read(".github/workflows/tests.yml")
