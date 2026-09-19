@@ -526,6 +526,7 @@ def run_crg_semantic_benchmark(
         "cases": rows,
         "controls": controls,
         "by_category": category_summary,
+        "by_query_type": category_summary,
         "summary": {
             "cases": len(rows),
             "mean_precision_at_k": _mean(metric_rows, "precision_at_k"),
