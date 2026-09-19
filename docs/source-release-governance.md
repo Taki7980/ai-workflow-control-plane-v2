@@ -49,7 +49,13 @@ Keep the existing `pypi` environment protected. PyPI publication uses GitHub OID
 
 ## CODEOWNERS
 
-`.github/CODEOWNERS` assigns the repository owner to workflows, release inputs, installers, provider execution, telemetry, deployment policy, learning verification, and provenance code. The `main` ruleset must require CODEOWNERS review; the file by itself is advisory.
+`.github/CODEOWNERS` assigns the repository owner to workflows, release inputs, installers, provider execution, telemetry, deployment policy, learning verification, and provenance code. The Python resolution authority is included explicitly: `pyproject.toml`, `uv.lock`, and `scripts/record_python_toolchain.py` require the same review ownership as release workflows. The `main` ruleset must require CODEOWNERS review; the file by itself is advisory.
+
+## Locked Python build authority
+
+The committed `uv.lock` is part of the reviewed source/release boundary. CI and release workflows must reject a stale lock rather than updating it implicitly. Dependency upgrades must therefore appear as reviewable source changes to both the declarative requirements and the resolved lock.
+
+Python release artifacts should carry enough toolchain identity to reconstruct which source revision, interpreter, resolver, locked inputs, and direct build tools were used. This supplements GitHub/SLSA attestations; it does not replace hosted-build provenance.
 
 ## Verification
 
