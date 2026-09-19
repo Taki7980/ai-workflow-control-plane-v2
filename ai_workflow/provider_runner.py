@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import shlex
@@ -26,6 +27,20 @@ from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_STDERR_BYTES = 64 * 1024
+
+PROVIDER_PROTOCOL_VERSION = 1
+MAX_PROVIDER_RECORDS = 1024
+MAX_PROVIDER_ITEM_FIELDS = 64
+MAX_PROVIDER_TEXT_CHARS = 1_000_000
+MAX_PROVIDER_METADATA_ENTRIES = 128
+MAX_PROVIDER_CONTAINER_ITEMS = 128
+MAX_PROVIDER_NESTING_DEPTH = 8
+MAX_PROVIDER_FIELD_CHARS = 4096
+MAX_PROVIDER_METADATA_STRING_CHARS = 65_536
+MAX_PROVIDER_LINE = 2_147_483_647
+MIN_PROVIDER_SCORE = 0.0
+MAX_PROVIDER_SCORE = 1.0
+MAX_PROVIDER_INTEGER = 2**63 - 1
 
 
 def _provider_process_group_kwargs() -> dict[str, Any]:
@@ -122,9 +137,12 @@ class CommandProviderSpec:
             raise ValueError("provider name must not be blank")
         if not self.command or any(not str(part) for part in self.command):
             raise ValueError(f"provider {self.name!r} command must not be blank")
-        if self.timeout_seconds <= 0:
+        if (
+            not math.isfinite(float(self.timeout_seconds))
+            or self.timeout_seconds <= 0
+        ):
             raise ValueError(
-                f"provider {self.name!r} timeout_seconds must be > 0"
+                f"provider {self.name!r} timeout_seconds must be finite and > 0"
             )
         if self.max_output_bytes <= 0:
             raise ValueError(
@@ -271,41 +289,151 @@ async def _bounded_async_reader(
         output.extend(chunk)
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"provider JSON contains non-standard constant: {value}")
+
+
+def _object_without_duplicate_keys(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"provider JSON contains duplicate key: {key}")
+        out[key] = value
+    return out
+
+
+def _validate_json_value(value: Any, *, depth: int = 0) -> None:
+    if depth > MAX_PROVIDER_NESTING_DEPTH:
+        raise ValueError("provider JSON exceeds maximum nesting depth")
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        if abs(value) > MAX_PROVIDER_INTEGER:
+            raise ValueError("provider integer exceeds signed 64-bit range")
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("provider JSON contains non-finite number")
+        return
+    if isinstance(value, str):
+        if len(value) > MAX_PROVIDER_METADATA_STRING_CHARS:
+            raise ValueError("provider JSON string exceeds protocol limit")
+        return
+    if isinstance(value, list):
+        if len(value) > MAX_PROVIDER_CONTAINER_ITEMS:
+            raise ValueError("provider JSON array exceeds protocol limit")
+        for item in value:
+            _validate_json_value(item, depth=depth + 1)
+        return
+    if isinstance(value, dict):
+        if len(value) > MAX_PROVIDER_METADATA_ENTRIES:
+            raise ValueError("provider JSON object exceeds protocol limit")
+        for key, item in value.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError("provider JSON keys must be non-empty strings")
+            if len(key) > MAX_PROVIDER_FIELD_CHARS:
+                raise ValueError("provider JSON key exceeds protocol limit")
+            _validate_json_value(item, depth=depth + 1)
+        return
+    raise ValueError(
+        f"provider JSON contains unsupported type: {type(value).__name__}"
+    )
+
+
+def _strict_json_loads(raw: str) -> Any:
+    value = json.loads(
+        raw,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_object_without_duplicate_keys,
+    )
+    _validate_json_value(value)
+    return value
+
+
 def _parse_records(raw: str) -> list[dict[str, Any]]:
     try:
-        payload = json.loads(raw)
+        payload = _strict_json_loads(raw)
     except json.JSONDecodeError:
         rows: list[dict[str, Any]] = []
         for line in raw.splitlines():
             if not line.strip():
                 continue
+            if len(rows) >= MAX_PROVIDER_RECORDS:
+                raise ValueError(
+                    "provider payload exceeds maximum record count"
+                ) from None
             try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
+                row = _strict_json_loads(line)
+            except (json.JSONDecodeError, ValueError, RecursionError) as exc:
                 raise ValueError(
                     "provider returned invalid JSON/JSONL payload"
                 ) from exc
             if not isinstance(row, dict):
-                raise ValueError("provider JSONL rows must be objects") from None
+                raise ValueError(
+                    "provider JSONL rows must be objects"
+                ) from None
             rows.append(row)
         if not rows and raw.strip():
-            raise ValueError("provider returned invalid JSON/JSONL payload") from None
+            raise ValueError(
+                "provider returned invalid JSON/JSONL payload"
+            ) from None
         return rows
+    except (ValueError, RecursionError) as exc:
+        raise ValueError(
+            "provider returned invalid JSON/JSONL payload"
+        ) from exc
 
     if isinstance(payload, dict):
-        payload = payload.get("items", [])
+        if "items" not in payload:
+            raise ValueError(
+                "provider object payload must contain an items array"
+            )
+        payload = payload["items"]
     if not isinstance(payload, list):
         raise ValueError(
             "provider payload must be a JSON array or an object with an items array"
         )
-    return [row for row in payload if isinstance(row, dict)]
+    if len(payload) > MAX_PROVIDER_RECORDS:
+        raise ValueError("provider payload exceeds maximum record count")
+    if not all(isinstance(row, dict) for row in payload):
+        raise ValueError("provider payload items must all be objects")
+    return list(payload)
 
 
 def _score(value: Any) -> float:
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError, OverflowError):
+    if value is None:
         return 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("provider score must be a JSON number")
+    score = float(value)
+    if not math.isfinite(score):
+        raise ValueError("provider score must be finite")
+    if not MIN_PROVIDER_SCORE <= score <= MAX_PROVIDER_SCORE:
+        raise ValueError(
+            "provider score must be between "
+            f"{MIN_PROVIDER_SCORE:g} and {MAX_PROVIDER_SCORE:g}"
+        )
+    return score
+
+
+def _line_number(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"provider {field} must be an integer")
+    if not 1 <= value <= MAX_PROVIDER_LINE:
+        raise ValueError(
+            f"provider {field} must be between 1 and {MAX_PROVIDER_LINE}"
+        )
+    return value
+
+
+def _bounded_field(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"provider {field} must be a string")
+    if len(value) > MAX_PROVIDER_FIELD_CHARS:
+        raise ValueError(f"provider {field} exceeds protocol limit")
+    return value
 
 
 def _context_items(
@@ -320,52 +448,62 @@ def _context_items(
     items: list[ContextItem] = []
     defaults = dict(metadata_defaults or {})
     for record in records:
-        text = str(
-            record.get("text") or record.get("content") or ""
-        ).strip()
+        if len(record) > MAX_PROVIDER_ITEM_FIELDS:
+            raise ValueError("provider item exceeds maximum field count")
+        _validate_json_value(record)
+
+        raw_text = (
+            record["text"]
+            if "text" in record
+            else record.get("content", "")
+        )
+        if not isinstance(raw_text, str):
+            raise ValueError("provider text/content must be a string")
+        if len(raw_text) > MAX_PROVIDER_TEXT_CHARS:
+            raise ValueError("provider text exceeds protocol limit")
+        text = raw_text.strip()
         if not text:
             continue
-        metadata = (
-            dict(record.get("metadata") or {})
-            if isinstance(record.get("metadata"), dict)
-            else {}
-        )
-        for key in (
-            "path",
-            "file",
-            "line",
-            "end_line",
-            "symbol",
-            "kind",
-            "language",
-        ):
+
+        metadata_raw = record.get("metadata", {})
+        provenance_raw = record.get("provenance", {})
+        if not isinstance(metadata_raw, dict):
+            raise ValueError("provider metadata must be an object")
+        if not isinstance(provenance_raw, dict):
+            raise ValueError("provider provenance must be an object")
+        metadata = dict(metadata_raw)
+        provenance = dict(provenance_raw)
+
+        for key in ("path", "file", "symbol", "kind", "language"):
             if key in record:
-                metadata[key] = record[key]
+                metadata[key] = _bounded_field(record[key], key)
+        for key in ("line", "end_line"):
+            if key in record:
+                metadata[key] = _line_number(record[key], key)
+
+        stale = record.get("stale", False)
+        if not isinstance(stale, bool):
+            raise ValueError("provider stale must be a boolean")
+
         metadata.update(defaults)
         metadata["provider"] = provider_name
         metadata["provider_trust"] = provider_trust
         metadata["trust"] = "untrusted_repository_content"
         metadata = confine_metadata_paths(root, metadata)
-        provenance = (
-            dict(record.get("provenance") or {})
-            if isinstance(record.get("provenance"), dict)
-            else {}
-        )
         provenance["provider"] = provider_name
         provenance["trust"] = "untrusted_repository_content"
         items.append(
             ContextItem(
                 source=source,
                 text=text,
-                score=_score(record.get("score", 0.0)),
-                stale=bool(record.get("stale", False)),
+                score=_score(record.get("score")),
+                stale=stale,
                 metadata=metadata,
                 provenance=provenance,
             )
         )
     items.sort(key=lambda item: -item.score)
     return tuple(items[:limit])
-
 
 def _result_from_bytes(
     spec: CommandProviderSpec,
@@ -387,7 +525,16 @@ def _result_from_bytes(
         )
     try:
         records = _parse_records(text)
-    except ValueError as exc:
+        items = _context_items(
+            request.root,
+            records,
+            source,
+            request.limit,
+            spec.name,
+            spec.executable_trust,
+            metadata_defaults,
+        )
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         return ProviderResult(
             provider=spec.name,
             latency_ms=latency_ms,
@@ -397,15 +544,7 @@ def _result_from_bytes(
         )
     return ProviderResult(
         provider=spec.name,
-        items=_context_items(
-            request.root,
-            records,
-            source,
-            request.limit,
-            spec.name,
-            spec.executable_trust,
-            metadata_defaults,
-        ),
+        items=items,
         latency_ms=latency_ms,
         returncode=returncode,
     )
