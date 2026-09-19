@@ -70,8 +70,10 @@ uv run --locked --no-sync python scripts/run_crg_semantic_benchmark.py \
   --output /tmp/crg-semantic-report.json
 ```
 
-After the measured baseline is committed, CI also checks the report against
-`baseline.json`.
+CI checks every report against the measured `baseline.json`. The baseline was
+captured from the first successful full corpus run rather than chosen in
+advance. It preserves known misses as visible benchmark debt while preventing
+regression of the relationships CRG currently resolves correctly.
 
 ## Scope
 
