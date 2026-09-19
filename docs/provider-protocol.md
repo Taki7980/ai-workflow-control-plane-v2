@@ -213,6 +213,79 @@ Example:
 }
 ```
 
+## Optional OS sandbox
+
+PR-17 adds an explicit trusted-registry-owned sandbox policy. Sandboxing is disabled by default for compatibility; a trusted provider installation can opt into:
+
+```json
+{
+  "sandbox": {
+    "mode": "required",
+    "backend": "auto",
+    "network": "deny",
+    "limits": {
+      "cpu_seconds": 10,
+      "memory_mb": 512,
+      "file_size_mb": 64,
+      "open_files": 128
+    }
+  }
+}
+```
+
+Repository configuration cannot set or weaken this policy.
+
+### Modes
+
+- `off`: never use an OS sandbox.
+- `preferred`: use a sandbox when available. Fallback is visible in `ProviderResult.sandbox_fallback_reason`.
+- `required`: fail closed with `sandbox_unavailable` if no enforcing backend exists.
+
+A `preferred` policy is automatically treated as must-enforce when it requests `network: "deny"` or any resource limits. These controls never silently degrade to an unsandboxed provider process.
+
+### Linux Bubblewrap backend
+
+The first OS backend is Bubblewrap on Linux. Availability is probed before provider execution. The backend uses:
+
+- a separate mount namespace;
+- host root mounted read-only;
+- only explicit ephemeral runtime directories rebound writable;
+- a new PID namespace and `/proc`;
+- IPC and UTS namespace isolation;
+- `--cap-drop ALL`;
+- `--new-session`;
+- `--die-with-parent`;
+- optional `--unshare-net` for `network: "deny"`.
+
+This materially reduces host write access and can remove network access, but it is not presented as equivalent to a microVM or a complete seccomp/Landlock policy.
+
+### Resource limits
+
+When configured, CPU time, address-space size, file size, and open-file limits are applied by a small exec wrapper using POSIX `setrlimit` immediately before the trusted provider executable is replaced with `exec`.
+
+The runner intentionally does not use Python `preexec_fn`; Python documents that `preexec_fn` is unsafe in threaded applications and can deadlock before exec.
+
+Resource limits require an enforcing sandbox backend in PR-17. If configured limits cannot be enforced, provider execution fails closed.
+
+### Cross-platform behavior
+
+The Bubblewrap backend is Linux-only. Windows and macOS retain the PR-16 restricted runtime when sandbox mode is `off` or a soft `preferred` sandbox has no hard network/resource controls.
+
+A `required` sandbox, `network: "deny"`, or resource-limit policy fails closed on platforms without an enforcing backend. This preserves compatibility without claiming controls that the platform did not actually enforce.
+
+### Typed audit state
+
+Every `ProviderResult` reports:
+
+- `sandboxed`;
+- `sandbox_backend`;
+- `sandbox_mode`;
+- `sandbox_network`;
+- `resource_limits_enforced`;
+- `sandbox_fallback_reason`.
+
+This makes a preferred fallback distinguishable from a genuinely sandboxed execution.
+
 ## Working-directory isolation
 
 Trusted registry providers default to an ephemeral neutral working directory that exists only for the lifetime of the provider process. The repository path is still supplied explicitly in the JSON request as `root`; it is not granted as ambient process state through the current working directory.
@@ -249,6 +322,7 @@ Typed `ProviderResult` values distinguish evidence from failures. Current failur
 - `configuration` — invalid provider configuration;
 - `provider_trust` — trusted executable identity or path policy changed before launch;
 - `launch` — executable/cwd could not be started;
+- `sandbox_unavailable` — required sandbox/network/resource policy could not be enforced;
 - `timeout` — process exceeded its deadline;
 - `output_limit` — stdout exceeded the configured byte limit;
 - `exit` — provider returned a non-zero exit code;
