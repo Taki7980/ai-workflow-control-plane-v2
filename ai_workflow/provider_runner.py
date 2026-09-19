@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import signal
+import stat
 import subprocess
 import tempfile
 import threading
@@ -243,9 +244,9 @@ def build_provider_env(
             "TMPDIR": str(temp_dir),
             "TEMP": str(temp_dir),
             "TMP": str(temp_dir),
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
-            "LC_CTYPE": "C.UTF-8",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "LC_CTYPE": "C",
             "PYTHONUTF8": "1",
             "PYTHONIOENCODING": "utf-8",
         }
@@ -690,6 +691,17 @@ def verify_provider_executable(
         raise ProviderTrustError(
             "trusted provider executable is no longer a regular file"
         )
+    if os.name != "nt":
+        try:
+            mode = resolved.stat().st_mode
+        except OSError as exc:
+            raise ProviderTrustError(
+                "trusted provider executable permissions could not be inspected"
+            ) from exc
+        if mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ProviderTrustError(
+                "trusted provider executable became writable by group or others"
+            )
     if _is_within(root, resolved):
         raise ProviderTrustError(
             "trusted provider executable may not move inside the repository"
