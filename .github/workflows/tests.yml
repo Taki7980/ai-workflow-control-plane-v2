@@ -207,6 +207,7 @@ jobs:
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
             --build-arg BUILDKIT_MULTI_PLATFORM=1 \
+            --provenance=false \
             --output type=image,name=ai-workflow-repro-a,push=false,rewrite-timestamp=true,compatibility-version=30 \
             --metadata-file "$RUNNER_TEMP/repro-a.json" \
             .
@@ -219,6 +220,7 @@ jobs:
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
             --build-arg BUILDKIT_MULTI_PLATFORM=1 \
+            --provenance=false \
             --output type=image,name=ai-workflow-repro-b,push=false,rewrite-timestamp=true,compatibility-version=30 \
             --metadata-file "$RUNNER_TEMP/repro-b.json" \
             .
