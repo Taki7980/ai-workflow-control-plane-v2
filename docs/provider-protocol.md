@@ -49,7 +49,29 @@ Example:
 }
 ```
 
-Unknown item fields are ignored. Missing or malformed scores fall back to `0.0`. Empty text items are ignored.
+Unknown item fields are ignored, but the accepted fields are validated strictly. Empty text items are ignored.
+
+### Response validation contract
+
+Provider output is parsed as RFC 8259 JSON rather than Python's more permissive default JSON dialect.
+
+The control plane rejects the whole provider response when any item violates the protocol:
+
+- `NaN`, `Infinity`, `-Infinity`, or numeric overflow to a non-finite value;
+- duplicate JSON object keys;
+- non-object items;
+- more than 1024 returned records;
+- more than 64 fields on one item;
+- excessive container/nesting/string bounds;
+- `score` values that are not JSON numbers in the normalized `0.0..1.0` range;
+- non-boolean `stale`;
+- non-object `metadata` or `provenance`;
+- `line` / `end_line` values outside `1..2147483647`;
+- path/symbol/kind/language fields that are not bounded strings.
+
+Missing `score` remains equivalent to `0.0`. Malformed scores are no longer coerced: the response fails closed with `invalid_payload` and produces zero `ContextItem` values.
+
+Rejected payloads therefore cannot contribute ranking candidates. Failed `ProviderResult` values are not cache-eligible, and the retrieval cache additionally refuses non-finite typed scores as defense in depth.
 
 ## Path policy
 
