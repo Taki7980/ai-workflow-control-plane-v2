@@ -246,6 +246,7 @@ def resolve_trusted_provider(
     trusted_raw["sha256"] = executable_sha256
     trusted_raw.setdefault("neutral_cwd", True)
     trusted_raw.setdefault("runtime_profile", "restricted")
+    trusted_raw.setdefault("sandbox", {"mode": "off"})
     trusted_spec = command_provider_spec(trusted_raw, default_name=provider_id)
 
     requested_timeout = float(
@@ -306,6 +307,8 @@ def resolve_project_provider(
             forbidden.append("semantics")
         if raw.get("runtime_profile") not in (None, ""):
             forbidden.append("runtime_profile")
+        if raw.get("sandbox") not in (None, {}):
+            forbidden.append("sandbox")
         if forbidden:
             raise ValueError(
                 "repository provider_id configuration may not set trusted fields: "
