@@ -212,8 +212,7 @@ jobs:
             --build-arg SOURCE_DATE_EPOCH \
             --provenance=mode=max,version=v1 \
             --sbom=true \
-            --push \
-            --tag "$image:$GITHUB_REF_NAME" \
+            --output "type=image,name=$image:$GITHUB_REF_NAME,push=true,rewrite-timestamp=true" \
             --metadata-file build-metadata.json \
             .
           digest="$(jq -r '."containerimage.digest"' build-metadata.json)"
