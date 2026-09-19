@@ -65,6 +65,35 @@ The container input manifest records the reviewed Dockerfile frontend, Python ba
 
 Base and package updates are explicit maintenance events. Digest pinning prevents an unchanged source revision from silently consuming newer container inputs; it does not remove the requirement to regularly review security updates.
 
+## Exact-SHA release authorization
+
+Release publication is gated in code by `scripts/verify_release_authorization.py`.
+
+For every `v*` tag, the gate requires all of the following before any draft release or publishing job can proceed:
+
+1. the remote tag resolves to the exact `GITHUB_SHA` that triggered the workflow;
+2. that commit is reachable from `main`;
+3. GitHub reports `main` as protected;
+4. `Tests`, `Security`, and `CodeQL` each have a completed successful **push** run on `main` for that exact SHA.
+
+The authorization runs twice: once before the protected `release` environment and again after environment approval immediately before draft creation. The second check prevents approval delay from turning a previously valid tag/branch state into a stale authorization.
+
+The second authorization writes `release-authorization.json`. That evidence is attested, attached to the draft release, included in `SHA256SUMS`, and validated again after publication.
+
+Published artifact verification additionally constrains GitHub attestations to:
+
+- the exact source digest `GITHUB_SHA`;
+- the exact source ref `GITHUB_REF`;
+- the repository's `.github/workflows/release.yml` signer workflow.
+
+This is stronger than verifying repository identity alone.
+
+### Current repository precondition
+
+At implementation time, GitHub reports `main` as **not protected** and the repository has no active repository rulesets. PR-20 deliberately does not weaken around that state: release authorization will fail closed until branch protection/ruleset configuration is enabled for `main`.
+
+The workflow can verify the public `protected` flag using normal repository read access. Detailed branch-protection configuration requires GitHub Administration-read permission and is therefore kept as repository-admin configuration rather than granted to the release workflow.
+
 ## Verification
 
 F-02 is considered closed only when all of the following are true:
