@@ -42,12 +42,15 @@ uv tool install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
 pipx install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
 ```
 
-For contributor development:
+For contributor development, use the committed universal lock with the same uv version as CI:
 
 ```bash
-python -m pip install -e ".[dev]"
-python -m unittest discover -s tests -v
+uv sync --locked
+uv lock --check
+uv run --locked --no-sync python -m unittest discover -s tests -v
 ```
+
+Normal development and CI must not perform opportunistic dependency upgrades. Changes to Python build/development tooling are reviewed as paired changes to `pyproject.toml` and `uv.lock`.
 
 ## Portable binary / bootstrap lifecycle
 
@@ -99,7 +102,9 @@ docker image rm ghcr.io/taki7980/ai-workflow-control-plane-v2:vX.Y.Z
 
 ## Release contract
 
-A `vX.Y.Z` tag must match `ai_workflow._version.__version__`. The tag workflow creates a draft release, builds wheel/sdist, builds PyInstaller 6.22.3 executables natively on Linux x86_64, Windows x86_64, macOS arm64 and macOS x86_64, publishes a GHCR container, generates `SHA256SUMS`, renders package-manager manifests from those exact checksums, attests artifacts, and publishes the draft only after required build jobs succeed.
+A `vX.Y.Z` tag must match `ai_workflow._version.__version__`. Before release work starts, the workflow verifies that the committed `uv.lock` still matches `pyproject.toml`. Python wheel/sdist builds and PyInstaller builds use the exact locked toolchain rather than independently resolving build tools at release time. Each release records a machine-readable toolchain manifest containing the Python version, uv version, selected build-tool versions, source SHA, platform identity, and SHA-256 digests of `pyproject.toml` and `uv.lock`.
+
+The tag workflow creates a draft release, builds wheel/sdist, builds PyInstaller 6.22.3 executables natively on Linux x86_64, Windows x86_64, macOS arm64 and macOS x86_64, publishes a GHCR container, generates `SHA256SUMS`, renders package-manager manifests from those exact checksums, attests artifacts and toolchain manifests, and publishes the draft only after required build jobs succeed.
 
 A post-publication verification job then downloads the public release, verifies every checksum-listed artifact, verifies GitHub attestations for Python distributions, portable binaries, checksums and rendered manifests, verifies the OCI image attestation, and performs a pinned bootstrap-install smoke.
 
