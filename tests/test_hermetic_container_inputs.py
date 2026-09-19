@@ -124,6 +124,7 @@ class HermeticContainerInputTests(unittest.TestCase):
             workflow.count("compatibility-version=30"),
             2,
         )
+        self.assertGreaterEqual(workflow.count("--provenance=false"), 2)
         self.assertIn('."containerimage.digest"', workflow)
         self.assertIn('test "$first" = "$second"', workflow)
         self.assertIn("Smoke Docker-loaded image separately", workflow)
