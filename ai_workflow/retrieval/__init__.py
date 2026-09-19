@@ -2,6 +2,12 @@
 
 from ..adaptive_broker import gather_detailed
 from ..context_broker import detect_changed_files, gather
+from ..evidence import (
+    EvidenceAuthority,
+    EvidenceEnvelope,
+    EvidenceKind,
+    EvidenceTrustClass,
+)
 from ..retrieval_policy import (
     RetrievalIntent,
     RetrievalPlan,
@@ -13,6 +19,10 @@ from ..retrieval_policy import (
 from ..workflow_engine import WorkflowEngine
 
 __all__ = [
+    "EvidenceAuthority",
+    "EvidenceEnvelope",
+    "EvidenceKind",
+    "EvidenceTrustClass",
     "RetrievalIntent",
     "RetrievalPlan",
     "Sufficiency",
