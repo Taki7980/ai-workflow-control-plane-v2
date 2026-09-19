@@ -5,6 +5,8 @@
 /.github/workflows/ @Taki7980
 /SECURITY.md @Taki7980
 /pyproject.toml @Taki7980
+/uv.lock @Taki7980
+/scripts/record_python_toolchain.py @Taki7980
 /Dockerfile @Taki7980
 /install.sh @Taki7980
 /install.ps1 @Taki7980
