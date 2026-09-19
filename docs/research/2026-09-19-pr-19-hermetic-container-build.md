@@ -41,6 +41,8 @@ BuildKit supports `SOURCE_DATE_EPOCH` for reproducible image/index/config and fi
 
 PR-19 derives the timestamp from the checked-out commit and passes it to every CI/security/release container build.
 
+BuildKit's reproducibility documentation distinguishes image/config/history timestamps from timestamps stored inside filesystem layers. The image/docker exporters therefore also use `rewrite-timestamp=true`; without that exporter option two no-cache builds can retain execution-time file metadata even when `SOURCE_DATE_EPOCH` is set.
+
 ### BuildKit SLSA provenance
 
 https://docs.docker.com/build/metadata/attestations/slsa-provenance/
