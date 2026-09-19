@@ -107,19 +107,25 @@ class HermeticContainerInputTests(unittest.TestCase):
                 )
                 self.assertIn("rewrite-timestamp=true", workflow)
 
-    def test_ci_rebuilds_twice_and_compares_image_identity(self) -> None:
+    def test_ci_rebuilds_twice_and_compares_release_image_digest(self) -> None:
         workflow = self._read(".github/workflows/tests.yml")
         self.assertIn("ai-workflow-repro-a", workflow)
         self.assertIn("ai-workflow-repro-b", workflow)
         self.assertGreaterEqual(workflow.count("--no-cache"), 2)
-        self.assertIn("docker image inspect ai-workflow-repro-a", workflow)
-        self.assertIn("docker image inspect ai-workflow-repro-b", workflow)
+        self.assertGreaterEqual(workflow.count("type=image"), 2)
+        self.assertGreaterEqual(
+            workflow.count("compatibility-version=30"),
+            2,
+        )
+        self.assertIn('."containerimage.digest"', workflow)
         self.assertIn('test "$first" = "$second"', workflow)
+        self.assertIn("Smoke Docker-loaded image separately", workflow)
 
     def test_release_exports_and_validates_slsa_v1_and_spdx(self) -> None:
         workflow = self._read(".github/workflows/release.yml")
         self.assertIn("--provenance=mode=max,version=v1", workflow)
         self.assertIn("--sbom=true", workflow)
+        self.assertIn("compatibility-version=30", workflow)
         self.assertIn(".Provenance.SLSA", workflow)
         self.assertIn(".SBOM.SPDX", workflow)
         self.assertIn("verify_container_attestations.py", workflow)
