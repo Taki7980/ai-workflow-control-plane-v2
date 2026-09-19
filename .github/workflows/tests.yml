@@ -206,6 +206,7 @@ jobs:
             --no-cache \
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
+            --build-arg BUILDKIT_MULTI_PLATFORM=1 \
             --output type=docker,rewrite-timestamp=true \
             --tag ai-workflow-repro-a \
             .
@@ -218,6 +219,7 @@ jobs:
             --no-cache \
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
+            --build-arg BUILDKIT_MULTI_PLATFORM=1 \
             --output type=docker,rewrite-timestamp=true \
             --tag ai-workflow-repro-b \
             .
