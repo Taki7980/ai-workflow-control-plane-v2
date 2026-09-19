@@ -51,8 +51,12 @@ class ReleaseDistributionTests(unittest.TestCase):
 
     def test_container_keeps_tooling_explicit_and_runtime_non_root(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("git", dockerfile)
-        self.assertIn("ripgrep", dockerfile)
+        packages = (
+            ROOT / "packaging" / "container" / "runtime-packages.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("git=", packages)
+        self.assertIn("ripgrep=", packages)
+        self.assertIn("runtime-packages.txt", dockerfile)
         self.assertRegex(dockerfile, r"(?m)^USER\s+(?!root\b)\S+")
         self.assertIn('ENTRYPOINT ["ai-workflow"]', dockerfile)
 
