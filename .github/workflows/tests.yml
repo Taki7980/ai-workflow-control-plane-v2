@@ -74,6 +74,13 @@ jobs:
         run: uv run --locked --no-sync code-review-graph --version
       - name: Run real graph contract test
         run: uv run --locked --no-sync python -m unittest tests.integration.test_code_review_graph_real -v
+      - name: Run CRG semantic golden benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked --no-sync python scripts/run_crg_semantic_benchmark.py \
+            --output "$RUNNER_TEMP/crg-semantic-report.json"
+          cat "$RUNNER_TEMP/crg-semantic-report.json"
 
   quality:
     runs-on: ubuntu-latest
