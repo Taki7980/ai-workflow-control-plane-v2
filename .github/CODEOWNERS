@@ -7,6 +7,7 @@
 /pyproject.toml @Taki7980
 /uv.lock @Taki7980
 /scripts/record_python_toolchain.py @Taki7980
+/scripts/verify_release_authorization.py @Taki7980
 /Dockerfile @Taki7980
 /packaging/container/ @Taki7980
 /scripts/verify_container_attestations.py @Taki7980
