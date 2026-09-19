@@ -1,0 +1,132 @@
+name: PR19 Repro Diagnostics
+
+on:
+  push:
+    branches:
+      - build/pr-19-hermetic-container
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up pinned Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          version: v0.37.0
+          driver-opts: >-
+            image=moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+      - name: Derive source timestamp
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+      - name: Build two OCI candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in a b; do
+            docker buildx build \
+              --no-cache \
+              --platform linux/amd64 \
+              --build-arg SOURCE_DATE_EPOCH \
+              --build-arg BUILDKIT_MULTI_PLATFORM=1 \
+              --provenance=false \
+              --output "type=oci,dest=$RUNNER_TEMP/$n.tar,rewrite-timestamp=true,compatibility-version=30" \
+              .
+          done
+      - name: Diagnose OCI differences
+        shell: bash
+        run: |
+          python - <<'PY'
+          import gzip
+          import hashlib
+          import io
+          import json
+          import tarfile
+          from pathlib import Path
+          import os
+
+          root = Path(os.environ["RUNNER_TEMP"])
+
+          def unpack(name):
+              dst = root / name
+              dst.mkdir(exist_ok=True)
+              with tarfile.open(root / f"{name}.tar", "r:*") as tf:
+                  tf.extractall(dst)
+              return dst
+
+          def load_json(root, digest):
+              algo, value = digest.split(":", 1)
+              return json.loads((root / "blobs" / algo / value).read_text())
+
+          def platform_manifest(root):
+              index = json.loads((root / "index.json").read_text())
+              desc = index["manifests"][0]
+              obj = load_json(root, desc["digest"])
+              if obj.get("mediaType", "").endswith("image.index.v1+json"):
+                  platform = next(
+                      x for x in obj["manifests"]
+                      if x.get("platform", {}).get("os") == "linux"
+                      and x.get("platform", {}).get("architecture") == "amd64"
+                  )
+                  return load_json(root, platform["digest"]), platform["digest"]
+              return obj, desc["digest"]
+
+          def layer_entries(root, digest):
+              algo, value = digest.split(":", 1)
+              raw = (root / "blobs" / algo / value).read_bytes()
+              try:
+                  raw = gzip.decompress(raw)
+              except gzip.BadGzipFile:
+                  pass
+              result = {}
+              with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as tf:
+                  for m in tf.getmembers():
+                      payload = b""
+                      if m.isfile():
+                          f = tf.extractfile(m)
+                          payload = f.read() if f else b""
+                      result[m.name] = {
+                          "type": m.type.decode("latin1") if isinstance(m.type, bytes) else str(m.type),
+                          "mode": m.mode,
+                          "uid": m.uid,
+                          "gid": m.gid,
+                          "size": m.size,
+                          "mtime": m.mtime,
+                          "linkname": m.linkname,
+                          "sha256": hashlib.sha256(payload).hexdigest() if m.isfile() else None,
+                          "pax": dict(sorted(m.pax_headers.items())),
+                      }
+              return result
+
+          a = unpack("a")
+          b = unpack("b")
+          ma, da = platform_manifest(a)
+          mb, db = platform_manifest(b)
+          print("PLATFORM_MANIFEST_A", da)
+          print("PLATFORM_MANIFEST_B", db)
+
+          ca = load_json(a, ma["config"]["digest"])
+          cb = load_json(b, mb["config"]["digest"])
+          if ca != cb:
+              print("CONFIG_DIFF")
+              print(json.dumps({"a": ca, "b": cb}, sort_keys=True, indent=2))
+
+          la = ma["layers"]
+          lb = mb["layers"]
+          print("LAYER_COUNT", len(la), len(lb))
+          for i, (xa, xb) in enumerate(zip(la, lb)):
+              print("LAYER", i, xa["digest"], xb["digest"], "same=" + str(xa["digest"] == xb["digest"]))
+              if xa["digest"] == xb["digest"]:
+                  continue
+              ea = layer_entries(a, xa["digest"])
+              eb = layer_entries(b, xb["digest"])
+              for path in sorted(set(ea) | set(eb)):
+                  if ea.get(path) != eb.get(path):
+                      print("ENTRY_DIFF", i, path)
+                      print(" A", json.dumps(ea.get(path), sort_keys=True))
+                      print(" B", json.dumps(eb.get(path), sort_keys=True))
+          PY
