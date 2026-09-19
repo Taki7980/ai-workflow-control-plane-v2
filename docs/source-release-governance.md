@@ -57,6 +57,14 @@ The committed `uv.lock` is part of the reviewed source/release boundary. CI and 
 
 Python release artifacts should carry enough toolchain identity to reconstruct which source revision, interpreter, resolver, locked inputs, and direct build tools were used. This supplements GitHub/SLSA attestations; it does not replace hosted-build provenance.
 
+## Locked container build authority
+
+Container source and release authority includes `Dockerfile`, `packaging/container/`, `scripts/verify_container_attestations.py`, and the Docker dependency-update policy. These files are CODEOWNERS-protected.
+
+The container input manifest records the reviewed Dockerfile frontend, Python base, uv bootstrap image, Buildx/BuildKit versions and digests, Debian snapshot timestamp, and direct runtime package versions. Release and security workflows must use the pinned builder rather than whichever Buildx/BuildKit happens to be installed on the runner.
+
+Base and package updates are explicit maintenance events. Digest pinning prevents an unchanged source revision from silently consuming newer container inputs; it does not remove the requirement to regularly review security updates.
+
 ## Verification
 
 F-02 is considered closed only when all of the following are true:
