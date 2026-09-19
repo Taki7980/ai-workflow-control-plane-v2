@@ -213,7 +213,7 @@ jobs:
             --build-arg BUILDKIT_MULTI_PLATFORM=1 \
             --provenance=mode=max,version=v1 \
             --sbom=true \
-            --output "type=image,name=$image:$GITHUB_REF_NAME,push=true,rewrite-timestamp=true" \
+            --output "type=image,name=$image:$GITHUB_REF_NAME,push=true,rewrite-timestamp=true,compatibility-version=30" \
             --metadata-file build-metadata.json \
             .
           digest="$(jq -r '."containerimage.digest"' build-metadata.json)"
