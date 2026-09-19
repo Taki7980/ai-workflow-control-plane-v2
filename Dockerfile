@@ -21,6 +21,7 @@ RUN rm -f /etc/apt/sources.list \
     && rm -rf \
         /var/lib/apt/lists/* \
         /var/cache/apt/* \
+        /var/cache/ldconfig/aux-cache \
         /var/log/apt/* \
         /var/log/dpkg.log \
         /var/log/alternatives.log \
