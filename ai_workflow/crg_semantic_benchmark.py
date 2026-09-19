@@ -236,60 +236,64 @@ def _stale_graph_control(fixture: Path, root: Path) -> dict[str, Any]:
 
 def _rename_delete_control(fixture: Path, root: Path) -> dict[str, Any]:
     repo = _copy_fixture(fixture, root / "rename")
+    lifecycle = repo / "python" / "lifecycle.py"
+    lifecycle.write_text(
+        "def lifecycle_helper() -> int:\n"
+        "    return 1\n\n"
+        "def lifecycle_caller() -> int:\n"
+        "    return lifecycle_helper()\n",
+        encoding="utf-8",
+    )
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "add lifecycle control")
+
     initial = sync_workspace_graphs(repo, {}, timeout=180)
     if initial.get("ready") != 1:
         return {"passed": False, "reason": "initial graph build failed"}
 
-    payments = repo / "python" / "payments.py"
-    consumer = repo / "python" / "alias_consumer.py"
-    payments.write_text(
-        payments.read_text(encoding="utf-8").replace(
-            "execute_payment",
-            "execute_payment_v2",
-        ),
-        encoding="utf-8",
-    )
-    consumer.write_text(
-        consumer.read_text(encoding="utf-8").replace(
-            "execute_payment",
-            "execute_payment_v2",
-        ),
+    lifecycle.write_text(
+        "def lifecycle_helper_v2() -> int:\n"
+        "    return 1\n\n"
+        "def lifecycle_caller() -> int:\n"
+        "    return lifecycle_helper_v2()\n",
         encoding="utf-8",
     )
     updated = sync_workspace_graphs(repo, {}, timeout=180)
     if updated.get("ready") != 1:
         return {"passed": False, "reason": "graph update failed", "sync": updated}
 
-    old_items = crg_context(
-        repo,
-        "Who calls execute_payment?",
-        "execute_payment",
-        None,
-        10,
-        patterns=("callers_of",),
+    old_rows, _ = _rows_from_items(
+        crg_context(
+            repo,
+            "Who calls lifecycle_helper?",
+            "lifecycle_helper",
+            None,
+            10,
+            patterns=("callers_of",),
+        )
     )
-    new_items = crg_context(
-        repo,
-        "Who calls execute_payment_v2?",
-        "execute_payment_v2",
-        None,
-        10,
-        patterns=("callers_of",),
+    new_rows, _ = _rows_from_items(
+        crg_context(
+            repo,
+            "Who calls lifecycle_helper_v2?",
+            "lifecycle_helper_v2",
+            None,
+            10,
+            patterns=("callers_of",),
+        )
     )
-    old_rows, _ = _rows_from_items(old_items)
-    new_rows, _ = _rows_from_items(new_items)
-    old_has_consumer = _contains_gold(
+    old_has_caller = _contains_gold(
         old_rows,
-        path="python/alias_consumer.py",
-        name="process_order",
+        path="python/lifecycle.py",
+        name="lifecycle_caller",
     )
-    new_has_consumer = _contains_gold(
+    new_has_caller = _contains_gold(
         new_rows,
-        path="python/alias_consumer.py",
-        name="process_order",
+        path="python/lifecycle.py",
+        name="lifecycle_caller",
     )
     return {
-        "passed": (not old_has_consumer) and new_has_consumer,
+        "passed": (not old_has_caller) and new_has_caller,
         "old_result_count": len(old_rows),
         "new_result_count": len(new_rows),
     }
@@ -312,32 +316,32 @@ def _worktree_control(fixture: Path, root: Path) -> dict[str, Any]:
     main_rows, _ = _rows_from_items(
         crg_context(
             repo,
-            "Who calls execute_payment?",
-            "execute_payment",
+            "What does start_pipeline call?",
+            "start_pipeline",
             None,
             10,
-            patterns=("callers_of",),
+            patterns=("callees_of",),
         )
     )
     worktree_rows, _ = _rows_from_items(
         crg_context(
             worktree,
-            "Who calls execute_payment?",
-            "execute_payment",
+            "What does start_pipeline call?",
+            "start_pipeline",
             None,
             10,
-            patterns=("callers_of",),
+            patterns=("callees_of",),
         )
     )
     main_ok = _contains_gold(
         main_rows,
-        path="python/alias_consumer.py",
-        name="process_order",
+        path="python/async_chain.py",
+        name="parse_remote",
     )
     worktree_ok = _contains_gold(
         worktree_rows,
-        path="python/alias_consumer.py",
-        name="process_order",
+        path="python/async_chain.py",
+        name="parse_remote",
     )
     return {
         "passed": main_ok and worktree_ok and main_dir != worktree_dir,
@@ -351,12 +355,9 @@ def _worktree_control(fixture: Path, root: Path) -> dict[str, Any]:
 def _write_small_repo(root: Path, caller: str) -> Path:
     root.mkdir(parents=True)
     (root / ".gitignore").write_text("ai-workspace/\n", encoding="utf-8")
-    (root / "shared.py").write_text(
-        "def shared() -> str:\n    return 'ok'\n",
-        encoding="utf-8",
-    )
-    (root / "consumer.py").write_text(
-        "from shared import shared\n\n"
+    (root / "flow.py").write_text(
+        "def shared() -> str:\n"
+        "    return 'ok'\n\n"
         f"def {caller}() -> str:\n"
         "    return shared()\n",
         encoding="utf-8",
