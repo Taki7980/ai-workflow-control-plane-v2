@@ -18,7 +18,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: "3.14.7"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Verify committed release lock
+        run: uv lock --check
       - name: Validate tag matches package version
         shell: bash
         run: |
@@ -57,21 +65,42 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
-      - name: Build Python distributions
+          python-version: "3.14.7"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync locked Python build toolchain
+        run: uv sync --locked --only-group build
+      - name: Build Python distributions from locked inputs
+        shell: bash
         run: |
-          python -m pip install --upgrade build
-          python -m build
-          python -m pip install dist/*.whl
-          ai-workflow --version
-      - name: Attest Python distributions
+          set -euo pipefail
+          mkdir -p release-metadata
+          uv run --locked --no-sync python -m build --no-isolation --report "$RUNNER_TEMP/build-report.json"
+          uv run --locked --no-sync python scripts/record_python_toolchain.py \
+            --package build \
+            --package setuptools \
+            --output release-metadata/python-build-toolchain.json
+          python -m venv "$RUNNER_TEMP/release-smoke"
+          "$RUNNER_TEMP/release-smoke/bin/python" -m pip install --no-deps dist/*.whl
+          "$RUNNER_TEMP/release-smoke/bin/ai-workflow" --version
+          cat "$RUNNER_TEMP/build-report.json"
+          cat release-metadata/python-build-toolchain.json
+      - name: Attest Python distributions and build toolchain
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: "dist/*"
+          subject-path: |
+            dist/*
+            release-metadata/python-build-toolchain.json
       - name: Attach Python distributions to draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          dist/* release-metadata/python-build-toolchain.json --clobber
       - name: Publish package distributions to PyPI with Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
@@ -102,32 +131,51 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: "3.14.7"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync locked portable-build toolchain
+        run: uv sync --locked --only-group portable
       - name: Build portable executable
         id: asset
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install "pyinstaller==6.22.3"
-          python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
+          uv run --locked --no-sync python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
           version="${GITHUB_REF_NAME#v}"
           asset="ai-workflow-v${version}-${{ matrix.suffix }}${{ matrix.exe }}"
           mkdir -p release
           mv "dist/ai-workflow${{ matrix.exe }}" "release/$asset"
+          toolchain="release/$asset.toolchain.json"
+          uv run --locked --no-sync python scripts/record_python_toolchain.py \
+            --package pyinstaller \
+            --output "$toolchain"
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
           echo "path=release/$asset" >> "$GITHUB_OUTPUT"
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+          cat "$toolchain"
       - name: Smoke portable executable
         shell: bash
         run: '"./${{ steps.asset.outputs.path }}" --version'
-      - name: Attest portable executable
+      - name: Attest portable executable and toolchain
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: ${{ steps.asset.outputs.path }}
+          subject-path: |
+            ${{ steps.asset.outputs.path }}
+            ${{ steps.asset.outputs.toolchain }}
       - name: Attach portable executable to draft release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.asset.outputs.path }}" --clobber
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          "${{ steps.asset.outputs.path }}"
+          "${{ steps.asset.outputs.toolchain }}"
+          --clobber
 
   container:
     needs: prepare-release
@@ -180,7 +228,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: "3.14.7"
       - name: Download release assets and create checksums
         env:
           GH_TOKEN: ${{ github.token }}
