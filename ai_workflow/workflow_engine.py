@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +18,11 @@ from .context_broker import (
 from .context_selection import select_context
 from .config import estimate_tokens
 from .deployment_runtime import resolve_runtime_deployment
+from .evidence import (
+    build_evidence_envelope,
+    repository_ids_for_roots,
+    trust_class_for_source,
+)
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .models import ContextItem, Lane, RouteDecision
 from .orchestration import build_orchestration_contract
@@ -40,22 +46,59 @@ from .workspace_state import workspace_fingerprint
 
 
 def _provenance(item: ContextItem, workspace_root: Path | None = None) -> ContextItem:
+    """Normalize provenance with code-owned trust labels.
+
+    Retrieved text and provider-supplied metadata may describe provenance, but
+    they cannot promote themselves into a trusted/authoritative control source.
+    """
+
     metadata = dict(item.metadata)
     provenance = dict(item.provenance)
-    provenance.setdefault("retriever", item.source)
-    provenance.setdefault("fresh", not item.stale)
+    provenance["retriever"] = item.source
+    provenance["fresh"] = not item.stale
     if workspace_root is not None:
-        provenance.setdefault("workspace_root", str(workspace_root))
-    if item.source in {"lightweight_index", "targeted_source", "code_review_graph", "scip", "semantic", "test_resolver"} or item.source.startswith("external:"):
-        provenance.setdefault("trust", "untrusted_repository_content")
-    elif item.source in {"durable_memory", "hot_cache", "research_cache"}:
-        provenance.setdefault("trust", "generated_or_cached_context")
-    else:
-        provenance.setdefault("trust", "context_data")
+        provenance["workspace_root"] = str(workspace_root.resolve())
+    provenance["trust"] = trust_class_for_source(item.source).value
     for key in ("path", "file", "line", "start_line", "end_line", "sha256"):
-        if key in metadata and key not in provenance:
+        if key in metadata:
             provenance[key] = metadata[key]
-    return ContextItem(item.source, item.text, item.score, item.stale, metadata, provenance)
+    return ContextItem(
+        item.source,
+        item.text,
+        item.score,
+        item.stale,
+        metadata,
+        provenance,
+    )
+
+
+def _attach_evidence_envelope(
+    item: ContextItem,
+    *,
+    control_root: Path,
+    repository_ids: dict[Path, str],
+) -> ContextItem:
+    raw_root = item.provenance.get("workspace_root")
+    candidate_root = control_root
+    if isinstance(raw_root, str) and raw_root.strip():
+        try:
+            candidate_root = Path(raw_root).resolve()
+        except OSError:
+            candidate_root = control_root
+
+    repository_id = repository_ids.get(candidate_root)
+    if repository_id is None:
+        repository_id = repository_ids[control_root]
+
+    envelope = build_evidence_envelope(
+        source=item.source,
+        text=item.text,
+        stale=item.stale,
+        metadata=item.metadata,
+        provenance=item.provenance,
+        repository_id=repository_id,
+    )
+    return replace(item, evidence=envelope)
 
 
 def _dedupe_ranked(items: list[ContextItem]) -> list[ContextItem]:
@@ -379,6 +422,14 @@ class WorkflowEngine:
         selected_roots = roots[:max_roots]
         base_calls: list[ScheduledCall] = []
         workspace_root = Path(root).resolve()
+        identity_roots = list(
+            dict.fromkeys([workspace_root, *selected_roots])
+        )
+        repository_ids = repository_ids_for_roots(
+            workspace_root,
+            identity_roots,
+            config,
+        )
 
         def changed_for(candidate_root: Path) -> list[str]:
             if candidate_root == workspace_root:
@@ -740,6 +791,15 @@ class WorkflowEngine:
             selected = _hard_cap(candidates, adaptive_chars)
             selector = {"mode": "legacy_hard_cap", "selected_count": len(selected), "used_chars": sum(len(i.text) for i in selected)}
 
+        selected = [
+            _attach_evidence_envelope(
+                item,
+                control_root=workspace_root,
+                repository_ids=repository_ids,
+            )
+            for item in selected
+        ]
+
         final_suff = evaluate_sufficiency(
             query,
             selected,
@@ -786,6 +846,11 @@ class WorkflowEngine:
             "workspace_state": snapshot,
             "graph_state": graph_state,
             "evidence_state": state,
+            "evidence_contract": {
+                "schema": "evidence-v1",
+                "selected_count": len(selected),
+                "authority": "evidence_only",
+            },
             "sufficiency": trace.sufficiency,
             "selector": selector,
             "adaptive_context_chars": adaptive_chars,
@@ -903,6 +968,11 @@ class WorkflowEngine:
                         "source": item.source,
                         "dedupe_key": item.dedupe_key,
                         "stale": item.stale,
+                        "evidence": (
+                            item.evidence.to_dict()
+                            if item.evidence is not None
+                            else None
+                        ),
                         "metadata": {
                             key: value
                             for key, value in item.metadata.items()
