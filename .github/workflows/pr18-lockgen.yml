@@ -38,3 +38,10 @@ jobs:
           print("PR18_LOCK_GZIP_BASE64_END")
           print(f"PR18_LOCK_BYTES={len(raw)}")
           PY
+      - name: Upload generated lock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr18-uv-lock
+          path: uv.lock
+          if-no-files-found: error
+          retention-days: 1
