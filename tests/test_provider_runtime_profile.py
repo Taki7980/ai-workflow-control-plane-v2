@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
-import stat
 import sys
 import tempfile
 import unittest
@@ -229,6 +229,62 @@ class ProviderRuntimeProfileTests(unittest.TestCase):
         self.assertNotEqual(temp_path, Path(td) / "ambient-tmp")
         self.assertFalse(home.exists())
         self.assertFalse(temp_path.exists())
+
+    def test_async_restricted_runtime_uses_same_isolated_environment(self):
+        from ai_workflow.provider_runner import (
+            CommandProviderSpec,
+            run_command_provider_async,
+        )
+        from ai_workflow.retrieval_contracts import RetrievalRequest
+
+        executable = Path(sys.executable).resolve()
+        digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+        code = (
+            "import json,os,sys;"
+            "sys.stdin.read();"
+            "print(json.dumps({'items':[{'text':json.dumps({"
+            "'HOME':os.environ.get('HOME'),"
+            "'TMP':os.environ.get('TMP'),"
+            "'PATH':os.environ.get('PATH'),"
+            "'AWS_PROFILE':os.environ.get('AWS_PROFILE')}),"
+            "'score':1.0}]}))"
+        )
+        spec = CommandProviderSpec(
+            name="async-restricted-runtime",
+            command=(str(executable), "-c", code),
+            timeout_seconds=2,
+            max_output_bytes=8192,
+            executable_trust="trusted_registry_digest",
+            executable_sha256=digest,
+            neutral_cwd=True,
+            runtime_profile="restricted",
+        )
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            {
+                "HOME": str(Path(td) / "ambient-home"),
+                "TMP": str(Path(td) / "ambient-tmp"),
+                "PATH": str(Path(td) / "attacker-bin"),
+                "AWS_PROFILE": "production",
+            },
+            clear=False,
+        ):
+            result = asyncio.run(
+                run_command_provider_async(
+                    spec,
+                    RetrievalRequest("q", Path(td), 1, "semantic", 2),
+                    source="external:async-restricted-runtime",
+                )
+            )
+
+        self.assertTrue(result.ok, result.error)
+        env = json.loads(result.items[0].text)
+        self.assertIsNone(env["AWS_PROFILE"])
+        self.assertEqual(env["PATH"], str(executable.parent))
+        self.assertNotEqual(env["HOME"], str(Path(td) / "ambient-home"))
+        self.assertNotEqual(env["TMP"], str(Path(td) / "ambient-tmp"))
+        self.assertFalse(Path(env["HOME"]).exists())
+        self.assertFalse(Path(env["TMP"]).exists())
 
     def test_compatibility_profile_preserves_legacy_safe_environment(self):
         from ai_workflow.provider_runner import (
