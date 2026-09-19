@@ -203,8 +203,6 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       - name: Build and push container from locked inputs with provenance and SBOM
         id: image
-        env:
-          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
         shell: bash
         run: |
           set -euo pipefail
