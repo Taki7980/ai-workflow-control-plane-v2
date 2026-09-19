@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from ai_workflow.crg_semantic_benchmark import (
+from scripts.crg_semantic_benchmark import (
     score_ranked_rows,
     validate_cases,
 )
