@@ -1007,11 +1007,17 @@ def run_command_provider(
                     **_provider_process_group_kwargs(),
                 )
             except (OSError, ValueError) as exc:
-                return ProviderResult(
-                    provider=spec.name,
-                    latency_ms=(time.perf_counter() - started) * 1000,
-                    error=f"provider could not be started: {type(exc).__name__}",
-                    error_kind="launch",
+                return _attach_sandbox_state(
+                    ProviderResult(
+                        provider=spec.name,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        error=(
+                            "provider could not be started: "
+                            f"{type(exc).__name__}"
+                        ),
+                        error_kind="launch",
+                    ),
+                    sandbox_plan,
                 )
 
             stdout_reader = threading.Thread(
@@ -1158,11 +1164,17 @@ async def run_command_provider_async(
                     **_provider_process_group_kwargs(),
                 )
             except (OSError, ValueError) as exc:
-                return ProviderResult(
-                    provider=spec.name,
-                    latency_ms=(time.perf_counter() - started) * 1000,
-                    error=f"provider could not be started: {type(exc).__name__}",
-                    error_kind="launch",
+                return _attach_sandbox_state(
+                    ProviderResult(
+                        provider=spec.name,
+                        latency_ms=(time.perf_counter() - started) * 1000,
+                        error=(
+                            "provider could not be started: "
+                            f"{type(exc).__name__}"
+                        ),
+                        error_kind="launch",
+                    ),
+                    sandbox_plan,
                 )
 
             effective_timeout = min(
