@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -25,8 +26,11 @@ class RetrievalRequest:
             raise ValueError("retrieval query must not be blank")
         if int(self.limit) < 1:
             raise ValueError("retrieval limit must be >= 1")
-        if float(self.timeout_seconds) <= 0:
-            raise ValueError("retrieval timeout_seconds must be > 0")
+        timeout = float(self.timeout_seconds)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(
+                "retrieval timeout_seconds must be finite and > 0"
+            )
 
 
 @dataclass(frozen=True)
