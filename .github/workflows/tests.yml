@@ -33,17 +33,17 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            python-version: "3.11"
+            python-version: "3.11.16"
           - os: ubuntu-latest
-            python-version: "3.12"
+            python-version: "3.12.14"
           - os: ubuntu-latest
-            python-version: "3.13"
+            python-version: "3.13.15"
           - os: ubuntu-latest
-            python-version: "3.14"
+            python-version: "3.14.7"
           - os: windows-latest
-            python-version: "3.14"
+            python-version: "3.14.7"
           - os: macos-latest
-            python-version: "3.14"
+            python-version: "3.14.7"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python ${{ matrix.python-version }}
@@ -61,13 +61,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - name: Install pinned Code Review Graph
-        run: python -m pip install "code-review-graph==2.3.8"
+          python-version: "3.12.14"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync locked CRG toolchain
+        run: uv sync --locked --only-group crg
       - name: Verify pinned CRG executable
-        run: code-review-graph --version
+        run: uv run --locked --no-sync code-review-graph --version
       - name: Run real graph contract test
-        run: python -m unittest tests.integration.test_code_review_graph_real -v
+        run: uv run --locked --no-sync python -m unittest tests.integration.test_code_review_graph_real -v
 
   quality:
     runs-on: ubuntu-latest
@@ -75,17 +81,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
-      - name: Install quality tools
-        run: python -m pip install -e ".[dev]"
+          python-version: "3.14.7"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync locked quality tools
+        run: uv sync --locked --only-group dev
       - name: Compile package
-        run: python -m compileall -q ai_workflow
+        run: uv run --locked --no-sync python -m compileall -q ai_workflow
       - name: Repository hygiene gate
-        run: python scripts/check_repository_hygiene.py --root .
+        run: uv run --locked --no-sync python scripts/check_repository_hygiene.py --root .
       - name: Ruff whole-repository quality gate
-        run: ruff check ai_workflow tests security_tests scripts
+        run: uv run --locked --no-sync ruff check ai_workflow tests security_tests scripts
       - name: Mypy whole-package gate
-        run: mypy ai_workflow
+        run: uv run --locked --no-sync mypy ai_workflow
 
   package-smoke:
     runs-on: ubuntu-latest
@@ -93,11 +105,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
-      - name: Build wheel and sdist
+          python-version: "3.14.7"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync locked package toolchain
+        run: uv sync --locked --only-group package-smoke
+      - name: Build wheel and sdist from locked build inputs
+        shell: bash
         run: |
-          python -m pip install --upgrade build pipx uv
-          python -m build
+          set -euo pipefail
+          uv run --locked --no-sync python -m build --no-isolation --report "$RUNNER_TEMP/build-report.json"
+          uv run --locked --no-sync python scripts/record_python_toolchain.py \
+            --package build \
+            --package setuptools \
+            --package pipx \
+            --output "$RUNNER_TEMP/python-build-toolchain.json"
+          cat "$RUNNER_TEMP/build-report.json"
+          cat "$RUNNER_TEMP/python-build-toolchain.json"
       - name: Clean wheel smoke
         shell: bash
         run: |
@@ -109,7 +137,7 @@ jobs:
         run: |
           export PIPX_HOME="$RUNNER_TEMP/pipx-home"
           export PIPX_BIN_DIR="$RUNNER_TEMP/pipx-bin"
-          pipx install dist/*.whl
+          uv run --locked --no-sync pipx install dist/*.whl
           "$PIPX_BIN_DIR/ai-workflow" --version
       - name: uv tool smoke
         shell: bash
@@ -136,12 +164,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: "3.14.7"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync locked portable-build toolchain
+        run: uv sync --locked --only-group portable
       - name: Build native portable executable
         shell: bash
         run: |
-          python -m pip install "pyinstaller==6.22.3"
-          python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
+          uv run --locked --no-sync python -m PyInstaller --clean --onefile --name ai-workflow packaging/entrypoint.py
+          uv run --locked --no-sync python scripts/record_python_toolchain.py \
+            --package pyinstaller \
+            --output "$RUNNER_TEMP/portable-toolchain.json"
+          cat "$RUNNER_TEMP/portable-toolchain.json"
       - name: Smoke portable executable
         shell: bash
         run: '"./dist/ai-workflow${{ matrix.exe }}" --version'
@@ -170,7 +209,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: "3.14.7"
       - name: Run deterministic bootstrap installer smoke
         run: python scripts/smoke_bootstrap_install.py --installer ${{ matrix.installer }}
 
@@ -180,7 +219,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: "3.14.7"
       - name: Prepare frozen benchmark fixture
         shell: bash
         run: |
