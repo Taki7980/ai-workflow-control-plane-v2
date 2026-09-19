@@ -51,6 +51,8 @@ class ContextItem:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        if self.evidence is not None:
+        if self.evidence is None:
+            data.pop("evidence", None)
+        else:
             data["evidence"] = self.evidence.to_dict()
         return data
