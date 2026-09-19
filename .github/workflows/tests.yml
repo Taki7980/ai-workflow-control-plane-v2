@@ -80,6 +80,9 @@ jobs:
           set -euo pipefail
           uv run --locked --no-sync python scripts/run_crg_semantic_benchmark.py \
             --output "$RUNNER_TEMP/crg-semantic-report.json"
+          uv run --locked --no-sync python scripts/check_crg_semantic_regression.py \
+            benchmarks/crg-semantic-v1/baseline.json \
+            "$RUNNER_TEMP/crg-semantic-report.json"
           cat "$RUNNER_TEMP/crg-semantic-report.json"
 
   quality:
