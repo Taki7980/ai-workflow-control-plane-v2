@@ -179,9 +179,13 @@ This removes the GitHub runner's preinstalled builder version from the effective
 
 ### Reproducibility gate
 
-CI performs two independent no-cache Linux/amd64 builds with the same source commit timestamp and compares their image IDs.
+CI performs two independent no-cache Linux/amd64 builds with the same source commit timestamp using BuildKit's `type=image` exporter, which matches the release exporter path, and compares the resulting `containerimage.digest` values.
 
-This catches hidden time-based or mutable-input drift in the normal image build.
+The exporter is pinned to `compatibility-version=30` so digest-affecting image assembly behavior is explicit rather than implicit.
+
+A separate `type=docker` build is loaded into the local Docker engine and executed as the runtime smoke test.
+
+This split is intentional. BuildKit issue #4986 documents that the local Docker exporter/import path can yield different Docker image identities across repeated builds even when `SOURCE_DATE_EPOCH` and timestamp rewriting are enabled. The release artifact is the BuildKit image-exporter result, so reproducibility is asserted on that production-equivalent digest while local Docker loading is validated separately for execution.
 
 ### Release provenance and SBOM
 
