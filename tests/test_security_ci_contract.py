@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -40,8 +41,8 @@ class SecurityCIContractTests(unittest.TestCase):
         )
 
     def test_security_tools_are_exactly_pinned(self) -> None:
-        raw = (ROOT / "security" / "requirements.txt").read_text(
-            encoding="utf-8"
+        data = tomllib.loads(
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )
         expected = {
             "coverage": "7.16.0",
@@ -51,14 +52,15 @@ class SecurityCIContractTests(unittest.TestCase):
             "ruff": "0.16.7",
         }
         parsed: dict[str, str] = {}
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            self.assertRegex(line, r"^[a-z0-9-]+==[^=<>~!]+$")
-            name, version = line.split("==", 1)
+        for requirement in data["dependency-groups"]["security"]:
+            self.assertRegex(
+                requirement,
+                r"^[a-z0-9-]+==[^=<>~!]+$",
+            )
+            name, version = requirement.split("==", 1)
             parsed[name] = version
         self.assertEqual(parsed, expected)
+        self.assertFalse((ROOT / "security" / "requirements.txt").exists())
 
     def test_security_workflow_uses_read_only_default_permissions(self) -> None:
         workflow = (
