@@ -166,8 +166,7 @@ On platforms that expose POSIX ownership/permission bits, the control plane now 
 - the registry is a regular file;
 - the registry is not writable by group or others;
 - the registry owner is the current user or root;
-- a trusted provider executable is not group/world writable;
-- executable permission safety is rechecked again immediately before launch.
+- executable identity remains protected by the existing absolute-path, symlink, SHA-256, and launch-time digest revalidation contract.
 
 Windows does not expose equivalent POSIX mode/UID semantics through the same portable API, so these specific checks are applied only where the platform exposes them. Digest/path validation remains cross-platform.
 
