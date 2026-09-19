@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -48,11 +49,23 @@ class DistributionContractTests(unittest.TestCase):
             self.assertIn("Taki7980/ai-workflow-control-plane-v2", source)
 
     def test_pyinstaller_pin_matches_current_tested_release(self) -> None:
+        data = tomllib.loads(self._text("pyproject.toml"))
+        self.assertEqual(
+            data["dependency-groups"]["portable"],
+            ["pyinstaller==6.22.3"],
+        )
+
         release = self._text(".github/workflows/release.yml")
         tests = self._text(".github/workflows/tests.yml")
-
-        self.assertIn('pyinstaller==6.22.3', release)
-        self.assertIn('pyinstaller==6.22.3', tests)
+        for workflow in (release, tests):
+            self.assertIn(
+                "uv sync --locked --only-group portable",
+                workflow,
+            )
+            self.assertIn(
+                "python -m PyInstaller",
+                workflow,
+            )
 
     def test_pr_installation_smoke_covers_portable_docker_and_bootstrap(self) -> None:
         workflow = self._text(".github/workflows/tests.yml")
