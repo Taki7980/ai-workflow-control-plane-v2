@@ -156,6 +156,62 @@ Repository configuration can tighten timeout/output limits and choose intents, b
 
 A digest-pinned interpreter is also prevented from being pointed at an existing repository-owned script path. If a trusted provider needs a helper script, register it with an absolute path outside the project and treat that helper as part of the trusted provider installation.
 
+## Trust-anchor permissions and ownership
+
+The trusted provider registry is executable authority, so its filesystem state is part of the trust boundary.
+
+On platforms that expose POSIX ownership/permission bits, the control plane now requires:
+
+- the registry path itself is not a symlink;
+- the registry is a regular file;
+- the registry is not writable by group or others;
+- the registry owner is the current user or root;
+- a trusted provider executable is not group/world writable;
+- executable permission safety is rechecked again immediately before launch.
+
+Windows does not expose equivalent POSIX mode/UID semantics through the same portable API, so these specific checks are applied only where the platform exposes them. Digest/path validation remains cross-platform.
+
+## Runtime profiles
+
+Trusted providers now have an explicit `runtime_profile` owned by the trusted registry.
+
+### `restricted` (default)
+
+This is the secure default for registry-backed providers.
+
+The process receives:
+
+- a dedicated ephemeral `HOME` / `USERPROFILE`;
+- a dedicated ephemeral `TMPDIR`, `TEMP`, and `TMP`;
+- a deterministic locale/UTF-8 runtime environment;
+- a minimal `PATH` containing only the trusted executable directory;
+- only the small OS bootstrap variables required to start processes;
+- only explicitly allowlisted provider variables from the trusted registry.
+
+Ambient developer configuration, cloud profiles, user config directories, and arbitrary parent-process variables are not inherited.
+
+The ephemeral profile/temp directories are removed after each provider invocation.
+
+### `compatibility`
+
+A trusted registry may explicitly opt a provider into `runtime_profile: "compatibility"` when the provider genuinely requires the previous safe-environment behavior, such as the host `HOME` or broader `PATH`.
+
+Repository configuration cannot select or weaken `runtime_profile`; only the out-of-repository trusted registry can do so.
+
+Example:
+
+```json
+{
+  "providers": {
+    "legacy-semantic": {
+      "command": ["/opt/providers/legacy-semantic"],
+      "sha256": "<digest>",
+      "runtime_profile": "compatibility"
+    }
+  }
+}
+```
+
 ## Working-directory isolation
 
 Trusted registry providers default to an ephemeral neutral working directory that exists only for the lifetime of the provider process. The repository path is still supplied explicitly in the JSON request as `root`; it is not granted as ambient process state through the current working directory.
