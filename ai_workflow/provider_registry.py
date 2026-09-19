@@ -69,20 +69,11 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _validate_registry_trust_anchor(path: Path) -> None:
-    """Fail closed when the trusted registry is mutable by other users."""
+def _validate_registry_stat(path: Path, info: os.stat_result) -> None:
+    """Validate the exact registry file descriptor metadata."""
 
-    if path.is_symlink():
-        raise ValueError("trusted provider registry may not be a symlink")
-    try:
-        info = path.stat()
-    except FileNotFoundError as exc:
-        raise ValueError(f"trusted provider registry not found: {path}") from exc
-    except OSError as exc:
-        raise ValueError("trusted provider registry could not be inspected") from exc
     if not stat.S_ISREG(info.st_mode):
         raise ValueError("trusted provider registry must be a regular file")
-
     if os.name != "nt":
         if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
             raise ValueError(
@@ -98,14 +89,60 @@ def _validate_registry_trust_anchor(path: Path) -> None:
                 )
 
 
+def _read_trusted_registry(path: Path) -> str:
+    """Read the same trust-anchor inode that was permission-checked.
+
+    POSIX uses O_NOFOLLOW + fstat to avoid a validate-then-swap symlink race.
+    Other platforms retain explicit lstat/symlink checks where portable.
+    """
+
+    if os.name != "nt":
+        flags = os.O_RDONLY
+        flags |= int(getattr(os, "O_CLOEXEC", 0))
+        flags |= int(getattr(os, "O_NOFOLLOW", 0))
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"trusted provider registry not found: {path}"
+            ) from exc
+        except OSError as exc:
+            if path.is_symlink():
+                raise ValueError(
+                    "trusted provider registry may not be a symlink"
+                ) from exc
+            raise ValueError(
+                "trusted provider registry could not be opened safely"
+            ) from exc
+        try:
+            info = os.fstat(fd)
+            _validate_registry_stat(path, info)
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                fd = -1
+                return handle.read()
+        finally:
+            if fd >= 0:
+                os.close(fd)
+
+    if path.is_symlink():
+        raise ValueError("trusted provider registry may not be a symlink")
+    try:
+        info = path.stat()
+        _validate_registry_stat(path, info)
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"trusted provider registry not found: {path}") from exc
+    except OSError as exc:
+        raise ValueError("trusted provider registry could not be read") from exc
+
+
 def _load_registry(root: Path) -> Mapping[str, Any]:
     path = trusted_registry_path()
     if _is_within(root, path):
         raise ValueError("trusted provider registry must live outside the repository")
-    _validate_registry_trust_anchor(path)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = json.loads(_read_trusted_registry(path))
+    except json.JSONDecodeError as exc:
         raise ValueError("trusted provider registry could not be read") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("providers"), dict):
         raise ValueError("trusted provider registry must contain a providers object")
