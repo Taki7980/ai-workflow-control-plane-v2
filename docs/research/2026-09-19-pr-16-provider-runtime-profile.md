@@ -57,8 +57,7 @@ For registry-backed trusted providers:
 - registry must be a regular file;
 - POSIX registry mode may not be group/world writable;
 - POSIX registry owner must be the current user or root;
-- trusted executable may not be group/world writable;
-- executable permissions are rechecked at launch in addition to digest/path verification.
+- trusted executable integrity continues to use absolute-path, symlink, SHA-256, and launch-time digest revalidation.
 
 The POSIX-specific ownership/mode checks are intentionally conditional on platform support.
 
