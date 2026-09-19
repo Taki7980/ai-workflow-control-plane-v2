@@ -207,11 +207,10 @@ jobs:
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
             --build-arg BUILDKIT_MULTI_PLATFORM=1 \
-            --output type=docker,rewrite-timestamp=true \
-            --tag ai-workflow-repro-a \
+            --output type=image,name=ai-workflow-repro-a,push=false,rewrite-timestamp=true,compatibility-version=30 \
+            --metadata-file "$RUNNER_TEMP/repro-a.json" \
             .
-          docker run --rm ai-workflow-repro-a --version
-      - name: Build reproducibility candidate B and compare image identity
+      - name: Build reproducibility candidate B and compare release-image digest
         shell: bash
         run: |
           set -euo pipefail
@@ -220,13 +219,27 @@ jobs:
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
             --build-arg BUILDKIT_MULTI_PLATFORM=1 \
-            --output type=docker,rewrite-timestamp=true \
-            --tag ai-workflow-repro-b \
+            --output type=image,name=ai-workflow-repro-b,push=false,rewrite-timestamp=true,compatibility-version=30 \
+            --metadata-file "$RUNNER_TEMP/repro-b.json" \
             .
-          first="$(docker image inspect ai-workflow-repro-a --format '{{.Id}}')"
-          second="$(docker image inspect ai-workflow-repro-b --format '{{.Id}}')"
+          first="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/repro-a.json")"
+          second="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/repro-b.json")"
+          test -n "$first" && test "$first" != "null"
+          test -n "$second" && test "$second" != "null"
           printf 'candidate_a=%s\ncandidate_b=%s\n' "$first" "$second"
           test "$first" = "$second"
+      - name: Smoke Docker-loaded image separately
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg SOURCE_DATE_EPOCH \
+            --build-arg BUILDKIT_MULTI_PLATFORM=1 \
+            --output type=docker,rewrite-timestamp=true \
+            --tag ai-workflow-install-smoke \
+            .
+          docker run --rm ai-workflow-install-smoke --version
 
   bootstrap-installer-smoke:
     name: bootstrap installer smoke (${{ matrix.installer }})
