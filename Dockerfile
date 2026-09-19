@@ -18,7 +18,13 @@ COPY packaging/container/runtime-packages.txt /tmp/runtime-packages.txt
 RUN rm -f /etc/apt/sources.list \
     && apt-get update \
     && xargs -r apt-get install -y --no-install-recommends < /tmp/runtime-packages.txt \
-    && rm -rf /var/lib/apt/lists/* /tmp/runtime-packages.txt \
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /var/cache/apt/* \
+        /var/log/apt/* \
+        /var/log/dpkg.log \
+        /var/log/alternatives.log \
+        /tmp/runtime-packages.txt \
     && useradd --no-log-init --create-home --uid 10001 aiworkflow
 COPY --from=build /src/dist/*.whl /tmp/
 RUN python -m pip install --no-cache-dir --no-deps /tmp/*.whl \
