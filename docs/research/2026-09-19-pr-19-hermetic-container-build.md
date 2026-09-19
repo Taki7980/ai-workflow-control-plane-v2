@@ -43,6 +43,8 @@ PR-19 derives the timestamp from the checked-out commit and passes it to every C
 
 BuildKit's reproducibility documentation distinguishes image/config/history timestamps from timestamps stored inside filesystem layers. The image/docker exporters therefore also use `rewrite-timestamp=true`; without that exporter option two no-cache builds can retain execution-time file metadata even when `SOURCE_DATE_EPOCH` is set.
 
+Exporter timestamp rewriting cannot normalize timestamps embedded *inside file contents*. Debian package operations write wall-clock timestamps into package-manager log files, so the runtime layer removes `/var/log/apt/*`, `/var/log/dpkg.log`, and `/var/log/alternatives.log` after installation. These are ephemeral build logs, not runtime inputs.
+
 ### BuildKit SLSA provenance
 
 https://docs.docker.com/build/metadata/attestations/slsa-provenance/
