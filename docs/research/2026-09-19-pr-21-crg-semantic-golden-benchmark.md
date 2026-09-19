@@ -124,12 +124,26 @@ For graph lifecycle:
 
 ## Baseline policy
 
-The first CI execution of the completed corpus is used to establish the
-measured baseline. The baseline is not chosen in advance.
+The first successful full-corpus measurement on CRG 2.3.8 established:
 
-Once recorded, CI must reject material regressions while still allowing the
-known hard-case misses to remain visible. Improving a known miss should raise
-the baseline in a deliberate follow-up change.
+- mean precision@K: 0.60;
+- mean recall@K: 0.60;
+- mean MRR: 0.60;
+- full-recall rate: 0.60;
+- stale-graph block rate: 1.00;
+- lifecycle-control pass rate: 0.75;
+- p95 query latency: 266.51 ms;
+- mean estimated context: 168.6 tokens.
+
+Known semantic misses remain explicit: alias callers, callback relationships,
+dynamic imports and tests-for. The rename/delete lifecycle control also remains
+a measured miss.
+
+`benchmarks/crg-semantic-v1/baseline.json` converts that measurement into a
+regression contract. CI preserves the currently correct categories and rejects
+material semantic, lifecycle, token-cost or latency regressions. Improving a
+known miss should raise the baseline deliberately rather than rewriting gold
+labels after the fact.
 
 ## Non-claims
 
