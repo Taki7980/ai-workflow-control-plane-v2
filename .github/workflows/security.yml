@@ -99,9 +99,9 @@ jobs:
       - name: Build container for scanning from pinned inputs
         run: >-
           docker buildx build
-          --load
           --platform linux/amd64
           --build-arg SOURCE_DATE_EPOCH
+          --output type=docker,rewrite-timestamp=true
           --tag ai-workflow-security:ci
           .
       - name: Install checksum-verified Trivy
