@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -171,7 +172,18 @@ class FileRetrievalCache:
         result: ProviderResult,
         semantics: ProviderSemantics,
     ) -> bool:
-        if not result.ok or not cache_eligible(semantics):
+        numeric_state_valid = (
+            math.isfinite(float(result.latency_ms))
+            and all(
+                math.isfinite(float(item.score))
+                for item in result.items
+            )
+        )
+        if (
+            not result.ok
+            or not numeric_state_valid
+            or not cache_eligible(semantics)
+        ):
             return False
         atomic_write_json(
             self._path(key),
