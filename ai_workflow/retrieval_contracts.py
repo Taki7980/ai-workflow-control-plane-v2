@@ -47,6 +47,12 @@ class ProviderResult:
     returncode: int | None = None
     stderr_tail: str | None = None
     stderr_truncated: bool = False
+    sandboxed: bool = False
+    sandbox_backend: str | None = None
+    sandbox_mode: str = "off"
+    sandbox_network: str = "host"
+    resource_limits_enforced: bool = False
+    sandbox_fallback_reason: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -63,6 +69,12 @@ class ProviderResult:
             "returncode": self.returncode,
             "stderr_tail": self.stderr_tail,
             "stderr_truncated": self.stderr_truncated,
+            "sandboxed": self.sandboxed,
+            "sandbox_backend": self.sandbox_backend,
+            "sandbox_mode": self.sandbox_mode,
+            "sandbox_network": self.sandbox_network,
+            "resource_limits_enforced": self.resource_limits_enforced,
+            "sandbox_fallback_reason": self.sandbox_fallback_reason,
         }
 
 
