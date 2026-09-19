@@ -456,6 +456,28 @@ def run_crg_semantic_benchmark(
 
     payload = json.loads(cases_path.read_text(encoding="utf-8"))
     cases = validate_cases(payload)
+    expected_version = str(payload.get("crg_version") or "").strip()
+    version_proc = subprocess.run(
+        ["code-review-graph", "--version"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    actual_version = (
+        version_proc.stdout.strip()
+        or version_proc.stderr.strip()
+        or "unknown"
+    )
+    if (
+        version_proc.returncode != 0
+        or not expected_version
+        or expected_version not in actual_version
+    ):
+        raise CrgSemanticBenchmarkError(
+            "unexpected Code Review Graph version: "
+            f"expected={expected_version!r} actual={actual_version!r}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="crg-semantic-") as td:
         scratch = Path(td)
@@ -522,7 +544,8 @@ def run_crg_semantic_benchmark(
     return {
         "schema_version": 1,
         "benchmark": str(payload.get("name") or "crg-semantic-golden"),
-        "crg_version_expected": payload.get("crg_version"),
+        "crg_version_expected": expected_version,
+        "crg_version_actual": actual_version,
         "cases": rows,
         "controls": controls,
         "by_category": category_summary,
