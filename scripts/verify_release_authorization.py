@@ -87,10 +87,15 @@ def _api_get_json(
     query: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     base = api_url.rstrip("/")
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ReleaseAuthorizationError(
+            "GitHub API base URL must be an absolute HTTPS URL"
+        )
     url = f"{base}/repos/{repository}/{path.lstrip('/')}"
     if query:
         url += "?" + urllib.parse.urlencode(query)
-    request = urllib.request.Request(
+    request = urllib.request.Request(  # noqa: S310 - HTTPS validated above
         url,
         headers={
             "Accept": "application/vnd.github+json",
@@ -100,7 +105,10 @@ def _api_get_json(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(  # noqa: S310 - HTTPS validated above
+            request,
+            timeout=30,
+        ) as response:
             payload = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
