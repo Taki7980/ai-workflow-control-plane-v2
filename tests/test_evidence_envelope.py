@@ -177,7 +177,7 @@ class EvidenceEnvelopeTests(unittest.TestCase):
         config = default_config()
         config["context"]["selector"]["enabled"] = False
         decision = RouteDecision(Lane.ANSWER, Risk.LOW, confidence=0.9)
-        budget = ContextBudget(40, 10, 160, {})
+        budget = ContextBudget(40, 10, 40, {})
         providers = ProviderStatus(False, False, False, False, False)
 
         with tempfile.TemporaryDirectory() as td:
