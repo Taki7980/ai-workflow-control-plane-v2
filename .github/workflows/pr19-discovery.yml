@@ -24,6 +24,8 @@ jobs:
           docker buildx imagetools inspect python:3.12.14-slim-trixie
           echo "=== DOCKERFILE FRONTEND ==="
           docker buildx imagetools inspect docker/dockerfile:1.27.0
+          echo "=== BUILDKIT ==="
+          docker buildx imagetools inspect moby/buildkit:v0.33.0
       - name: Inspect frozen Debian package candidates
         shell: bash
         run: |
