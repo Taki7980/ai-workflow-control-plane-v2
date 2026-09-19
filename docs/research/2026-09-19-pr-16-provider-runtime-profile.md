@@ -86,6 +86,21 @@ Some existing providers may intentionally require host HOME/PATH behavior. The t
 
 Repository configuration cannot set this field, so a checked-in repository cannot weaken the runtime boundary.
 
+## Research alignment and scope boundary
+
+The 2026 Sandlock paper demonstrates that meaningful confinement of agent-executed code requires OS/kernel-enforced policy for filesystem, network, IPC, syscalls, and TOCTOU-sensitive execution decisions. PR-16 implements the portion appropriate to this roadmap stage:
+
+- deterministic process environment;
+- ephemeral HOME/temp state;
+- reduced ambient credential/config discovery;
+- trusted-registry ownership/mode checks;
+- POSIX `O_NOFOLLOW` + `fstat` registry reading so the exact opened inode is the one permission-checked;
+- sync/async parity.
+
+PR-16 intentionally does **not** claim that environment filtering is a sandbox. PR-17 is responsible for optional OS-level provider sandboxing, resource limits, and network-egress policy.
+
+This separation also matches OWASP guidance: isolate agent execution environments and restrict credentials/tools, while applying stronger sandboxing/egress controls when untrusted code may execute.
+
 ## Compatibility
 
 - legacy direct `CommandProviderSpec` construction keeps the historical compatibility profile by default;
