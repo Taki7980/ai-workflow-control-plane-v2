@@ -89,12 +89,23 @@ Checksums establish byte integrity relative to release metadata. GitHub artifact
 
 ## Docker / GHCR lifecycle
 
+Container builds use reviewed immutable inputs: digest-pinned Python, uv and Dockerfile frontend images, a pinned Buildx/BuildKit toolchain in CI/release, and a timestamped Debian snapshot for runtime OS packages. The direct runtime package versions are recorded under `packaging/container/`.
+
+For a reproducible local build, use the source commit timestamp:
+
 ```bash
-docker build -t ai-workflow:local .
+export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+docker buildx build \
+  --load \
+  --platform linux/amd64 \
+  --build-arg SOURCE_DATE_EPOCH \
+  -t ai-workflow:local .
 docker run --rm -v "$PWD:/workspace" ai-workflow:local doctor --strict
 ```
 
-Tagged releases are designed to publish `ghcr.io/taki7980/ai-workflow-control-plane-v2:vX.Y.Z` with SBOM/provenance metadata. Remove an unused local image with:
+Do not run a blanket `apt-get upgrade` in the image. Refresh the base digest, Debian snapshot timestamp and explicit package versions as a reviewed dependency update. Docker digest updates are surfaced through Dependabot.
+
+Tagged releases publish `ghcr.io/taki7980/ai-workflow-control-plane-v2:vX.Y.Z` with BuildKit SLSA v1 max-mode provenance and an SPDX SBOM. The release exports inspectable copies of both attestations and verifies that provenance contains the locked Python/uv image materials and that the SBOM contains the locked runtime packages. Remove an unused local image with:
 
 ```bash
 docker image rm ghcr.io/taki7980/ai-workflow-control-plane-v2:vX.Y.Z
