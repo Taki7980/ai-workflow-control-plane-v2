@@ -7,6 +7,13 @@ from typing import Any
 
 from ._version import __version__
 from .budget import ContextBudget, budget_for
+from .capability_gate import (
+    AuthorizationDecision,
+    ModelActionRequest,
+    ModelCapabilityPolicy,
+    authorize_model_action,
+    build_model_capability_policy,
+)
 from .classifier import classify
 from .config import default_config, load_config
 from .models import ContextItem, RouteDecision
@@ -54,6 +61,19 @@ class WorkflowResult:
     execution_provider: str
     model_tier: str
     run: RunMetadata
+    capability_policy: ModelCapabilityPolicy
+
+    def authorize_model_action(
+        self,
+        request: ModelActionRequest,
+    ) -> AuthorizationDecision:
+        """Authorize one post-LLM action against the precomputed policy."""
+
+        return authorize_model_action(
+            self.capability_policy,
+            request,
+            self.context,
+        )
 
 
 class WorkflowClient:
@@ -129,6 +149,12 @@ class WorkflowClient:
                 root / "ai-workspace" / "runs"
             )
             store.add(run)
+        orchestration = retrieval.get("orchestration")
+        capability_policy = build_model_capability_policy(
+            decision,
+            orchestration if isinstance(orchestration, Mapping) else {},
+            items,
+        )
         return WorkflowResult(
             task=task,
             decision=decision,
@@ -143,6 +169,7 @@ class WorkflowClient:
             ),
             model_tier=model_tier(decision, config),
             run=run,
+            capability_policy=capability_policy,
         )
 
 
