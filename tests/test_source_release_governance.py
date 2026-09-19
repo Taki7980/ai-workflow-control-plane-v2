@@ -34,6 +34,8 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
             "/.github/workflows/",
             "/SECURITY.md",
             "/pyproject.toml",
+            "/uv.lock",
+            "/scripts/record_python_toolchain.py",
             "/Dockerfile",
             "/install.sh",
             "/install.ps1",
