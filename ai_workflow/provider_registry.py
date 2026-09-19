@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import stat
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -39,13 +40,15 @@ def default_registry_path() -> Path:
 
 
 def trusted_registry_path() -> Path:
+    """Return an absolute registry path without resolving away symlinks."""
+
     configured = os.getenv(REGISTRY_ENV, "").strip()
     if configured:
         path = Path(configured).expanduser()
         if not path.is_absolute():
             raise ValueError(f"{REGISTRY_ENV} must be an absolute path")
-        return path.resolve()
-    return default_registry_path().expanduser().resolve()
+        return Path(os.path.abspath(path))
+    return Path(os.path.abspath(default_registry_path().expanduser()))
 
 
 def _is_within(root: Path, candidate: Path) -> bool:
@@ -66,14 +69,59 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _validate_registry_trust_anchor(path: Path) -> None:
+    """Fail closed when the trusted registry is mutable by other users."""
+
+    if path.is_symlink():
+        raise ValueError("trusted provider registry may not be a symlink")
+    try:
+        info = path.stat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"trusted provider registry not found: {path}") from exc
+    except OSError as exc:
+        raise ValueError("trusted provider registry could not be inspected") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("trusted provider registry must be a regular file")
+
+    if os.name != "nt":
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ValueError(
+                "trusted provider registry may not be writable by group or others"
+            )
+        getuid = getattr(os, "getuid", None)
+        if callable(getuid):
+            current_uid = int(getuid())
+            if info.st_uid not in {current_uid, 0}:
+                raise ValueError(
+                    "trusted provider registry must be owned by the current user "
+                    "or root"
+                )
+
+
+def _validate_executable_permissions(path: Path) -> None:
+    """Reject digest-pinned executables mutable by unrelated POSIX users."""
+
+    if os.name == "nt":
+        return
+    try:
+        info = path.stat()
+    except OSError as exc:
+        raise ValueError(
+            "trusted provider executable permissions could not be inspected"
+        ) from exc
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise ValueError(
+            "trusted provider executable may not be writable by group or others"
+        )
+
+
 def _load_registry(root: Path) -> Mapping[str, Any]:
     path = trusted_registry_path()
     if _is_within(root, path):
         raise ValueError("trusted provider registry must live outside the repository")
+    _validate_registry_trust_anchor(path)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise ValueError(f"trusted provider registry not found: {path}") from exc
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("trusted provider registry could not be read") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("providers"), dict):
@@ -103,6 +151,7 @@ def _validated_executable(
         raise ValueError("trusted provider executable is not a regular file")
     if _is_within(root, executable):
         raise ValueError("trusted provider executable must live outside the repository")
+    _validate_executable_permissions(executable)
 
     expected = str(raw.get("sha256") or "").strip().lower()
     if expected.startswith("sha256:"):
@@ -178,6 +227,7 @@ def resolve_trusted_provider(
     trusted_raw["command"] = list(argv)
     trusted_raw["sha256"] = executable_sha256
     trusted_raw.setdefault("neutral_cwd", True)
+    trusted_raw.setdefault("runtime_profile", "restricted")
     trusted_spec = command_provider_spec(trusted_raw, default_name=provider_id)
 
     requested_timeout = float(
@@ -236,6 +286,8 @@ def resolve_project_provider(
             forbidden.append("version")
         if raw.get("semantics") not in (None, {}):
             forbidden.append("semantics")
+        if raw.get("runtime_profile") not in (None, ""):
+            forbidden.append("runtime_profile")
         if forbidden:
             raise ValueError(
                 "repository provider_id configuration may not set trusted fields: "
