@@ -8,6 +8,7 @@ from ai_workflow.crg_semantic_benchmark import (
     score_ranked_rows,
     validate_cases,
 )
+from scripts.check_crg_semantic_regression import check_regression
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +93,68 @@ class CrgSemanticBenchmarkContractTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["crg_version"], "2.3.8")
         validate_cases(payload)
+
+    def test_measured_baseline_accepts_equal_or_better_report(self) -> None:
+        baseline = {
+            "benchmark": "crg-semantic-golden-v1",
+            "crg_version": "2.3.8",
+            "minimums": {
+                "mean_recall_at_k": 0.6,
+                "stale_graph_block_rate": 1.0,
+            },
+            "maximums": {
+                "latency_p95_ms": 500.0,
+            },
+            "category_minimum_recall": {
+                "cross_language": 1.0,
+            },
+            "known_misses": ["py-alias-call", "rename_delete"],
+        }
+        report = {
+            "benchmark": "crg-semantic-golden-v1",
+            "crg_version_actual": "code-review-graph 2.3.8",
+            "summary": {
+                "mean_recall_at_k": 0.7,
+                "stale_graph_block_rate": 1.0,
+                "latency_p95_ms": 300.0,
+            },
+            "by_category": {
+                "cross_language": {"mean_recall_at_k": 1.0},
+            },
+            "cases": [{"case_id": "py-alias-call"}],
+            "controls": {"rename_delete": {"passed": False}},
+        }
+
+        self.assertEqual(check_regression(baseline, report), [])
+
+    def test_measured_baseline_reports_semantic_regression(self) -> None:
+        baseline = {
+            "benchmark": "crg-semantic-golden-v1",
+            "crg_version": "2.3.8",
+            "minimums": {"mean_mrr": 0.6},
+            "maximums": {"latency_p95_ms": 500.0},
+            "category_minimum_recall": {
+                "cross_language": 1.0,
+            },
+        }
+        report = {
+            "benchmark": "crg-semantic-golden-v1",
+            "crg_version_actual": "code-review-graph 2.3.8",
+            "summary": {
+                "mean_mrr": 0.5,
+                "latency_p95_ms": 700.0,
+            },
+            "by_category": {
+                "cross_language": {"mean_recall_at_k": 0.5},
+            },
+            "cases": [],
+            "controls": {},
+        }
+
+        failures = check_regression(baseline, report)
+        self.assertTrue(any("mean_mrr regressed" in row for row in failures))
+        self.assertTrue(any("latency_p95_ms regressed" in row for row in failures))
+        self.assertTrue(any("cross_language recall regressed" in row for row in failures))
 
     def test_invalid_or_duplicate_cases_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported"):
