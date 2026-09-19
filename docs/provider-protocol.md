@@ -191,6 +191,8 @@ Ambient developer configuration, cloud profiles, user config directories, and ar
 
 The ephemeral profile/temp directories are removed after each provider invocation.
 
+Restricted mode is **not an OS sandbox**. A trusted executable can still use the operating-system privileges of the parent process unless a separate sandbox backend constrains filesystem, network, IPC, and syscalls. PR-16 reduces ambient configuration/credential discovery and accidental helper resolution; PR-17 owns kernel/OS-level confinement.
+
 ### `compatibility`
 
 A trusted registry may explicitly opt a provider into `runtime_profile: "compatibility"` when the provider genuinely requires the previous safe-environment behavior, such as the host `HOME` or broader `PATH`.
