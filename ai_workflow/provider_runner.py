@@ -152,9 +152,9 @@ class CommandProviderSpec:
     executable_trust: str = "configured_local_executable"
     executable_sha256: str | None = None
     neutral_cwd: bool = False
-    runtime_profile: str = "compatibility"
     version: str = "unknown"
     semantics: ProviderSemantics = field(default_factory=ProviderSemantics)
+    runtime_profile: str = "compatibility"
 
     def __post_init__(self) -> None:
         if not self.name.strip():
