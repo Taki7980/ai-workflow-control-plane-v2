@@ -5,9 +5,10 @@ import unittest
 from pathlib import Path
 
 from ai_workflow.execution_semantics import ProviderSemantics
+from ai_workflow.models import ContextItem
 from ai_workflow.provider_runner import CommandProviderSpec, _result_from_bytes
 from ai_workflow.retrieval_cache import FileRetrievalCache
-from ai_workflow.retrieval_contracts import RetrievalRequest
+from ai_workflow.retrieval_contracts import ProviderResult, RetrievalRequest
 
 
 class ProviderProtocolHardeningTests(unittest.TestCase):
@@ -137,6 +138,26 @@ class ProviderProtocolHardeningTests(unittest.TestCase):
             )
             self.assertFalse(written)
             self.assertIsNone(cache.get("invalid-provider-result"))
+
+    def test_cache_rejects_non_finite_typed_results_defense_in_depth(self):
+        poisoned = ProviderResult(
+            "typed-provider",
+            (ContextItem("external:test", "poison", float("nan")),),
+            1.0,
+        )
+        with tempfile.TemporaryDirectory() as td:
+            cache = FileRetrievalCache(Path(td))
+            self.assertFalse(
+                cache.put(
+                    "typed-poison",
+                    poisoned,
+                    ProviderSemantics(
+                        deterministic=True,
+                        cacheable=True,
+                        side_effecting=False,
+                    ),
+                )
+            )
 
     def test_rejected_score_never_becomes_rankable_context(self):
         result = self._result(
