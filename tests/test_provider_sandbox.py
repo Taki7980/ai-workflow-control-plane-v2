@@ -127,7 +127,7 @@ class ProviderSandboxPolicyTests(unittest.TestCase):
         self.assertTrue(plan.sandboxed)
         self.assertEqual(plan.backend, "bubblewrap")
         args = list(plan.command)
-        self.assertEqual(args[0], "/usr/bin/bwrap")
+        self.assertEqual(args[0], str(Path("/usr/bin/bwrap")))
         self.assertIn("--ro-bind", args)
         self.assertIn("--unshare-net", args)
         self.assertIn("--unshare-pid", args)
