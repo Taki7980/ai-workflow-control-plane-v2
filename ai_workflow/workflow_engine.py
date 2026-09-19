@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .budget import ContextBudget, truncate
+from .capability_gate import build_model_capability_policy
 from .code_review_graph import workspace_graph_fingerprint
 from .context_broker import (
     crg_context as default_structural_provider,
@@ -880,9 +881,15 @@ class WorkflowEngine:
                     else None
                 ),
             }
-        diagnostics["orchestration"] = build_orchestration_contract(
+        orchestration_contract = build_orchestration_contract(
             decision, diagnostics, changed, len(roots), providers, config
         )
+        diagnostics["orchestration"] = orchestration_contract
+        diagnostics["authorization_policy"] = build_model_capability_policy(
+            decision,
+            orchestration_contract,
+            selected,
+        ).to_dict()
         if learning_path is not None:
             try:
                 observation_path = write_learning_observation(
@@ -962,6 +969,9 @@ class WorkflowEngine:
                     "selector": selector,
                     "fallbacks": list(trace.fallbacks),
                     "scheduler": dict(diagnostics["scheduler"]),
+                    "authorization_policy": dict(
+                        diagnostics["authorization_policy"]
+                    ),
                 },
                 "selected_evidence": [
                     {
