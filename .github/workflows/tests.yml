@@ -204,9 +204,9 @@ jobs:
           set -euo pipefail
           docker buildx build \
             --no-cache \
-            --load \
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
+            --output type=docker,rewrite-timestamp=true \
             --tag ai-workflow-repro-a \
             .
           docker run --rm ai-workflow-repro-a --version
@@ -216,9 +216,9 @@ jobs:
           set -euo pipefail
           docker buildx build \
             --no-cache \
-            --load \
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
+            --output type=docker,rewrite-timestamp=true \
             --tag ai-workflow-repro-b \
             .
           first="$(docker image inspect ai-workflow-repro-a --format '{{.Id}}')"
