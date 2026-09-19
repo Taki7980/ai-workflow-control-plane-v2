@@ -149,7 +149,7 @@ control plane
   -> bubblewrap
     -> ai_workflow.provider_sandbox_exec
       -> setrlimit(...)
-      -> exec(provider)
+      -> subprocess.run(provider argv, shell=False)
 ```
 
 No shell and no `preexec_fn` are used.
