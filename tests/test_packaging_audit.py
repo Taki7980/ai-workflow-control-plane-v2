@@ -12,14 +12,16 @@ ROOT = Path(__file__).resolve().parents[1]
 class PackageMetadataTests(unittest.TestCase):
     def test_modern_pep639_metadata_and_dev_tools_are_declared(self):
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn('requires = ["setuptools>=77"]', pyproject)
+        self.assertIn('requires = ["setuptools==84.0.0"]', pyproject)
         self.assertIn('license = "MIT"', pyproject)
         self.assertIn('license-files = ["LICENSE*"]', pyproject)
         self.assertIn("[project.urls]", pyproject)
-        self.assertIn("[project.optional-dependencies]", pyproject)
-        self.assertIn('"build>=1.3"', pyproject)
-        self.assertIn('"ruff>=0.12"', pyproject)
-        self.assertIn('"mypy>=1.17"', pyproject)
+        self.assertIn("[dependency-groups]", pyproject)
+        self.assertIn('"build==1.6.1"', pyproject)
+        self.assertIn('"setuptools==84.0.0"', pyproject)
+        self.assertIn('"ruff==0.16.7"', pyproject)
+        self.assertIn('"mypy==2.3.1"', pyproject)
+        self.assertTrue((ROOT / "uv.lock").is_file())
         self.assertIn('dynamic = ["version"]', pyproject)
         self.assertIn('[tool.setuptools.dynamic]', pyproject)
 
@@ -50,6 +52,9 @@ class WorkflowSupplyChainTests(unittest.TestCase):
         self.assertRegex(ci, r"\bpackage-smoke:")
         self.assertIn("pipx", ci)
         self.assertIn("uv", ci)
+        self.assertIn("uv lock --check", ci)
+        self.assertIn("uv sync --locked", ci)
+        self.assertNotIn("pip install --upgrade build", ci)
 
     def test_all_uses_references_in_repo_workflows_are_full_sha_pins(self):
         workflows = list((ROOT / ".github" / "workflows").glob("*.yml"))
