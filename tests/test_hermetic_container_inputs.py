@@ -49,6 +49,7 @@ class HermeticContainerInputTests(unittest.TestCase):
         self.assertIn("apt-get update", dockerfile)
         self.assertIn("runtime-packages.txt", dockerfile)
         for ephemeral in (
+            "/var/cache/ldconfig/aux-cache",
             "/var/log/apt/*",
             "/var/log/dpkg.log",
             "/var/log/alternatives.log",
