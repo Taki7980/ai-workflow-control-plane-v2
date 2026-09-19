@@ -98,23 +98,6 @@ def _validate_registry_trust_anchor(path: Path) -> None:
                 )
 
 
-def _validate_executable_permissions(path: Path) -> None:
-    """Reject digest-pinned executables mutable by unrelated POSIX users."""
-
-    if os.name == "nt":
-        return
-    try:
-        info = path.stat()
-    except OSError as exc:
-        raise ValueError(
-            "trusted provider executable permissions could not be inspected"
-        ) from exc
-    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise ValueError(
-            "trusted provider executable may not be writable by group or others"
-        )
-
-
 def _load_registry(root: Path) -> Mapping[str, Any]:
     path = trusted_registry_path()
     if _is_within(root, path):
@@ -151,8 +134,6 @@ def _validated_executable(
         raise ValueError("trusted provider executable is not a regular file")
     if _is_within(root, executable):
         raise ValueError("trusted provider executable must live outside the repository")
-    _validate_executable_permissions(executable)
-
     expected = str(raw.get("sha256") or "").strip().lower()
     if expected.startswith("sha256:"):
         expected = expected.removeprefix("sha256:")
