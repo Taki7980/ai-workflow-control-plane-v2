@@ -17,7 +17,7 @@ class Capability(str, Enum):
     PROVIDER_SELECTION = "provider_selection"
     REPOSITORY_ACTIVATION = "repository_activation"
     NETWORK_ACCESS = "network_access"
-    SECRET_ACCESS = "secret_access"
+    SECRET_ACCESS = "secret_access"  # noqa: S105 - capability label, not a credential
     SAFETY_LANE_CHANGE = "safety_lane_change"
     SKIP_VERIFICATION = "skip_verification"
 
