@@ -210,6 +210,7 @@ jobs:
           docker buildx build \
             --platform linux/amd64 \
             --build-arg SOURCE_DATE_EPOCH \
+            --build-arg BUILDKIT_MULTI_PLATFORM=1 \
             --provenance=mode=max,version=v1 \
             --sbom=true \
             --output "type=image,name=$image:$GITHUB_REF_NAME,push=true,rewrite-timestamp=true" \
