@@ -4,6 +4,7 @@ import unittest
 
 from scripts.verify_release_authorization import (
     ReleaseAuthorizationError,
+    _api_get_json,
     evaluate_release_authorization,
     select_successful_workflow_run,
 )
@@ -162,6 +163,18 @@ class ReleaseAuthorizationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(selected["id"], 4)
+
+    def test_rejects_non_https_api_base_before_network_access(self) -> None:
+        with self.assertRaisesRegex(
+            ReleaseAuthorizationError,
+            "must be an absolute HTTPS URL",
+        ):
+            _api_get_json(
+                api_url="http://api.github.com",
+                repository="owner/repo",
+                path="branches/main",
+                token="not-a-real-token",
+            )
 
     def test_rejects_invalid_release_sha_shape(self) -> None:
         with self.assertRaisesRegex(
