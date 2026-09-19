@@ -150,10 +150,11 @@ uv tool install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
 pipx install git+https://github.com/Taki7980/ai-workflow-control-plane-v2.git
 ```
 
-For local development:
+For local development, use the committed Python tool lock:
 
 ```bash
-python -m pip install -e ".[dev]"
+uv sync --locked
+uv run --locked --no-sync python -m unittest discover -s tests -v
 ```
 
 After installation, `ai-workflow setup` is the canonical project entry point. Full verification, upgrade and uninstall commands are in `docs/distribution.md`.
