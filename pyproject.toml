@@ -39,6 +39,11 @@ crg = [
 portable = [
   "pyinstaller==6.22.3",
 ]
+package-smoke = [
+  "build==1.6.1",
+  "pipx==1.17.4",
+  "setuptools==84.0.0",
+]
 
 [project.scripts]
 ai-workflow = "ai_workflow.entrypoint:main"
