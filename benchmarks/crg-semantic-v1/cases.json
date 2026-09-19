@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "name": "crg-semantic-golden-v1",
+  "crg_version": "2.3.8",
+  "cases": [
+    {
+      "case_id": "py-alias-call",
+      "category": "alias",
+      "language": "python",
+      "pattern": "callers_of",
+      "target": "execute_payment",
+      "query": "Who calls execute_payment through an import alias?",
+      "gold": [
+        {
+          "path_contains": "python/alias_consumer.py",
+          "name_contains": "process_order"
+        }
+      ]
+    },
+    {
+      "case_id": "py-duplicate-symbol-resolution",
+      "category": "duplicate_symbol",
+      "language": "python",
+      "pattern": "callees_of",
+      "target": "use_alpha",
+      "query": "Which helper does use_alpha call when alpha.py and beta.py both define helper?",
+      "gold": [
+        {
+          "path_contains": "python/alpha.py",
+          "name_contains": "helper"
+        }
+      ]
+    },
+    {
+      "case_id": "py-inheritance",
+      "category": "inheritance_override",
+      "language": "python",
+      "pattern": "inheritors_of",
+      "target": "BaseProcessor",
+      "query": "Which classes inherit BaseProcessor?",
+      "gold": [
+        {
+          "path_contains": "python/inheritance.py",
+          "name_contains": "ChildProcessor"
+        }
+      ]
+    },
+    {
+      "case_id": "py-callback",
+      "category": "callback",
+      "language": "python",
+      "pattern": "callers_of",
+      "target": "on_event",
+      "query": "Which function supplies on_event as the callback?",
+      "gold": [
+        {
+          "path_contains": "python/callbacks.py",
+          "name_contains": "run_callback"
+        }
+      ]
+    },
+    {
+      "case_id": "py-async-chain",
+      "category": "async_chain",
+      "language": "python",
+      "pattern": "callees_of",
+      "target": "start_pipeline",
+      "query": "What does start_pipeline call?",
+      "gold": [
+        {
+          "path_contains": "python/async_chain.py",
+          "name_contains": "parse_remote"
+        }
+      ]
+    },
+    {
+      "case_id": "py-dynamic-import",
+      "category": "dynamic_import",
+      "language": "python",
+      "pattern": "imports_of",
+      "target": "python/dynamic_loader.py",
+      "query": "Which module is dynamically imported by dynamic_loader.py?",
+      "gold": [
+        {
+          "path_contains": "python/plugins/audit.py",
+          "name_contains": "audit"
+        }
+      ]
+    },
+    {
+      "case_id": "py-generated-code",
+      "category": "generated_code",
+      "language": "python",
+      "pattern": "callees_of",
+      "target": "use_generated",
+      "query": "Which generated function does use_generated call?",
+      "gold": [
+        {
+          "path_contains": "python/generated/client.py",
+          "name_contains": "generated_call"
+        }
+      ]
+    },
+    {
+      "case_id": "py-tests-for",
+      "category": "tests",
+      "language": "python",
+      "pattern": "tests_for",
+      "target": "run_service",
+      "query": "Which test covers run_service?",
+      "gold": [
+        {
+          "path_contains": "tests/test_service.py",
+          "name_contains": "test_run_service"
+        }
+      ]
+    },
+    {
+      "case_id": "ts-call-chain",
+      "category": "cross_language",
+      "language": "typescript",
+      "pattern": "callees_of",
+      "target": "tsStart",
+      "query": "What does tsStart call?",
+      "gold": [
+        {
+          "path_contains": "typescript/flow.ts",
+          "name_contains": "tsFetch"
+        }
+      ]
+    },
+    {
+      "case_id": "go-call-chain",
+      "category": "cross_language",
+      "language": "go",
+      "pattern": "callees_of",
+      "target": "GoStart",
+      "query": "What does GoStart call?",
+      "gold": [
+        {
+          "path_contains": "go/flow.go",
+          "name_contains": "GoFetch"
+        }
+      ]
+    }
+  ]
+}
