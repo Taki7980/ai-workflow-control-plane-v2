@@ -28,7 +28,7 @@ class CIQualityContractTests(unittest.TestCase):
     def test_quality_workflow_type_checks_entire_package(self) -> None:
         workflow = self._text(".github/workflows/tests.yml")
 
-        self.assertIn("run: mypy ai_workflow", workflow)
+        self.assertIn("uv run --locked --no-sync mypy ai_workflow", workflow)
         self.assertNotIn("Mypy typed-boundary gate", workflow)
         self.assertNotIn("--follow-imports=skip", workflow)
 
