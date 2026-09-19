@@ -261,7 +261,7 @@ This materially reduces host write access and can remove network access, but it 
 
 ### Resource limits
 
-When configured, CPU time, address-space size, file size, and open-file limits are applied by a small exec wrapper using POSIX `setrlimit` immediately before the trusted provider executable is replaced with `exec`.
+When configured, CPU time, address-space size, file size, and open-file limits are applied by a small wrapper using POSIX `setrlimit` before launching the trusted provider as a shell-free argv subprocess. POSIX resource limits are inherited by the child process.
 
 The runner intentionally does not use Python `preexec_fn`; Python documents that `preexec_fn` is unsafe in threaded applications and can deadlock before exec.
 
