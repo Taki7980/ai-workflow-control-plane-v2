@@ -18,6 +18,7 @@ from .code_review_graph import (
 )
 from .config import estimate_tokens
 from .context_broker import crg_context
+from .repository_registry import refresh_registry
 
 
 SEMANTIC_BENCHMARK_SCHEMA = 1
@@ -365,12 +366,37 @@ def _write_small_repo(root: Path, caller: str) -> Path:
 
 
 def _multi_repo_control(root: Path) -> dict[str, Any]:
-    repo_a = _write_small_repo(root / "multi-a", "call_a")
-    repo_b = _write_small_repo(root / "multi-b", "call_b")
-    a_sync = sync_workspace_graphs(repo_a, {}, timeout=180)
-    b_sync = sync_workspace_graphs(repo_b, {}, timeout=180)
-    if a_sync.get("ready") != 1 or b_sync.get("ready") != 1:
-        return {"passed": False, "reason": "multi-repo graph build failed"}
+    workspace = root / "workspace"
+    workspace.mkdir(parents=True)
+    control_dir = workspace / "ai-workspace" / "config"
+    control_dir.mkdir(parents=True)
+    (control_dir / "control-plane.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    repo_a = _write_small_repo(workspace / "repo-a", "call_a")
+    repo_b = _write_small_repo(workspace / "repo-b", "call_b")
+    config = {
+        "workspace": {
+            "discovery": {
+                "require_acceptance": False,
+            }
+        }
+    }
+    registry = refresh_registry(
+        workspace,
+        config=config,
+        auto_include=True,
+    )
+    sync = sync_workspace_graphs(workspace, config, timeout=180)
+    if sync.get("ready") != 2:
+        return {
+            "passed": False,
+            "reason": "multi-repo graph build failed",
+            "registry": registry,
+            "sync": sync,
+        }
 
     a_rows, _ = _rows_from_items(
         crg_context(
@@ -396,11 +422,13 @@ def _multi_repo_control(root: Path) -> dict[str, Any]:
     b_text = "\n".join(_row_text(row) for row in b_rows)
     return {
         "passed": (
-            "call_a" in a_text
+            registry.get("accepted") == 2
+            and "call_a" in a_text
             and "call_b" not in a_text
             and "call_b" in b_text
             and "call_a" not in b_text
         ),
+        "registry_fingerprint": registry.get("fingerprint"),
         "repo_a_results": a_rows,
         "repo_b_results": b_rows,
     }
