@@ -22,6 +22,12 @@ from typing import Any
 from .execution_semantics import ProviderSemantics
 from .models import ContextItem
 from .path_policy import confine_metadata_paths
+from .provider_sandbox import (
+    SandboxPlan,
+    SandboxPolicy,
+    SandboxUnavailableError,
+    build_sandbox_plan,
+)
 from .retrieval_contracts import ProviderResult, RetrievalRequest
 
 
@@ -154,6 +160,7 @@ class CommandProviderSpec:
     version: str = "unknown"
     semantics: ProviderSemantics = field(default_factory=ProviderSemantics)
     runtime_profile: str = "compatibility"
+    sandbox: SandboxPolicy = field(default_factory=SandboxPolicy)
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -204,6 +211,10 @@ class CommandProviderSpec:
             object.__setattr__(self, "executable_sha256", digest)
         if not self.version.strip():
             raise ValueError(f"provider {self.name!r} version must not be blank")
+        if not isinstance(self.sandbox, SandboxPolicy):
+            raise ValueError(
+                f"provider {self.name!r} sandbox must be SandboxPolicy"
+            )
 
 
 def build_provider_env(
@@ -305,6 +316,8 @@ def command_provider_spec(
             "provider runtime_profile must be restricted or compatibility"
         )
 
+    sandbox = SandboxPolicy.from_mapping(raw.get("sandbox"))
+
     executable_sha256 = str(
         raw.get("executable_sha256") or raw.get("sha256") or ""
     ).strip().lower()
@@ -328,6 +341,7 @@ def command_provider_spec(
         runtime_profile=runtime_profile,
         version=str(raw.get("version") or "unknown"),
         semantics=ProviderSemantics.from_mapping(semantics_raw),
+        sandbox=sandbox,
     )
 
 
@@ -735,6 +749,7 @@ class ProviderRuntime:
     env: dict[str, str]
     home: Path | None = None
     temp_dir: Path | None = None
+    writable_paths: tuple[Path, ...] = ()
 
 
 def _secure_runtime_dir(path: Path) -> Path:
@@ -764,6 +779,9 @@ def _provider_runtime(
                 if spec.neutral_cwd
                 else _legacy_provider_cwd(spec, request)
             )
+            writable_paths = [home, temp_dir]
+            if spec.neutral_cwd:
+                writable_paths.append(cwd)
             yield ProviderRuntime(
                 cwd=cwd,
                 env=build_provider_env(
@@ -775,6 +793,7 @@ def _provider_runtime(
                 ),
                 home=home,
                 temp_dir=temp_dir,
+                writable_paths=tuple(writable_paths),
             )
         return
 
@@ -782,12 +801,14 @@ def _provider_runtime(
         with tempfile.TemporaryDirectory(
             prefix="ai-workflow-provider-",
         ) as td:
+            cwd = Path(td)
             yield ProviderRuntime(
-                cwd=Path(td),
+                cwd=cwd,
                 env=build_provider_env(
                     spec.env_allowlist,
                     runtime_profile="compatibility",
                 ),
+                writable_paths=(cwd,),
             )
         return
 
@@ -900,6 +921,37 @@ def _attach_stderr(
     )
 
 
+def _attach_sandbox_state(
+    result: ProviderResult,
+    plan: SandboxPlan,
+) -> ProviderResult:
+    return replace(
+        result,
+        sandboxed=plan.sandboxed,
+        sandbox_backend=plan.backend,
+        sandbox_mode=plan.mode,
+        sandbox_network=plan.network,
+        resource_limits_enforced=plan.resource_limits_enforced,
+        sandbox_fallback_reason=plan.fallback_reason,
+    )
+
+
+def _sandbox_unavailable_result(
+    spec: CommandProviderSpec,
+    started: float,
+    exc: SandboxUnavailableError,
+) -> ProviderResult:
+    return ProviderResult(
+        provider=spec.name,
+        latency_ms=(time.perf_counter() - started) * 1000,
+        error=str(exc),
+        error_kind="sandbox_unavailable",
+        sandboxed=False,
+        sandbox_mode=spec.sandbox.mode,
+        sandbox_network=spec.sandbox.network,
+    )
+
+
 def _provider_trust_result(
     spec: CommandProviderSpec,
     started: float,
@@ -936,8 +988,17 @@ def run_command_provider(
             except ProviderTrustError as exc:
                 return _provider_trust_result(spec, started, exc)
             try:
-                proc = subprocess.Popen(
+                sandbox_plan = build_sandbox_plan(
+                    spec.sandbox,
                     command,
+                    cwd=runtime.cwd,
+                    writable_paths=runtime.writable_paths,
+                )
+            except SandboxUnavailableError as exc:
+                return _sandbox_unavailable_result(spec, started, exc)
+            try:
+                proc = subprocess.Popen(
+                    sandbox_plan.command,
                     cwd=runtime.cwd,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -1052,12 +1113,13 @@ def run_command_provider(
             latency_ms,
             returncode,
         )
-    return _attach_stderr(
+    result = _attach_stderr(
         result,
         spec,
         bytes(stderr_output),
         stderr_truncated.is_set(),
     )
+    return _attach_sandbox_state(result, sandbox_plan)
 
 
 async def run_command_provider_async(
@@ -1077,8 +1139,17 @@ async def run_command_provider_async(
             except ProviderTrustError as exc:
                 return _provider_trust_result(spec, started, exc)
             try:
+                sandbox_plan = build_sandbox_plan(
+                    spec.sandbox,
+                    command,
+                    cwd=runtime.cwd,
+                    writable_paths=runtime.writable_paths,
+                )
+            except SandboxUnavailableError as exc:
+                return _sandbox_unavailable_result(spec, started, exc)
+            try:
                 proc = await asyncio.create_subprocess_exec(
-                    *command,
+                    *sandbox_plan.command,
                     cwd=runtime.cwd,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
@@ -1242,9 +1313,10 @@ async def run_command_provider_async(
             latency_ms,
             returncode,
         )
-    return _attach_stderr(
+    result = _attach_stderr(
         result,
         spec,
         stderr_output,
         stderr_truncated,
     )
+    return _attach_sandbox_state(result, sandbox_plan)
