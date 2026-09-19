@@ -116,6 +116,28 @@ SAFE_ENV_KEYS = {
     "PYTHONIOENCODING",
 }
 
+RUNTIME_PROFILES = {"restricted", "compatibility"}
+RESTRICTED_BOOT_ENV_KEYS = {
+    "PATHEXT",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+}
+RESTRICTED_RESERVED_ENV_KEYS = {
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "TMP",
+    "TEMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "PYTHONUTF8",
+    "PYTHONIOENCODING",
+}
+
 
 @dataclass(frozen=True)
 class CommandProviderSpec:
@@ -129,6 +151,7 @@ class CommandProviderSpec:
     executable_trust: str = "configured_local_executable"
     executable_sha256: str | None = None
     neutral_cwd: bool = False
+    runtime_profile: str = "compatibility"
     version: str = "unknown"
     semantics: ProviderSemantics = field(default_factory=ProviderSemantics)
 
@@ -152,6 +175,22 @@ class CommandProviderSpec:
             raise ValueError(
                 f"provider {self.name!r} max_stderr_bytes must be > 0"
             )
+        profile = str(self.runtime_profile).strip().lower()
+        if profile not in RUNTIME_PROFILES:
+            raise ValueError(
+                f"provider {self.name!r} runtime_profile must be one of "
+                f"{sorted(RUNTIME_PROFILES)}"
+            )
+        object.__setattr__(self, "runtime_profile", profile)
+        if profile == "restricted":
+            reserved = sorted(
+                set(self.env_allowlist) & RESTRICTED_RESERVED_ENV_KEYS
+            )
+            if reserved:
+                raise ValueError(
+                    "restricted provider env_allowlist may not override runtime "
+                    "identity/environment keys: " + ", ".join(reserved)
+                )
         if self.executable_sha256 is not None:
             digest = self.executable_sha256.strip().lower()
             if digest.startswith("sha256:"):
@@ -167,12 +206,57 @@ class CommandProviderSpec:
             raise ValueError(f"provider {self.name!r} version must not be blank")
 
 
-def build_provider_env(allowed_keys: Iterable[str] = ()) -> dict[str, str]:
-    """Build the subprocess environment without inheriting arbitrary secrets."""
+def build_provider_env(
+    allowed_keys: Iterable[str] = (),
+    *,
+    runtime_profile: str = "compatibility",
+    home: Path | None = None,
+    temp_dir: Path | None = None,
+    executable: Path | None = None,
+) -> dict[str, str]:
+    """Build a provider environment from an explicit runtime profile."""
 
-    keys = set(SAFE_ENV_KEYS)
-    keys.update(str(key) for key in allowed_keys if str(key).strip())
-    return {key: os.environ[key] for key in keys if key in os.environ}
+    profile = str(runtime_profile).strip().lower()
+    if profile not in RUNTIME_PROFILES:
+        raise ValueError(f"unknown provider runtime profile: {runtime_profile}")
+
+    if profile == "compatibility":
+        keys = set(SAFE_ENV_KEYS)
+        keys.update(str(key) for key in allowed_keys if str(key).strip())
+        return {key: os.environ[key] for key in keys if key in os.environ}
+
+    if home is None or temp_dir is None or executable is None:
+        raise ValueError(
+            "restricted provider environment requires home, temp_dir and executable"
+        )
+
+    env = {
+        key: os.environ[key]
+        for key in RESTRICTED_BOOT_ENV_KEYS
+        if key in os.environ
+    }
+    env.update(
+        {
+            "PATH": str(executable.resolve().parent),
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "TMPDIR": str(temp_dir),
+            "TEMP": str(temp_dir),
+            "TMP": str(temp_dir),
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "LC_CTYPE": "C.UTF-8",
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
+    for raw_key in allowed_keys:
+        key = str(raw_key).strip()
+        if not key or key in RESTRICTED_RESERVED_ENV_KEYS:
+            continue
+        if key in os.environ:
+            env[key] = os.environ[key]
+    return env
 
 
 def command_provider_spec(
@@ -213,6 +297,14 @@ def command_provider_spec(
     if not isinstance(neutral_cwd, bool):
         raise ValueError("provider neutral_cwd must be a boolean")
 
+    runtime_profile = str(
+        raw.get("runtime_profile") or "compatibility"
+    ).strip().lower()
+    if runtime_profile not in RUNTIME_PROFILES:
+        raise ValueError(
+            "provider runtime_profile must be restricted or compatibility"
+        )
+
     executable_sha256 = str(
         raw.get("executable_sha256") or raw.get("sha256") or ""
     ).strip().lower()
@@ -233,6 +325,7 @@ def command_provider_spec(
         env_allowlist=tuple(env_allowlist),
         executable_sha256=executable_sha256 or None,
         neutral_cwd=neutral_cwd,
+        runtime_profile=runtime_profile,
         version=str(raw.get("version") or "unknown"),
         semantics=ProviderSemantics.from_mapping(semantics_raw),
     )
@@ -636,18 +729,75 @@ def _legacy_provider_cwd(
     return request.root
 
 
+@dataclass(frozen=True)
+class ProviderRuntime:
+    cwd: Path
+    env: dict[str, str]
+    home: Path | None = None
+    temp_dir: Path | None = None
+
+
+def _secure_runtime_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=False)
+    if os.name != "nt":
+        path.chmod(0o700)
+    return path
+
+
 @contextmanager
-def _provider_launch_cwd(
+def _provider_runtime(
     spec: CommandProviderSpec,
     request: RetrievalRequest,
 ):
+    """Create isolated ambient state for restricted trusted providers."""
+
+    executable = Path(spec.command[0]).expanduser().resolve()
+    if spec.runtime_profile == "restricted":
+        with tempfile.TemporaryDirectory(
+            prefix="ai-workflow-provider-runtime-",
+        ) as td:
+            base = Path(td)
+            home = _secure_runtime_dir(base / "home")
+            temp_dir = _secure_runtime_dir(base / "tmp")
+            cwd = (
+                _secure_runtime_dir(base / "cwd")
+                if spec.neutral_cwd
+                else _legacy_provider_cwd(spec, request)
+            )
+            yield ProviderRuntime(
+                cwd=cwd,
+                env=build_provider_env(
+                    spec.env_allowlist,
+                    runtime_profile="restricted",
+                    home=home,
+                    temp_dir=temp_dir,
+                    executable=executable,
+                ),
+                home=home,
+                temp_dir=temp_dir,
+            )
+        return
+
     if spec.neutral_cwd:
         with tempfile.TemporaryDirectory(
             prefix="ai-workflow-provider-",
         ) as td:
-            yield Path(td)
+            yield ProviderRuntime(
+                cwd=Path(td),
+                env=build_provider_env(
+                    spec.env_allowlist,
+                    runtime_profile="compatibility",
+                ),
+            )
         return
-    yield _legacy_provider_cwd(spec, request)
+
+    yield ProviderRuntime(
+        cwd=_legacy_provider_cwd(spec, request),
+        env=build_provider_env(
+            spec.env_allowlist,
+            runtime_profile="compatibility",
+        ),
+    )
 
 
 def _bounded_tail_reader(
@@ -780,7 +930,7 @@ def run_command_provider(
     timed_out = False
 
     try:
-        with _provider_launch_cwd(spec, request) as cwd:
+        with _provider_runtime(spec, request) as runtime:
             try:
                 command = _verified_command(spec, request.root)
             except ProviderTrustError as exc:
@@ -788,11 +938,11 @@ def run_command_provider(
             try:
                 proc = subprocess.Popen(
                     command,
-                    cwd=cwd,
+                    cwd=runtime.cwd,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    env=build_provider_env(spec.env_allowlist),
+                    env=runtime.env,
                     **_provider_process_group_kwargs(),
                 )
             except (OSError, ValueError) as exc:
@@ -921,7 +1071,7 @@ async def run_command_provider_async(
 
     started = time.perf_counter()
     try:
-        with _provider_launch_cwd(spec, request) as cwd:
+        with _provider_runtime(spec, request) as runtime:
             try:
                 command = _verified_command(spec, request.root)
             except ProviderTrustError as exc:
@@ -929,11 +1079,11 @@ async def run_command_provider_async(
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *command,
-                    cwd=cwd,
+                    cwd=runtime.cwd,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=build_provider_env(spec.env_allowlist),
+                    env=runtime.env,
                     **_provider_process_group_kwargs(),
                 )
             except (OSError, ValueError) as exc:
