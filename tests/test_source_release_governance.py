@@ -38,6 +38,7 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
             "/scripts/record_python_toolchain.py",
             "/ai_workflow/crg_semantic_benchmark.py",
             "/scripts/run_crg_semantic_benchmark.py",
+            "/scripts/check_crg_semantic_regression.py",
             "/benchmarks/crg-semantic-v1/",
             "/scripts/verify_release_authorization.py",
             "/Dockerfile",
