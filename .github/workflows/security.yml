@@ -101,6 +101,7 @@ jobs:
           docker buildx build
           --platform linux/amd64
           --build-arg SOURCE_DATE_EPOCH
+          --build-arg BUILDKIT_MULTI_PLATFORM=1
           --output type=docker,rewrite-timestamp=true
           --tag ai-workflow-security:ci
           .
