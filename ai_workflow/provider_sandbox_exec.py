@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from collections.abc import Sequence
 
@@ -78,8 +79,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         file_size_mb=args.file_size_mb,
         open_files=args.open_files,
     )
-    os.execvpe(command[0], command, os.environ)
-    return 127
+    completed = subprocess.run(
+        command,
+        env=os.environ,
+        check=False,
+    )
+    return int(completed.returncode)
 
 
 if __name__ == "__main__":
