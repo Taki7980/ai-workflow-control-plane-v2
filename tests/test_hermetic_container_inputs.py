@@ -48,6 +48,12 @@ class HermeticContainerInputTests(unittest.TestCase):
         self.assertNotIn("apt-get upgrade", dockerfile)
         self.assertIn("apt-get update", dockerfile)
         self.assertIn("runtime-packages.txt", dockerfile)
+        for ephemeral in (
+            "/var/log/apt/*",
+            "/var/log/dpkg.log",
+            "/var/log/alternatives.log",
+        ):
+            self.assertIn(ephemeral, dockerfile)
         self.assertNotIn("deb.debian.org", sources)
         self.assertNotIn("security.debian.org", sources)
         self.assertEqual(
