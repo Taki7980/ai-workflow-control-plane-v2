@@ -36,6 +36,7 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
             "/pyproject.toml",
             "/uv.lock",
             "/scripts/record_python_toolchain.py",
+            "/scripts/verify_release_authorization.py",
             "/Dockerfile",
             "/packaging/container/",
             "/scripts/verify_container_attestations.py",
@@ -82,6 +83,42 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
             finalize,
             r"(?m)^    needs: \[publish-pypi, portable-binaries, container\]$",
         )
+
+    def test_release_requires_exact_sha_authorization_before_publish(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        authorize = _job_block(workflow, "authorize-release")
+        prepare = _job_block(workflow, "prepare-release")
+        verify = _job_block(workflow, "verify-release")
+
+        self.assertRegex(authorize, r"(?m)^      actions: read$")
+        self.assertRegex(authorize, r"(?m)^      contents: read$")
+        self.assertIn("fetch-depth: 0", authorize)
+        self.assertIn("verify_release_authorization.py", authorize)
+        self.assertIn("--release-branch main", authorize)
+
+        self.assertRegex(prepare, r"(?m)^    needs: authorize-release$")
+        self.assertRegex(prepare, r"(?m)^    environment: release$")
+        self.assertIn("verify_release_authorization.py", prepare)
+        self.assertIn("release-authorization.json", prepare)
+        self.assertIn("Attest release authorization evidence", prepare)
+
+        self.assertIn("--source-digest \"$GITHUB_SHA\"", verify)
+        self.assertIn("--source-ref \"$GITHUB_REF\"", verify)
+        self.assertIn(
+            '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"',
+            verify,
+        )
+        self.assertIn("release-authorization.json", verify)
+
+    def test_release_authorization_script_is_owned(self) -> None:
+        raw = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+        self.assertIn(
+            "/scripts/verify_release_authorization.py @Taki7980",
+            raw,
+        )
+
 
 
 if __name__ == "__main__":
