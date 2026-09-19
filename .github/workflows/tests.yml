@@ -189,10 +189,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build install-smoke image
-        run: docker build --tag ai-workflow-install-smoke .
-      - name: Smoke container CLI
-        run: docker run --rm ai-workflow-install-smoke --version
+      - name: Set up pinned Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          version: v0.37.0
+          driver-opts: >-
+            image=moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+      - name: Derive reproducible source timestamp
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+      - name: Build reproducibility candidate A
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --no-cache \
+            --load \
+            --platform linux/amd64 \
+            --build-arg SOURCE_DATE_EPOCH \
+            --tag ai-workflow-repro-a \
+            .
+          docker run --rm ai-workflow-repro-a --version
+      - name: Build reproducibility candidate B and compare image identity
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --no-cache \
+            --load \
+            --platform linux/amd64 \
+            --build-arg SOURCE_DATE_EPOCH \
+            --tag ai-workflow-repro-b \
+            .
+          first="$(docker image inspect ai-workflow-repro-a --format '{{.Id}}')"
+          second="$(docker image inspect ai-workflow-repro-b --format '{{.Id}}')"
+          printf 'candidate_a=%s\ncandidate_b=%s\n' "$first" "$second"
+          test "$first" = "$second"
 
   bootstrap-installer-smoke:
     name: bootstrap installer smoke (${{ matrix.installer }})
