@@ -36,7 +36,7 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
             "/pyproject.toml",
             "/uv.lock",
             "/scripts/record_python_toolchain.py",
-            "/ai_workflow/crg_semantic_benchmark.py",
+            "/scripts/crg_semantic_benchmark.py",
             "/scripts/run_crg_semantic_benchmark.py",
             "/scripts/check_crg_semantic_regression.py",
             "/benchmarks/crg-semantic-v1/",
