@@ -181,26 +181,38 @@ jobs:
     needs: prepare-release
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up pinned Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          version: v0.37.0
+          driver-opts: >-
+            image=moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+      - name: Derive reproducible source timestamp
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
       - name: Log in to GitHub Container Registry
         env:
           GHCR_TOKEN: ${{ github.token }}
         shell: bash
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Build and push container with provenance and SBOM
+      - name: Build and push container from locked inputs with provenance and SBOM
         id: image
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
         shell: bash
         run: |
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker buildx build \
             --platform linux/amd64 \
-            --provenance=mode=max \
+            --build-arg SOURCE_DATE_EPOCH \
+            --provenance=mode=max,version=v1 \
             --sbom=true \
             --push \
             --tag "$image:$GITHUB_REF_NAME" \
@@ -210,12 +222,39 @@ jobs:
           test -n "$digest" && test "$digest" != "null"
           echo "name=$image" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Export and verify container provenance and SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${{ steps.image.outputs.name }}@${{ steps.image.outputs.digest }}"
+          docker buildx imagetools inspect "$ref" \
+            --format '{{ json .Provenance.SLSA }}' > container-provenance.json
+          docker buildx imagetools inspect "$ref" \
+            --format '{{ json .SBOM.SPDX }}' > container-sbom.spdx.json
+          python scripts/verify_container_attestations.py \
+            --provenance container-provenance.json \
+            --sbom container-sbom.spdx.json
       - name: Attest pushed container image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
+      - name: Attest exported container metadata
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            container-provenance.json
+            container-sbom.spdx.json
+      - name: Attach inspectable container metadata to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          container-provenance.json
+          container-sbom.spdx.json
+          --clobber
 
   finalize-release:
     needs: [publish-pypi, portable-binaries, container]
