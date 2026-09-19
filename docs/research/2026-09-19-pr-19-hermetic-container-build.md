@@ -179,7 +179,9 @@ This removes the GitHub runner's preinstalled builder version from the effective
 
 ### Reproducibility gate
 
-CI performs two independent no-cache Linux/amd64 builds with the same source commit timestamp using BuildKit's `type=image` exporter, which matches the release exporter path, and compares the resulting `containerimage.digest` values.
+CI performs two independent no-cache Linux/amd64 builds with the same source commit timestamp using BuildKit's `type=image` exporter, which matches the release exporter path, and compares the resulting `containerimage.digest` values with provenance disabled for the comparison builds.
+
+Provenance is deliberately excluded from the equality check. SLSA provenance contains per-invocation metadata such as a globally unique invocation ID plus build start/finish timestamps, so two legitimate rebuilds are expected to have different provenance bytes. The release path still emits fresh max-mode SLSA provenance; only the reproducibility comparison isolates the image payload from that invocation-specific envelope.
 
 The exporter is pinned to `compatibility-version=30` so digest-affecting image assembly behavior is explicit rather than implicit.
 
