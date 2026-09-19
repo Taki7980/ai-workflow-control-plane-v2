@@ -12,13 +12,14 @@ RUN uv sync --locked --only-group build \
     && uv run --locked --no-sync python -m build --wheel --no-isolation
 
 FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS runtime
+ARG SOURCE_DATE_EPOCH
 COPY packaging/container/debian.sources /etc/apt/sources.list.d/debian.sources
 COPY packaging/container/runtime-packages.txt /tmp/runtime-packages.txt
 RUN rm -f /etc/apt/sources.list \
     && apt-get update \
     && xargs -r apt-get install -y --no-install-recommends < /tmp/runtime-packages.txt \
     && rm -rf /var/lib/apt/lists/* /tmp/runtime-packages.txt \
-    && useradd --create-home --uid 10001 aiworkflow
+    && useradd --no-log-init --create-home --uid 10001 aiworkflow
 COPY --from=build /src/dist/*.whl /tmp/
 RUN python -m pip install --no-cache-dir --no-deps /tmp/*.whl \
     && rm -f /tmp/*.whl
