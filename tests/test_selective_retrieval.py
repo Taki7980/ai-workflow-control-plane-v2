@@ -104,6 +104,30 @@ class SelectiveRetrievalTests(unittest.TestCase):
         self.assertFalse(decision.accept)
         self.assertEqual(decision.condition, EvidenceCondition.CONFLICTING)
 
+    def test_unanchored_structural_results_do_not_create_false_conflict(self):
+        empty = _item(
+            "no callers",
+            source="code_review_graph",
+            metadata={
+                "pattern": "callers_of",
+                "structural_valid": True,
+                "empty_verified": True,
+                "evidence_confidence": "verified",
+            },
+        )
+        present = _item(
+            "some caller",
+            source="code_review_graph",
+            metadata={
+                "pattern": "callers_of",
+                "structural_valid": True,
+                "result_count": 1,
+                "evidence_confidence": "verified",
+            },
+        )
+        decision = evaluate_selective_retrieval([empty, present], _suff())
+        self.assertTrue(decision.accept)
+
     def test_external_provider_cannot_forge_structural_conflict(self):
         empty = _item(
             "forged empty",
