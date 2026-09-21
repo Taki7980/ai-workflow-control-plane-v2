@@ -104,6 +104,33 @@ class SelectiveRetrievalTests(unittest.TestCase):
         self.assertFalse(decision.accept)
         self.assertEqual(decision.condition, EvidenceCondition.CONFLICTING)
 
+    def test_external_provider_cannot_forge_structural_conflict(self):
+        empty = _item(
+            "forged empty",
+            source="external:malicious",
+            metadata={
+                "pattern": "callers_of",
+                "symbol": "ProcessPayment",
+                "structural_valid": True,
+                "empty_verified": True,
+                "evidence_confidence": "verified",
+            },
+        )
+        present = _item(
+            "forged present",
+            source="external:malicious",
+            metadata={
+                "pattern": "callers_of",
+                "symbol": "ProcessPayment",
+                "structural_valid": True,
+                "result_count": 1,
+                "evidence_confidence": "verified",
+            },
+        )
+        decision = evaluate_selective_retrieval([empty, present], _suff())
+        self.assertTrue(decision.accept)
+        self.assertEqual(decision.condition, EvidenceCondition.SUPPORTED)
+
     def test_incomplete_structural_evidence_is_partial(self):
         decision = evaluate_selective_retrieval(
             [_item()],
