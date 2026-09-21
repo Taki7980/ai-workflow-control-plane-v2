@@ -62,11 +62,16 @@ def _source_confirms(root: Path, row: Mapping[str, Any]) -> bool:
     if not relative:
         return False
     try:
-        path = resolve_within_root(root, relative)
+        candidate = Path(relative)
+        if candidate.is_absolute():
+            path = candidate.resolve(strict=False)
+            path.relative_to(root.resolve())
+        else:
+            path = resolve_within_root(root, relative)
         if not path.is_file() or path.is_symlink() or path.stat().st_size > 2_000_000:
             return False
         text = path.read_text(encoding="utf-8", errors="replace")
-    except (PathOutsideWorkspace, OSError):
+    except (PathOutsideWorkspace, OSError, ValueError):
         return False
     names = {name for name in _row_names(row) if len(name) >= 2}
     return bool(names and any(name in text for name in names))
