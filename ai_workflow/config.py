@@ -39,6 +39,7 @@ _DEFAULT_CONFIG = {
         },
         "external_retrievers": [],
         "sufficiency": {"threshold": 0.72},
+        "selective_retrieval": {"enabled": True, "minimum_coverage": 0.15},
         "adaptive_budget": {"enabled": True, "high_sufficiency_fraction": 0.45, "medium_sufficiency_fraction": 0.7, "minimum_chars": 900},
         "selector": {"enabled": True, "tight_budget_fraction": 0.3, "mandatory_structural_evidence": True, "max_selector_candidates": 200},
         "telemetry": {"mode": "mutations"},
@@ -266,6 +267,15 @@ def validate_config(data: dict[str, Any]) -> None:
     _positive_int(int(semantic.get("max_output_bytes", 8388608)), "context.semantic.max_output_bytes")
     _string_list(semantic.get("env_allowlist", []), "context.semantic.env_allowlist")
     _fraction(data["context"]["sufficiency"].get("threshold"), "context.sufficiency.threshold")
+    selective_retrieval = data["context"].get("selective_retrieval", {})
+    if not isinstance(selective_retrieval, dict):
+        raise ValueError("context.selective_retrieval must be an object")
+    if not isinstance(selective_retrieval.get("enabled", True), bool):
+        raise ValueError("context.selective_retrieval.enabled must be boolean")
+    _fraction(
+        selective_retrieval.get("minimum_coverage", 0.15),
+        "context.selective_retrieval.minimum_coverage",
+    )
     adaptive = data["context"]["adaptive_budget"]
     _fraction(adaptive.get("high_sufficiency_fraction"), "context.adaptive_budget.high_sufficiency_fraction")
     _fraction(adaptive.get("medium_sufficiency_fraction"), "context.adaptive_budget.medium_sufficiency_fraction")
