@@ -72,6 +72,7 @@ class EvidenceEnvelope:
     trust_class: EvidenceTrustClass
     authority: EvidenceAuthority = field(default_factory=EvidenceAuthority)
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    confidence: str = "candidate"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +83,7 @@ class EvidenceEnvelope:
             "trust_class": self.trust_class.value,
             "authority": self.authority.to_dict(),
             "provenance": dict(self.provenance),
+            "confidence": self.confidence,
         }
 
 
@@ -163,6 +165,8 @@ def build_evidence_envelope(
     trust_class = trust_class_for_source(source)
     content_sha256 = _content_sha256(text)
     locator = _safe_locator(metadata)
+    raw_confidence = str(metadata.get("evidence_confidence") or "candidate").strip().casefold()
+    confidence = raw_confidence if raw_confidence in {"candidate", "corroborated", "verified"} else "candidate"
     system_provenance: dict[str, Any] = {
         "retriever": source,
         "fresh": not stale,
@@ -200,6 +204,7 @@ def build_evidence_envelope(
         trust_class=trust_class,
         authority=EvidenceAuthority(),
         provenance=system_provenance,
+        confidence=confidence,
     )
 
 
