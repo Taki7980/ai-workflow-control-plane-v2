@@ -376,6 +376,19 @@ class WorkflowEngine:
             endpoint=endpoint,
         )
         roots = workspace_roots(root, config)
+        max_roots = max(
+            1,
+            int(((config.get("workspace") or {}).get("max_roots", 4))),
+        )
+        routing_plan = plan_repository_retrieval(
+            Path(root).resolve(),
+            roots[:max_roots],
+            query,
+            changed,
+            config,
+        )
+        selected_routes = list(routing_plan.repositories)
+        selected_roots = [route.root for route in selected_routes]
         deployment_assignment = resolve_runtime_deployment(
             root,
             query,
@@ -383,7 +396,7 @@ class WorkflowEngine:
             plan.intent.value,
             config,
             changed_files_count=len(changed),
-            workspace_roots_count=len(roots),
+            workspace_roots_count=len(selected_roots),
         )
         learning_decision, learning_path = prepare_learning_decision(
             root,
@@ -417,19 +430,6 @@ class WorkflowEngine:
         def remaining() -> float:
             return global_deadline - (time.perf_counter() - started)
 
-        max_roots = max(
-            1,
-            int(((config.get("workspace") or {}).get("max_roots", 4))),
-        )
-        routing_plan = plan_repository_retrieval(
-            Path(root).resolve(),
-            roots[:max_roots],
-            query,
-            changed,
-            config,
-        )
-        selected_routes = list(routing_plan.repositories)
-        selected_roots = [route.root for route in selected_routes]
         route_by_root = {route.root: route for route in selected_routes}
 
         def routed_item(item: ContextItem, provider_root: Path) -> ContextItem:
@@ -910,7 +910,7 @@ class WorkflowEngine:
                 ),
             }
         orchestration_contract = build_orchestration_contract(
-            decision, diagnostics, changed, len(roots), providers, config
+            decision, diagnostics, changed, len(selected_roots), providers, config
         )
         diagnostics["orchestration"] = orchestration_contract
         diagnostics["authorization_policy"] = build_model_capability_policy(
