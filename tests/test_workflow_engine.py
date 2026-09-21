@@ -611,6 +611,42 @@ class WorkflowEngineTests(unittest.TestCase):
         )
 
 
+    def test_task_conditioned_policy_is_auditable_and_budget_neutral(self):
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        decision = RouteDecision(Lane.FULL, Risk.MEDIUM, confidence=0.9)
+        budget = ContextBudget(6000, 1200, 24000, {})
+        engine = WorkflowEngine(
+            base_gather=lambda *args, **kwargs: [
+                ContextItem("lightweight_index", "billing.py TypeError ProcessPayment", 3.0)
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            _, diagnostics = engine.gather_detailed(
+                Path(td),
+                "Traceback TypeError in ProcessPayment at billing.py:41",
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(False, False, False, False, False),
+            )
+
+        policy = diagnostics["task_retrieval_policy"]
+        self.assertEqual(policy["profile"], "trace2code")
+        self.assertGreater(
+            policy["fusion_weights"]["lexical"],
+            policy["fusion_weights"]["specialist"],
+        )
+        self.assertEqual(diagnostics["hard_context_chars"], budget.context_chars)
+        self.assertEqual(diagnostics["hard_context_tokens"], budget.estimated_tokens)
+        self.assertEqual(
+            diagnostics["policy_identity"]["task_retrieval_policy"],
+            policy,
+        )
+
+
     def test_run_identity_and_policy_identity_are_returned(self):
         from ai_workflow.provenance import config_digest
         from ai_workflow.workflow_engine import WorkflowEngine
