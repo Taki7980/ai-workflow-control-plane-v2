@@ -85,12 +85,19 @@ def evaluate_selective_retrieval(
     reasons: list[str] = []
     expected = expected_repository_ids or set()
     if expected:
+        if any(item.evidence is None for item in items):
+            return SelectiveRetrievalDecision(
+                EvidenceCondition.WRONG_REPOSITORY,
+                False,
+                0.0,
+                ("missing_code_owned_evidence_identity",),
+            )
         observed = {
             item.evidence.repository_id
             for item in items
             if item.evidence is not None
         }
-        if observed and not observed.issubset(expected):
+        if not observed.issubset(expected):
             return SelectiveRetrievalDecision(
                 EvidenceCondition.WRONG_REPOSITORY,
                 False,
