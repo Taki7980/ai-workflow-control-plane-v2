@@ -27,6 +27,7 @@ from .evidence import (
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .models import ContextItem, Lane, RouteDecision
 from .multi_repo_retrieval import plan_repository_retrieval
+from .multi_repo_retrieval import plan_repository_retrieval
 from .orchestration import build_orchestration_contract
 from .provenance import config_digest
 from .providers import ProviderStatus
@@ -488,7 +489,8 @@ class WorkflowEngine:
                 if path.startswith(prefix)
             ]
 
-        for index, candidate_root in enumerate(selected_roots):
+        for index, route in enumerate(selected_routes):
+            candidate_root = route.root
             label = "base" if index == 0 else f"workspace:{candidate_root.name}"
             trace.providers_attempted.append(label)
             candidate_changed = changed_for(candidate_root)
@@ -888,6 +890,7 @@ class WorkflowEngine:
             "algorithm_policy": algorithm_policy,
             "policy_identity": policy_identity,
             "workspace_roots": [str(path) for path in roots],
+            "repository_routing": repository_plan.to_dict(),
             "repository_routing": routing_plan.to_dict(),
             "workspace_state": snapshot,
             "graph_state": graph_state,
