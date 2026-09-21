@@ -125,7 +125,11 @@ def _parse_edge(raw: object, accepted: set[str]) -> RepositoryEdge | None:
     source = raw.get("source_repository_id")
     target = raw.get("target_repository_id")
     relationship = raw.get("relationship")
-    if not all(isinstance(value, str) and value.strip() for value in (source, target, relationship)):
+    if not isinstance(source, str) or not source.strip():
+        return None
+    if not isinstance(target, str) or not target.strip():
+        return None
+    if not isinstance(relationship, str) or not relationship.strip():
         return None
     source = source.strip()
     target = target.strip()
