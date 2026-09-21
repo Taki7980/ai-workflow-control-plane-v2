@@ -455,9 +455,26 @@ class WorkflowEngine:
             config,
         )
 
+        nested_root_prefixes: list[str] = []
+        for known_root in roots:
+            if known_root == workspace_root:
+                continue
+            try:
+                relative_known = known_root.relative_to(workspace_root).as_posix()
+            except ValueError:
+                continue
+            nested_root_prefixes.append(relative_known.rstrip("/") + "/")
+
         def changed_for(candidate_root: Path) -> list[str]:
             if candidate_root == workspace_root:
-                return list(changed)
+                return [
+                    path
+                    for path in changed
+                    if not any(
+                        path.startswith(prefix)
+                        for prefix in nested_root_prefixes
+                    )
+                ]
             try:
                 relative_root = candidate_root.relative_to(
                     workspace_root
