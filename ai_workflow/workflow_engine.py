@@ -42,6 +42,7 @@ from .retriever_plugins import configured_retrievers, run_retriever_result as de
 from .run_journal import write_run_journal
 from .semantic import semantic_result as default_semantic_provider
 from .scip import scip_context as default_scip_provider
+from .selective_retrieval import evaluate_selective_retrieval
 from .task_retrieval import TaskRetrievalPolicy, task_retrieval_policy
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
@@ -876,7 +877,20 @@ class WorkflowEngine:
             structural_patterns=plan.structural_patterns,
             threshold=threshold,
         )
-        state = _evidence_state(decision, final_suff.sufficient)
+        expected_repository_ids = {
+            route.repository_id
+            for route in selected_routes
+            if route.repository_id is not None
+        }
+        selective = evaluate_selective_retrieval(
+            selected,
+            final_suff,
+            expected_repository_ids=expected_repository_ids,
+        )
+        state = _evidence_state(
+            decision,
+            final_suff.sufficient and selective.accept,
+        )
         snapshot = workspace_fingerprint(root, changed)
         graph_state = workspace_graph_fingerprint(root, config)
         trace.workspace_fingerprint = str(
@@ -923,6 +937,7 @@ class WorkflowEngine:
                 "authority": "evidence_only",
             },
             "sufficiency": trace.sufficiency,
+            "selective_retrieval": selective.to_dict(),
             "selector": selector,
             "adaptive_context_chars": adaptive_chars,
             "hard_context_chars": budget.context_chars,
@@ -1036,6 +1051,7 @@ class WorkflowEngine:
                     "provider_errors": safe_error_kinds,
                     "algorithm_policy": algorithm_policy,
                     "sufficiency": dict(trace.sufficiency),
+                    "selective_retrieval": selective.to_dict(),
                     "selector": selector,
                     "fallbacks": list(trace.fallbacks),
                     "scheduler": dict(diagnostics["scheduler"]),
