@@ -81,6 +81,8 @@ class RepositoryGraphTests(unittest.TestCase):
                 (backend,),
             )
             self.assertEqual(len(graph.edges[0].edge_id), 64)
+            self.assertEqual(len(graph.fingerprint), 64)
+            self.assertEqual(graph.fingerprint, load_repository_graph(root).fingerprint)
 
     def test_unknown_repository_fails_closed_for_all_edges(self):
         with tempfile.TemporaryDirectory() as td:
