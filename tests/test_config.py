@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_workflow.config import DEFAULT_RELATIVE, load_config
+from ai_workflow.config import DEFAULT_RELATIVE, default_config, load_config, validate_config
 
 
 class ConfigValidationTests(unittest.TestCase):
