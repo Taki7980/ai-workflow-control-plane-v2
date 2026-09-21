@@ -22,6 +22,7 @@ from .models import ContextItem, RouteDecision, Lane
 from .providers import ProviderStatus
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .retrieval_policy import structural_requirements
+from .structural_validation import validate_crg_items
 
 
 def _jsonl(path: Path):
@@ -611,7 +612,14 @@ def crg_context(
                 )
             )
 
-    return results[:limit]
+    return validate_crg_items(
+        root,
+        results[:limit],
+        query=query,
+        symbol=anchor,
+        changed_files=changed_files,
+        limit=limit,
+    )
 
 
 def targeted_source(
