@@ -68,6 +68,27 @@ class CrgSemanticBenchmarkContractTests(unittest.TestCase):
         self.assertEqual(metrics["recall_at_k"], 0.0)
         self.assertEqual(metrics["mrr"], 0.0)
 
+    def test_gold_matching_ignores_unrelated_metadata_text(self) -> None:
+        metrics = score_ranked_rows(
+            [
+                {
+                    "file_path": "python/beta.py",
+                    "name": "helper",
+                    "debug_note": "python/alpha.py::helper",
+                }
+            ],
+            [
+                {
+                    "path_contains": "python/alpha.py",
+                    "name_contains": "helper",
+                }
+            ],
+        )
+
+        self.assertEqual(metrics["precision_at_k"], 0.0)
+        self.assertEqual(metrics["recall_at_k"], 0.0)
+        self.assertEqual(metrics["mrr"], 0.0)
+
     def test_corpus_covers_required_semantic_categories(self) -> None:
         payload = json.loads(CASES.read_text(encoding="utf-8"))
         cases = validate_cases(payload)
@@ -126,6 +147,26 @@ class CrgSemanticBenchmarkContractTests(unittest.TestCase):
         }
 
         self.assertEqual(check_regression(baseline, report), [])
+
+    def test_regression_rejects_version_prefix_collision(self) -> None:
+        baseline = {
+            "benchmark": "crg-semantic-golden-v1",
+            "crg_version": "2.3.8",
+            "minimums": {},
+            "maximums": {},
+            "category_minimum_recall": {},
+        }
+        report = {
+            "benchmark": "crg-semantic-golden-v1",
+            "crg_version_actual": "code-review-graph 2.3.80",
+            "summary": {},
+            "by_category": {},
+            "cases": [],
+            "controls": {},
+        }
+
+        failures = check_regression(baseline, report)
+        self.assertTrue(any("CRG version mismatch" in row for row in failures))
 
     def test_measured_baseline_reports_semantic_regression(self) -> None:
         baseline = {
