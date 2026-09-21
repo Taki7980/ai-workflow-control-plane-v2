@@ -62,3 +62,16 @@ class HierarchicalRetrievalConfigTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "max_graph_expansions"):
                 load_config(root)
+
+    def test_selective_retrieval_config_rejects_invalid_values(self):
+        for value in (-0.1, 1.1, "high"):
+            data = default_config()
+            data["context"]["selective_retrieval"]["minimum_coverage"] = value
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    validate_config(data)
+
+        data = default_config()
+        data["context"]["selective_retrieval"]["enabled"] = "yes"
+        with self.assertRaises(ValueError):
+            validate_config(data)
