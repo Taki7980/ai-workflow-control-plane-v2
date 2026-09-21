@@ -50,6 +50,28 @@ class FusionTests(unittest.TestCase):
         self.assertEqual(fused[0][1], "b")
         self.assertEqual({item for _, item in fused}, {"a", "b", "c"})
 
+    def test_weighted_fusion_can_adapt_to_task_specific_ranker_value(self):
+        rankings = [
+            ["source_first", "specialist_first"],
+            ["source_first", "specialist_first"],
+            ["specialist_first", "source_first"],
+        ]
+
+        fused = reciprocal_rank_fusion(
+            rankings,
+            key=lambda item: item,
+            k=10,
+            weights=[0.5, 0.5, 2.0],
+        )
+
+        self.assertEqual(fused[0][1], "specialist_first")
+
+    def test_weighted_fusion_rejects_invalid_weights(self):
+        with self.assertRaisesRegex(ValueError, "match rankings"):
+            reciprocal_rank_fusion([["a"]], key=lambda item: item, weights=[1.0, 2.0])
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            reciprocal_rank_fusion([["a"]], key=lambda item: item, weights=[-1.0])
+
 
 class MMRTests(unittest.TestCase):
     def test_zero_relevance_candidates_are_not_selected(self):
