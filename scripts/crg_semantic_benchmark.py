@@ -92,15 +92,41 @@ def _row_text(row: Mapping[str, Any]) -> str:
     ).casefold()
 
 
+def _field_text(row: Mapping[str, Any], *keys: str) -> str:
+    return "\n".join(
+        str(row.get(key) or "").casefold()
+        for key in keys
+        if row.get(key) is not None
+    )
+
+
 def _matches_gold(row: Mapping[str, Any], gold: Mapping[str, Any]) -> bool:
-    raw = _row_text(row)
     path_contains = str(gold.get("path_contains") or "").strip().casefold()
     name_contains = str(gold.get("name_contains") or "").strip().casefold()
-    if path_contains and path_contains not in raw:
+
+    path_text = _field_text(
+        row,
+        "file_path",
+        "relative_path",
+        "path",
+        "qualified_name",
+    )
+    name_text = _field_text(
+        row,
+        "name",
+        "parent_name",
+        "import_target",
+    )
+
+    if path_contains and path_contains not in path_text:
         return False
-    if name_contains and name_contains not in raw:
+    if name_contains and name_contains not in name_text:
         return False
     return bool(path_contains or name_contains)
+
+
+def _crg_version_matches(actual: str, expected: str) -> bool:
+    return expected in actual.strip().split()
 
 
 def score_ranked_rows(
@@ -473,7 +499,7 @@ def run_crg_semantic_benchmark(
     if (
         version_proc.returncode != 0
         or not expected_version
-        or expected_version not in actual_version
+        or not _crg_version_matches(actual_version, expected_version)
     ):
         raise CrgSemanticBenchmarkError(
             "unexpected Code Review Graph version: "
