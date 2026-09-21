@@ -153,6 +153,27 @@ def plan_repository_retrieval(
         root: registry.get(root, (None, "", ""))[0]
         for root in bounded_roots
     }
+
+    # Legacy workspace.roots may intentionally point at directories that have
+    # no accepted registry identity. Preserve that historical explicit mode;
+    # graph authority is only applied once the reviewed registry is in use.
+    if bounded_roots and not any(identities.values()):
+        hard_max = max(
+            1,
+            int((config.get("workspace") or {}).get("max_roots", len(bounded_roots))),
+        )
+        legacy = tuple(
+            RoutedRepository(
+                root,
+                None,
+                "legacy_explicit",
+                1.0,
+                "legacy_workspace_root",
+            )
+            for root in bounded_roots[:hard_max]
+        )
+        return RepositoryRetrievalPlan(legacy, graph.fingerprint, (), (), ())
+
     root_for_id = {
         repo_id: root
         for root, repo_id in identities.items()
