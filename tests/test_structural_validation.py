@@ -66,6 +66,40 @@ class StructuralValidationTests(unittest.TestCase):
         self.assertTrue(item.metadata["structural_valid"])
         self.assertTrue(item.metadata["high_risk_eligible"])
 
+    def test_absolute_crg_path_inside_workspace_can_be_corroborated(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "src" / "service.py"
+            source.parent.mkdir()
+            source.write_text("def charge():\n    return True\n", encoding="utf-8")
+            with patch("ai_workflow.structural_validation.scip_ready", return_value=False):
+                item = validate_crg_item(
+                    root,
+                    crg_item(str(source), "charge"),
+                    query="who calls charge",
+                    symbol="charge",
+                    changed_files=[],
+                    limit=10,
+                )
+        self.assertEqual(item.metadata["evidence_confidence"], "corroborated")
+        self.assertTrue(item.metadata["structural_valid"])
+
+    def test_absolute_crg_path_outside_workspace_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as outside:
+            root = Path(td)
+            source = Path(outside) / "service.py"
+            source.write_text("def charge():\n    return True\n", encoding="utf-8")
+            item = validate_crg_item(
+                root,
+                crg_item(str(source), "charge"),
+                query="who calls charge",
+                symbol="charge",
+                changed_files=[],
+                limit=10,
+            )
+        self.assertEqual(item.metadata["evidence_confidence"], "candidate")
+        self.assertFalse(item.metadata["structural_valid"])
+
     def test_source_and_scip_promote_to_verified(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
