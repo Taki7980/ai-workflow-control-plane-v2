@@ -110,7 +110,11 @@ class WorkflowMultiRepoRoutingTests(unittest.TestCase):
                     ProviderStatus(False, False, False, False, False),
                 )
 
-            self.assertEqual(calls, ["frontend", "backend"])
+            self.assertCountEqual(calls, ["frontend", "backend"])
+            self.assertEqual(
+                diagnostics["providers_attempted"][:2],
+                ["base", "workspace:backend"],
+            )
             routing = diagnostics["repository_routing"]
             self.assertEqual(routing["primary_repository_ids"], [ids["frontend"]])
             self.assertEqual(routing["expanded_repository_ids"], [ids["backend"]])
