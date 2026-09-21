@@ -48,14 +48,16 @@ def _structural_conflict(items: list[ContextItem]) -> bool:
         ):
             continue
         pattern = str(item.metadata.get("pattern") or "").strip()
-        symbol = str(
+        anchor = str(
             item.metadata.get("symbol")
             or item.metadata.get("qualified_name")
+            or item.metadata.get("path")
+            or item.metadata.get("file")
             or ""
         ).strip()
-        if not pattern:
+        if not pattern or not anchor:
             continue
-        key = (pattern, symbol)
+        key = (pattern, anchor)
         state = "empty" if bool(item.metadata.get("empty_verified")) else "present"
         states.setdefault(key, set()).add(state)
     return any(len(values) > 1 for values in states.values())
