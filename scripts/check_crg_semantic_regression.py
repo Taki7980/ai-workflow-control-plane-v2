@@ -30,7 +30,7 @@ def check_regression(
 
     expected_crg = str(baseline.get("crg_version") or "")
     actual_crg = str(report.get("crg_version_actual") or "")
-    if expected_crg and expected_crg not in actual_crg:
+    if expected_crg and expected_crg not in actual_crg.strip().split():
         failures.append(
             f"CRG version mismatch: expected {expected_crg}, got {actual_crg}"
         )
