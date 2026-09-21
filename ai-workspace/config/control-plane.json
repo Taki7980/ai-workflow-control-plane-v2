@@ -44,6 +44,7 @@
     "roots": [],
     "max_roots": 4,
     "registry": "ai-workspace/config/repositories.json",
+    "repository_graph": "ai-workspace/config/repository-graph.json",
     "discovery": {
       "max_depth": 8,
       "require_acceptance": false,
