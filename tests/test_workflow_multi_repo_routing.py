@@ -85,9 +85,21 @@ class WorkflowMultiRepoRoutingTests(unittest.TestCase):
                 ],
             }
             calls = []
+            changed_seen = {}
 
-            def base(candidate_root, *args, **kwargs):
+            def base(
+                candidate_root,
+                query,
+                decision,
+                budget,
+                config,
+                providers,
+                symbol,
+                endpoint,
+                changed,
+            ):
                 calls.append(candidate_root.name)
+                changed_seen[candidate_root.name] = list(changed or [])
                 return [
                     ContextItem(
                         "lightweight_index",
@@ -108,9 +120,12 @@ class WorkflowMultiRepoRoutingTests(unittest.TestCase):
                     ContextBudget(2500, 700, 10000, {}),
                     config,
                     ProviderStatus(False, False, False, False, False),
+                    changed_files=["frontend/src/checkout.ts"],
                 )
 
             self.assertCountEqual(calls, ["frontend", "backend"])
+            self.assertEqual(changed_seen["frontend"], ["src/checkout.ts"])
+            self.assertEqual(changed_seen["backend"], [])
             self.assertEqual(
                 diagnostics["providers_attempted"][:2],
                 ["base", "workspace:backend"],
