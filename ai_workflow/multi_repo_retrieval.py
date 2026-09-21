@@ -176,6 +176,16 @@ def plan_repository_retrieval(
         if repo_id is not None and repo_id in graph_nodes
     }
 
+    # Preserve explicitly configured legacy roots when no accepted registry
+    # identities are available. Hierarchical routing only narrows repositories
+    # when PR-23's reviewed identity boundary can actually be enforced.
+    if not any(identities.values()):
+        legacy = tuple(
+            RoutedRepository(root, None, "legacy_explicit", 1.0, "explicit_workspace_root")
+            for root in bounded_roots
+        )
+        return RepositoryRetrievalPlan(legacy, graph.fingerprint, (), (), ())
+
     nested_prefixes = tuple(
         relative.rstrip("/") + "/"
         for candidate, (_repo_id, _name, relative) in registry.items()
