@@ -167,7 +167,9 @@ class StructuralFallbackTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].source, "code_review_graph")
         self.assertEqual(items[0].metadata["pattern"], "callers_of")
-        self.assertTrue(items[0].metadata["structural_valid"])
+        self.assertFalse(items[0].metadata["structural_valid"])
+        self.assertEqual(items[0].metadata["evidence_confidence"], "candidate")
+        self.assertFalse(items[0].metadata["high_risk_eligible"])
         self.assertEqual(items[0].metadata["result_count"], 1)
 
     def test_structural_query_falls_back_to_source_without_crg(self):
@@ -216,7 +218,9 @@ class StructuralCRGContractTests(unittest.TestCase):
 
         self.assertEqual(calls, [["impact", "--files", "service.py"]])
         self.assertEqual(items[0].metadata["pattern"], "impact")
-        self.assertTrue(items[0].metadata["structural_valid"])
+        self.assertFalse(items[0].metadata["structural_valid"])
+        self.assertEqual(items[0].metadata["evidence_confidence"], "candidate")
+        self.assertFalse(items[0].metadata["high_risk_eligible"])
 
     def test_crg_search_result_becomes_anchor_before_relationship_query(self):
         import ai_workflow.context_broker as cb
