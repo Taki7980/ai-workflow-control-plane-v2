@@ -176,10 +176,26 @@ def plan_repository_retrieval(
         if repo_id is not None and repo_id in graph_nodes
     }
 
+    nested_prefixes = tuple(
+        relative.rstrip("/") + "/"
+        for candidate, (_repo_id, _name, relative) in registry.items()
+        if candidate != workspace and relative not in {"", "."}
+    )
     signaled: list[tuple[Path, str]] = []
     for root in bounded_roots:
         repo_id, name, relative = registry.get(root, (None, root.name, "."))
-        if repo_id and _changed_matches(workspace, root, relative, changed_files):
+        owns_change = _changed_matches(
+            workspace,
+            root,
+            relative,
+            changed_files,
+        )
+        if root == workspace and nested_prefixes:
+            owns_change = any(
+                not any(path.startswith(prefix) for prefix in nested_prefixes)
+                for path in changed_files
+            )
+        if repo_id and owns_change:
             signaled.append((root, "changed_files"))
         elif repo_id and _query_mentions(query, name, relative):
             signaled.append((root, "explicit_query_anchor"))
