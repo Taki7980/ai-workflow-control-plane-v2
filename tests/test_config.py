@@ -30,3 +30,30 @@ class ConfigValidationTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "source share"):
                 load_config(root)
+
+
+class HierarchicalRetrievalConfigTests(ConfigValidationTests):
+    def test_unknown_repository_relationship_fails_at_load_boundary(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = Path(__file__).parents[1] / DEFAULT_RELATIVE
+            data = json.loads(source.read_text(encoding="utf-8"))
+            data["workspace"]["hierarchical_retrieval"]["relationships"] = [
+                "depends_on",
+                "model_controls_repository",
+            ]
+            self.write_config(root, data)
+
+            with self.assertRaisesRegex(ValueError, "unsupported relationship"):
+                load_config(root)
+
+    def test_negative_graph_expansion_limit_fails_at_load_boundary(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = Path(__file__).parents[1] / DEFAULT_RELATIVE
+            data = json.loads(source.read_text(encoding="utf-8"))
+            data["workspace"]["hierarchical_retrieval"]["max_graph_expansions"] = -1
+            self.write_config(root, data)
+
+            with self.assertRaisesRegex(ValueError, "max_graph_expansions"):
+                load_config(root)
