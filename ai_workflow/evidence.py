@@ -165,8 +165,15 @@ def build_evidence_envelope(
     trust_class = trust_class_for_source(source)
     content_sha256 = _content_sha256(text)
     locator = _safe_locator(metadata)
+    # Confidence is code-owned structural state. External/provider metadata must
+    # never self-promote by spelling a valid confidence label.
     raw_confidence = str(metadata.get("evidence_confidence") or "candidate").strip().casefold()
-    confidence = raw_confidence if raw_confidence in {"candidate", "corroborated", "verified"} else "candidate"
+    confidence = (
+        raw_confidence
+        if source == "code_review_graph"
+        and raw_confidence in {"candidate", "corroborated", "verified"}
+        else "candidate"
+    )
     system_provenance: dict[str, Any] = {
         "retriever": source,
         "fresh": not stale,
