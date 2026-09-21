@@ -37,7 +37,15 @@ def _structural_conflict(items: list[ContextItem]) -> bool:
 
     states: dict[tuple[str, str], set[str]] = {}
     for item in items:
+        if item.source not in {"code_review_graph", "scip"}:
+            continue
         if not bool(item.metadata.get("structural_valid")):
+            continue
+        if (
+            item.source == "code_review_graph"
+            and str(item.metadata.get("evidence_confidence") or "candidate")
+            not in {"corroborated", "verified"}
+        ):
             continue
         pattern = str(item.metadata.get("pattern") or "").strip()
         symbol = str(
