@@ -32,7 +32,12 @@ class ConfigValidationTests(unittest.TestCase):
                 load_config(root)
 
 
-class HierarchicalRetrievalConfigTests(ConfigValidationTests):
+class HierarchicalRetrievalConfigTests(unittest.TestCase):
+    def write_config(self, root: Path, data: dict) -> None:
+        path = root / DEFAULT_RELATIVE
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
     def test_unknown_repository_relationship_fails_at_load_boundary(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
