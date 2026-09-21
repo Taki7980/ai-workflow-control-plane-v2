@@ -882,14 +882,22 @@ class WorkflowEngine:
             for route in selected_routes
             if route.repository_id is not None
         }
+        selective_cfg = (
+            (config.get("context") or {}).get("selective_retrieval") or {}
+        )
         selective = evaluate_selective_retrieval(
             selected,
             final_suff,
             expected_repository_ids=expected_repository_ids,
+            minimum_coverage=float(
+                selective_cfg.get("minimum_coverage", 0.15)
+            ),
         )
+        selective_enabled = bool(selective_cfg.get("enabled", True))
         state = _evidence_state(
             decision,
-            final_suff.sufficient and selective.accept,
+            final_suff.sufficient
+            and (selective.accept or not selective_enabled),
         )
         snapshot = workspace_fingerprint(root, changed)
         graph_state = workspace_graph_fingerprint(root, config)
@@ -937,7 +945,10 @@ class WorkflowEngine:
                 "authority": "evidence_only",
             },
             "sufficiency": trace.sufficiency,
-            "selective_retrieval": selective.to_dict(),
+            "selective_retrieval": {
+                **selective.to_dict(),
+                "enabled": selective_enabled,
+            },
             "selector": selector,
             "adaptive_context_chars": adaptive_chars,
             "hard_context_chars": budget.context_chars,
@@ -1051,7 +1062,10 @@ class WorkflowEngine:
                     "provider_errors": safe_error_kinds,
                     "algorithm_policy": algorithm_policy,
                     "sufficiency": dict(trace.sufficiency),
-                    "selective_retrieval": selective.to_dict(),
+                    "selective_retrieval": {
+                        **selective.to_dict(),
+                        "enabled": selective_enabled,
+                    },
                     "selector": selector,
                     "fallbacks": list(trace.fallbacks),
                     "scheduler": dict(diagnostics["scheduler"]),
