@@ -430,6 +430,20 @@ class WorkflowEngine:
         )
         selected_routes = list(routing_plan.repositories)
         selected_roots = [route.root for route in selected_routes]
+        route_by_root = {route.root: route for route in selected_routes}
+
+        def routed_item(item: ContextItem, provider_root: Path) -> ContextItem:
+            routed = _provenance(item, provider_root)
+            route = route_by_root.get(provider_root)
+            if route is None:
+                return routed
+            routed.metadata["repository_tier"] = route.tier
+            routed.metadata["repository_prior"] = route.prior
+            routed.metadata["repository_relationship"] = route.relationship
+            routed.metadata["repository_id"] = route.repository_id
+            routed.score *= route.prior
+            return routed
+
         base_calls: list[ScheduledCall] = []
         workspace_root = Path(root).resolve()
         identity_roots = list(
@@ -488,14 +502,10 @@ class WorkflowEngine:
             trace.stage_latency_ms[outcome.label] = round(outcome.latency_ms, 2)
             if outcome.ok and isinstance(outcome.value, list):
                 trace.candidates[outcome.label] = len(outcome.value)
-                for item in outcome.value:
-                    routed = _provenance(item, candidate_root)
-                    routed.metadata["repository_tier"] = route.tier
-                    routed.metadata["repository_prior"] = route.prior
-                    routed.metadata["repository_relationship"] = route.relationship
-                    routed.metadata["repository_id"] = route.repository_id
-                    routed.score *= route.prior
-                    base_items.append(routed)
+                base_items.extend(
+                    routed_item(item, candidate_root)
+                    for item in outcome.value
+                )
             else:
                 trace.candidates[outcome.label] = 0
                 provider_errors[outcome.label] = _scheduler_error(outcome)
@@ -609,7 +619,7 @@ class WorkflowEngine:
                 error_kind = result.error_kind or "provider_error"
                 trace.fallbacks.append(_fallback_label(outcome.label, error_kind))
             specialist_items.extend(
-                _provenance(item, provider_root)
+                routed_item(item, provider_root)
                 for item in result.items
             )
 
@@ -728,7 +738,7 @@ class WorkflowEngine:
                     if outcome.ok and isinstance(outcome.value, list):
                         trace.candidates[label] = len(outcome.value)
                         specialist_items.extend(
-                            _provenance(item, structural_root)
+                            routed_item(item, structural_root)
                             for item in outcome.value
                         )
                     else:
