@@ -58,6 +58,16 @@ class WorkspaceRepositoryGraph:
     def node_ids(self) -> set[str]:
         return {node.repository_id for node in self.nodes}
 
+    @property
+    def fingerprint(self) -> str:
+        payload = {
+            "nodes": [node.repository_id for node in self.nodes],
+            "edges": [edge.edge_id for edge in self.edges],
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
     def outgoing(
         self,
         repository: str,
@@ -192,6 +202,7 @@ def graph_summary(root: Path, config: dict | None = None) -> dict[str, Any]:
         "version": _GRAPH_VERSION,
         "review_required": True,
         "path": str(graph_path(root, config)),
+        "fingerprint": graph.fingerprint,
         "nodes": [
             {
                 "repository_id": node.repository_id,
