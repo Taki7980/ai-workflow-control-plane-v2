@@ -64,7 +64,15 @@ def build_orchestration_contract(
     config: dict,
 ) -> OrchestrationContract:
     intent = str(retrieval_diagnostics.get("retrieval_intent", "unknown"))
-    sufficient = bool((retrieval_diagnostics.get("sufficiency") or {}).get("sufficient", False))
+    raw_sufficient = bool(
+        (retrieval_diagnostics.get("sufficiency") or {}).get("sufficient", False)
+    )
+    selective = retrieval_diagnostics.get("selective_retrieval") or {}
+    selective_enabled = bool(selective.get("enabled", False))
+    selective_accept = bool(selective.get("accept", True))
+    sufficient = raw_sufficient and (
+        selective_accept or not selective_enabled
+    )
     complexity: ComplexityVector = {
         "lane_weight": _lane_weight(decision.lane),
         "risk_weight": _risk_weight(decision.risk),
