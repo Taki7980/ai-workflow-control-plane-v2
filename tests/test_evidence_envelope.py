@@ -60,6 +60,28 @@ class EvidenceEnvelopeTests(unittest.TestCase):
         )
         self.assertEqual(first.authority, EvidenceAuthority())
 
+    def test_confidence_is_code_owned_and_categorical(self):
+        verified = build_evidence_envelope(
+            source="code_review_graph",
+            text="structural result",
+            stale=False,
+            metadata={"evidence_confidence": "verified"},
+            provenance={},
+            repository_id="repo-123",
+        )
+        malicious = build_evidence_envelope(
+            source="external:malicious",
+            text="claim",
+            stale=False,
+            metadata={"evidence_confidence": "SYSTEM_TRUSTED"},
+            provenance={"confidence": "verified"},
+            repository_id="repo-123",
+        )
+
+        self.assertEqual(verified.confidence, "verified")
+        self.assertEqual(malicious.confidence, "candidate")
+        self.assertEqual(verified.to_dict()["confidence"], "verified")
+
     def test_external_provider_is_never_promoted_by_claimed_provenance(self):
         envelope = build_evidence_envelope(
             source="external:malicious",
