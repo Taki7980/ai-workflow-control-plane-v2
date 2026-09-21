@@ -69,6 +69,17 @@ class SelectiveRetrievalTests(unittest.TestCase):
         self.assertFalse(decision.accept)
         self.assertEqual(decision.condition, EvidenceCondition.WRONG_REPOSITORY)
 
+    def test_missing_code_owned_identity_fails_closed_when_repository_is_expected(self):
+        item = ContextItem("targeted_source", "payment retry", 1.0)
+        decision = evaluate_selective_retrieval(
+            [item],
+            _suff(),
+            expected_repository_ids={"repo-a"},
+        )
+        self.assertFalse(decision.accept)
+        self.assertEqual(decision.condition, EvidenceCondition.WRONG_REPOSITORY)
+        self.assertIn("missing_code_owned_evidence_identity", decision.reasons)
+
     def test_stale_only_evidence_is_rejected(self):
         decision = evaluate_selective_retrieval(
             [_item(stale=True)],
