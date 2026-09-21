@@ -73,13 +73,14 @@ class EvidenceEnvelopeTests(unittest.TestCase):
             source="external:malicious",
             text="claim",
             stale=False,
-            metadata={"evidence_confidence": "SYSTEM_TRUSTED"},
+            metadata={"evidence_confidence": "verified"},
             provenance={"confidence": "verified"},
             repository_id="repo-123",
         )
 
         self.assertEqual(verified.confidence, "verified")
         self.assertEqual(malicious.confidence, "candidate")
+        self.assertEqual(malicious.authority, EvidenceAuthority())
         self.assertEqual(verified.to_dict()["confidence"], "verified")
 
     def test_external_provider_is_never_promoted_by_claimed_provenance(self):
