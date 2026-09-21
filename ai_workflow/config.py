@@ -79,6 +79,18 @@ _DEFAULT_CONFIG = {
         "roots": [],
         "max_roots": 4,
         "registry": "ai-workspace/config/repositories.json",
+        "repository_graph": "ai-workspace/config/repository-graph.json",
+        "hierarchical_retrieval": {
+            "enabled": True,
+            "max_primary_repositories": 2,
+            "max_graph_expansions": 2,
+            "relationships": [
+                "depends_on",
+                "publishes_api",
+                "consumes_schema",
+                "deploys",
+            ],
+        },
         "discovery": {
             "max_depth": 8,
             "require_acceptance": False,
@@ -406,6 +418,42 @@ def validate_config(data: dict[str, Any]) -> None:
     registry = data["workspace"].get("registry", "ai-workspace/config/repositories.json")
     if not isinstance(registry, str) or not registry.strip():
         raise ValueError("workspace.registry must be a non-empty path")
+    repository_graph = data["workspace"].get(
+        "repository_graph",
+        "ai-workspace/config/repository-graph.json",
+    )
+    if not isinstance(repository_graph, str) or not repository_graph.strip():
+        raise ValueError("workspace.repository_graph must be a non-empty path")
+    hierarchical = data["workspace"].get("hierarchical_retrieval", {})
+    if not isinstance(hierarchical, dict):
+        raise ValueError("workspace.hierarchical_retrieval must be an object")
+    if not isinstance(hierarchical.get("enabled", True), bool):
+        raise ValueError("workspace.hierarchical_retrieval.enabled must be boolean")
+    _positive_int(
+        hierarchical.get("max_primary_repositories", 2),
+        "workspace.hierarchical_retrieval.max_primary_repositories",
+    )
+    _nonnegative_int(
+        hierarchical.get("max_graph_expansions", 2),
+        "workspace.hierarchical_retrieval.max_graph_expansions",
+    )
+    relationships = _string_list(
+        hierarchical.get(
+            "relationships",
+            ["depends_on", "publishes_api", "consumes_schema", "deploys"],
+        ),
+        "workspace.hierarchical_retrieval.relationships",
+    )
+    allowed_relationships = {
+        "depends_on",
+        "publishes_api",
+        "consumes_schema",
+        "deploys",
+    }
+    if not set(relationships).issubset(allowed_relationships):
+        raise ValueError(
+            "workspace.hierarchical_retrieval.relationships contains an unsupported relationship"
+        )
     discovery = data["workspace"].get(
         "discovery",
         {
