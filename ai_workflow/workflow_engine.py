@@ -42,6 +42,7 @@ from .retriever_plugins import configured_retrievers, run_retriever_result as de
 from .run_journal import write_run_journal
 from .semantic import semantic_result as default_semantic_provider
 from .scip import scip_context as default_scip_provider
+from .task_retrieval import TaskRetrievalPolicy, task_retrieval_policy
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
 from .workspace_state import workspace_fingerprint
@@ -144,6 +145,7 @@ def _hybrid_rank(
     specialist: list[ContextItem],
     limit: int,
     config: dict,
+    task_policy: TaskRetrievalPolicy | None = None,
 ) -> list[ContextItem]:
     candidates = [_provenance(item) for item in [*base, *specialist]]
     if not candidates:
@@ -151,6 +153,7 @@ def _hybrid_rank(
 
     policy = _algorithm_policy(config)
     mode = policy["hybrid_ranker"]
+    adaptive_mode = mode == "adaptive"
     if mode == "adaptive" and not specialist:
         return _dedupe_ranked(candidates)
     if mode == "adaptive":
@@ -178,10 +181,20 @@ def _hybrid_rank(
             key=lambda item: -item.score,
         )
     )
+    fusion_weights = (
+        [
+            task_policy.source_weight,
+            task_policy.lexical_weight,
+            task_policy.specialist_weight,
+        ]
+        if task_policy is not None
+        else None
+    )
     fused = reciprocal_rank_fusion(
         [source_rank, lexical_rank, specialist_rank],
         key=lambda item: item.dedupe_key,
         k=int(policy["rrf_k"]),
+        weights=fusion_weights,
     )
     fused_items = [item for _, item in fused]
     fused_scores = [score for score, _ in fused]
@@ -194,7 +207,11 @@ def _hybrid_rank(
         tokenize(query),
         scorer.docs,
         fused_scores,
-        lambda_param=float(policy["mmr_lambda"]),
+        lambda_param=(
+            task_policy.mmr_lambda
+            if adaptive_mode and task_policy is not None
+            else float(policy["mmr_lambda"])
+        ),
         max_items=min(limit, len(fused_items)),
     )
 
@@ -375,6 +392,11 @@ class WorkflowEngine:
             symbol=symbol,
             endpoint=endpoint,
         )
+        task_policy = task_retrieval_policy(
+            query,
+            plan,
+            changed_files=changed,
+        )
         roots = workspace_roots(root, config)
         max_roots = max(
             1,
@@ -414,6 +436,7 @@ class WorkflowEngine:
         )
         algorithm_policy = _algorithm_policy(effective_config)
         policy_identity["algorithm_policy"] = dict(algorithm_policy)
+        policy_identity["task_retrieval_policy"] = task_policy.to_dict()
         trace = RetrievalTrace(
             query,
             decision.lane.value,
@@ -775,6 +798,7 @@ class WorkflowEngine:
             specialist_items,
             limit,
             effective_config,
+            task_policy,
         )
         suff = evaluate_sufficiency(
             query,
@@ -886,6 +910,7 @@ class WorkflowEngine:
             "retrieval_intent": plan.intent.value,
             "retrieval_reason": plan.reason,
             "algorithm_policy": algorithm_policy,
+            "task_retrieval_policy": task_policy.to_dict(),
             "policy_identity": policy_identity,
             "workspace_roots": [str(path) for path in roots],
             "repository_routing": routing_plan.to_dict(),
