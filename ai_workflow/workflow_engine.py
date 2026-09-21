@@ -26,6 +26,7 @@ from .evidence import (
 )
 from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_rank_fusion, tokenize
 from .models import ContextItem, Lane, RouteDecision
+from .multi_repo_retrieval import plan_repository_retrieval
 from .orchestration import build_orchestration_contract
 from .provenance import config_digest
 from .providers import ProviderStatus
@@ -420,7 +421,15 @@ class WorkflowEngine:
             1,
             int(((config.get("workspace") or {}).get("max_roots", 4))),
         )
-        selected_roots = roots[:max_roots]
+        routing_plan = plan_repository_retrieval(
+            Path(root).resolve(),
+            roots[:max_roots],
+            query,
+            changed,
+            config,
+        )
+        selected_routes = list(routing_plan.repositories)
+        selected_roots = [route.root for route in selected_routes]
         base_calls: list[ScheduledCall] = []
         workspace_root = Path(root).resolve()
         identity_roots = list(
@@ -474,11 +483,19 @@ class WorkflowEngine:
         base_items: list[ContextItem] = []
         provider_errors: dict[str, dict] = {}
         deadline_labels: list[str] = []
-        for outcome, candidate_root in zip(base_outcomes, selected_roots, strict=True):
+        for outcome, route in zip(base_outcomes, selected_routes, strict=True):
+            candidate_root = route.root
             trace.stage_latency_ms[outcome.label] = round(outcome.latency_ms, 2)
             if outcome.ok and isinstance(outcome.value, list):
                 trace.candidates[outcome.label] = len(outcome.value)
-                base_items.extend(_provenance(item, candidate_root) for item in outcome.value)
+                for item in outcome.value:
+                    routed = _provenance(item, candidate_root)
+                    routed.metadata["repository_tier"] = route.tier
+                    routed.metadata["repository_prior"] = route.prior
+                    routed.metadata["repository_relationship"] = route.relationship
+                    routed.metadata["repository_id"] = route.repository_id
+                    routed.score *= route.prior
+                    base_items.append(routed)
             else:
                 trace.candidates[outcome.label] = 0
                 provider_errors[outcome.label] = _scheduler_error(outcome)
@@ -844,6 +861,7 @@ class WorkflowEngine:
             "algorithm_policy": algorithm_policy,
             "policy_identity": policy_identity,
             "workspace_roots": [str(path) for path in roots],
+            "repository_routing": routing_plan.to_dict(),
             "workspace_state": snapshot,
             "graph_state": graph_state,
             "evidence_state": state,
