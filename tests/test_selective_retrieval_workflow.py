@@ -52,12 +52,18 @@ class SelectiveRetrievalWorkflowTests(unittest.TestCase):
         )
         self.assertFalse(diagnostics["selective_retrieval"]["accept"])
         self.assertEqual(diagnostics["evidence_state"], "abstain")
+        self.assertTrue(
+            diagnostics["orchestration"]["complexity_vector"]["evidence_gap"]
+        )
 
     def test_disabled_gate_preserves_legacy_evidence_state(self):
         _, diagnostics = self._run(enabled=False)
         self.assertFalse(diagnostics["selective_retrieval"]["accept"])
         self.assertFalse(diagnostics["selective_retrieval"]["enabled"])
         self.assertEqual(diagnostics["evidence_state"], "sufficient")
+        self.assertFalse(
+            diagnostics["orchestration"]["complexity_vector"]["evidence_gap"]
+        )
 
 
 if __name__ == "__main__":
