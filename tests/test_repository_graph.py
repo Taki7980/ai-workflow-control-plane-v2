@@ -14,7 +14,6 @@ from ai_workflow.repository_graph import (
 from ai_workflow.repository_registry import (
     discover_repositories,
     registry_payload,
-    repository_id,
 )
 
 
