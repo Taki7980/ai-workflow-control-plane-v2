@@ -119,11 +119,7 @@ def _changed_matches(
     if not changed_files:
         return False
     if repository_root == control_root:
-        nested_prefixes = []
-        return any(
-            not any(path.startswith(prefix) for prefix in nested_prefixes)
-            for path in changed_files
-        )
+        return bool(changed_files)
     prefix = relative_path.rstrip("/") + "/"
     return any(path == relative_path or path.startswith(prefix) for path in changed_files)
 
@@ -232,12 +228,18 @@ def plan_repository_retrieval(
                 direction = "incoming"
             else:
                 continue
-            root = root_for_id.get(neighbor)
-            if root is None or root in seen_roots:
+            neighbor_root = root_for_id.get(neighbor)
+            if neighbor_root is None or neighbor_root in seen_roots:
                 continue
             prior = _DEFAULT_RELATION_PRIORS[edge.relationship]
             candidates.append(
-                (-prior, edge.edge_id, root, anchor, f"{edge.relationship.value}:{direction}")
+                (
+                    -prior,
+                    edge.edge_id,
+                    neighbor_root,
+                    anchor,
+                    f"{edge.relationship.value}:{direction}",
+                )
             )
 
         for neg_prior, _edge_id, root, anchor, relation in sorted(candidates):
