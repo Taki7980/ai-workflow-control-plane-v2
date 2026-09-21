@@ -98,16 +98,25 @@ def reciprocal_rank_fusion(
     rankings: List[List[Any]],
     key: Callable[[Any], str],
     k: int = 60,
+    weights: List[float] | None = None,
 ) -> List[tuple[float, Any]]:
     """Fuse ranked lists without assuming their scores share a scale."""
     if k <= 0:
         raise ValueError("k must be positive")
+    if weights is not None:
+        if len(weights) != len(rankings):
+            raise ValueError("weights must match rankings")
+        if any(weight < 0 for weight in weights):
+            raise ValueError("weights must be non-negative")
+    effective_weights = weights or [1.0] * len(rankings)
 
     scores: Dict[str, float] = {}
     items: Dict[str, Any] = {}
     first_seen: Dict[str, int] = {}
     seen_count = 0
-    for ranking in rankings:
+    for ranking, weight in zip(rankings, effective_weights, strict=True):
+        if weight == 0:
+            continue
         seen_in_ranking: Set[str] = set()
         for rank, item in enumerate(ranking, 1):
             item_key = key(item)
@@ -118,7 +127,7 @@ def reciprocal_rank_fusion(
                 first_seen[item_key] = seen_count
                 seen_count += 1
                 items[item_key] = item
-            scores[item_key] = scores.get(item_key, 0.0) + 1.0 / (k + rank)
+            scores[item_key] = scores.get(item_key, 0.0) + weight / (k + rank)
 
     ordered = sorted(scores, key=lambda item_key: (-scores[item_key], first_seen[item_key]))
     return [(scores[item_key], items[item_key]) for item_key in ordered]
