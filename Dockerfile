@@ -29,7 +29,19 @@ RUN rm -f /etc/apt/sources.list \
     && useradd --no-log-init --create-home --uid 10001 aiworkflow
 COPY --from=build /src/dist/*.whl /tmp/
 RUN python -m pip install --no-cache-dir --no-deps /tmp/*.whl \
-    && rm -f /tmp/*.whl
+    && python -m pip uninstall -y msgpack setuptools \
+    && rm -rf \
+        /usr/local/lib/python3.14/site-packages/pip \
+        /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+        /usr/local/lib/python3.14/site-packages/msgpack \
+        /usr/local/lib/python3.14/site-packages/msgpack-*.dist-info \
+        /usr/local/lib/python3.14/site-packages/setuptools \
+        /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info \
+        /usr/local/lib/python3.14/ensurepip \
+        /usr/local/bin/pip \
+        /usr/local/bin/pip3 \
+        /usr/local/bin/pip3.14 \
+        /tmp/*.whl
 USER aiworkflow
 WORKDIR /workspace
 ENTRYPOINT ["ai-workflow"]
