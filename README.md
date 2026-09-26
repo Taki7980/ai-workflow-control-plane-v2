@@ -2,7 +2,7 @@
 
 A dependency-free, agent-agnostic control plane for AI-assisted software development. It coordinates **Superpowers** for execution methodology and **Code Review Graph (CRG)** for structural code intelligence without reimplementing either system.
 
-## V2.2
+## V2.3
 
 ```text
 Task
@@ -23,7 +23,7 @@ Task
 
 Core invariant: **escalate capability, not context volume.**
 
-## What V2.2 owns
+## What V2.3 owns
 
 - deterministic Answer / Small / Full routing and high-risk escalation;
 - exact / semantic / structural / mixed retrieval routing;
