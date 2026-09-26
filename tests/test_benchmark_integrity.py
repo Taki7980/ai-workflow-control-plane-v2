@@ -7,6 +7,7 @@ from ai_workflow.benchmark_integrity import (
     analyze_partition_integrity,
     canonical_document_sha256,
 )
+from ai_workflow.cli import build_parser
 
 
 def positive_case(
@@ -208,6 +209,37 @@ class BenchmarkIntegrityTests(unittest.TestCase):
         self.assertFalse(report["ready"])
         self.assertIn(
             "invalid_temporal_provenance",
+            {item["code"] for item in report["blockers"]},
+        )
+
+    def test_cli_wires_repeated_integrity_inputs(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "benchmark-corpus",
+                "integrity",
+                "--input",
+                "development.json",
+                "--input",
+                "holdout.json",
+                "--fail-on-signals",
+            ]
+        )
+
+        self.assertEqual(
+            args.input,
+            ["development.json", "holdout.json"],
+        )
+        self.assertTrue(args.fail_on_signals)
+
+    def test_protected_legacy_case_without_stable_id_blocks(self) -> None:
+        documents = clean_partitions()
+        documents[0]["cases"][0]["schema_version"] = 1
+        del documents[0]["cases"][0]["case_id"]
+
+        report = analyze_partition_integrity(documents)
+
+        self.assertIn(
+            "missing_stable_case_id",
             {item["code"] for item in report["blockers"]},
         )
 
