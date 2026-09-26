@@ -297,6 +297,15 @@ The built-in corpus contains exact, semantic, structural, mutation, high-risk, p
 
 The research protocol also supports Agent Retrieval Bench-style `code2test`, `comment2context`, `trace2code`, `edit2ripple`, natural no-gold, and wrong-repository controls. Cases can declare exact `gold_files`, a frozen `base_commit`, and a `repository_path`; results add file-level Precision/Recall/MRR/nDCG/F1, frozen-snapshot status, selective-control accuracy, and wrong-repository contamination diagnostics when repository identity is available.
 
+For modern agentic retrieval evaluation, positive cases may optionally label every
+gold file as `edit_target` or `supporting_context` through
+`file_relevance`, and may list known repository-local decoys in
+`distractor_files`. Reports then add edit-target recall/MRR, supporting-context
+recall, weighted recall, graded nDCG, coverage balance, and known-distractor rate.
+This follows the Level-2 issue-to-edit versus Level-3 broader-context distinction
+used by CORE-Bench while preserving the existing binary metrics for older cases.
+
+
 ```bash
 ai-workflow benchmark \
   --tasks benchmarks/research-protocol-example.json \
