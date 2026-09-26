@@ -35,6 +35,18 @@
       "kind": "paper",
       "url": "https://openreview.net/forum?id=TuvDxubEfE",
       "scope": "benchmark data contamination mitigation limits and evaluation hygiene"
+    },
+    {
+      "id": "core-bench-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2606.11864",
+      "scope": "issue-to-edit localization, broader context retrieval, and repository-local distractor evaluation"
+    },
+    {
+      "id": "contextbench-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2602.05892",
+      "scope": "process-oriented coding-agent context retrieval and explored-versus-utilized context metrics"
     }
   ],
   "capabilities": [
@@ -290,6 +302,36 @@
       ]
     },
     {
+      "id": "role-aware-retrieval-evaluation",
+      "claim": "Research benchmarks can distinguish edit-target files from supporting context and score known repository-local distractors without changing production retrieval behavior.",
+      "scope": "research",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/benchmark_relevance.py",
+        "ai_workflow/benchmark_protocol.py",
+        "ai_workflow/benchmark.py"
+      ],
+      "verification": [
+        "tests/test_benchmark_relevance.py",
+        "tests/test_benchmark_protocol.py"
+      ],
+      "benchmarks": [
+        "benchmarks/research-protocol-example.json"
+      ],
+      "research_refs": [
+        "core-bench-2026",
+        "contextbench-2026",
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Role labels and known distractors are supplied benchmark evidence and are only as reliable as their annotation process.",
+        "Known-distractor rate does not estimate all irrelevant repository content.",
+        "Graded relevance metrics do not prove downstream patch correctness or establish a universal utility function."
+      ]
+    },
+    {
       "id": "adaptive-retrieval-learning",
       "claim": "Low-risk retrieval-policy learning infrastructure can log propensities, evaluate off-policy evidence, and keep learned changes out of production defaults until explicit promotion.",
       "scope": "research",
@@ -437,4 +479,4 @@
       ]
     }
   ]
-}
+}\n
