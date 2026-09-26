@@ -451,17 +451,17 @@ def analyze_partition_integrity(
                 )
             )
 
-    for left_index, left in enumerate(_PROTECTED_SPLITS):
-        for right in _PROTECTED_SPLITS[left_index + 1 :]:
-            overlap = repositories_by_split[left].intersection(
-                repositories_by_split[right]
+    for split_index, split_left in enumerate(_PROTECTED_SPLITS):
+        for split_right in _PROTECTED_SPLITS[split_index + 1 :]:
+            overlap = repositories_by_split[split_left].intersection(
+                repositories_by_split[split_right]
             )
             if overlap:
                 blockers.append(
                     _issue(
                         "cross_split_repository_overlap",
                         "Protected splits must be repository-disjoint.",
-                        splits=[left, right],
+                        splits=[split_left, split_right],
                         repositories=overlap,
                     )
                 )
