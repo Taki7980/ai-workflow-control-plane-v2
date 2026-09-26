@@ -74,7 +74,7 @@ class ModularArchitectureCompatibilityTests(unittest.TestCase):
         )
         self.assertEqual(
             set(_choices(top["benchmark-corpus"])),
-            {"validate", "snapshot"},
+            {"validate", "integrity", "snapshot"},
         )
         self.assertEqual(
             set(_choices(top["learning"])),
