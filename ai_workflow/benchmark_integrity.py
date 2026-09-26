@@ -232,6 +232,16 @@ def analyze_partition_integrity(
                 "repository_id": repository_id,
             }
             case_records.append(record)
+            if role in _PROTECTED_SPLITS and not case_id:
+                blockers.append(
+                    _issue(
+                        "missing_stable_case_id",
+                        "Protected benchmark case requires a stable case_id.",
+                        corpora=[corpus_id],
+                        splits=[role],
+                        repositories=[repository_id],
+                    )
+                )
             case_ids[case_id].append(record)
             task_fingerprints[task_fingerprint(case)].append(record)
             source_fingerprints[source_instance_fingerprint(case)].append(record)
