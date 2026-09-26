@@ -23,6 +23,18 @@
       "kind": "specification",
       "url": "https://slsa.dev/spec/v1.2/provenance",
       "scope": "provenance and verifiable build/evidence identity"
+    },
+    {
+      "id": "swe-bench-pro-2026",
+      "kind": "paper",
+      "url": "https://openreview.net/forum?id=9R2iUHhVfr",
+      "scope": "public/private repository partitions for coding-agent evaluation integrity"
+    },
+    {
+      "id": "benchmark-contamination-icml-2025",
+      "kind": "paper",
+      "url": "https://openreview.net/forum?id=TuvDxubEfE",
+      "scope": "benchmark data contamination mitigation limits and evaluation hygiene"
     }
   ],
   "capabilities": [
@@ -248,6 +260,33 @@
       ],
       "limitations": [
         "The bundled corpus is not claimed to be publication-scale evidence; external/human-labelled corpus expansion remains required."
+      ]
+    },
+    {
+      "id": "benchmark-partition-integrity",
+      "claim": "Benchmark-v2 corpora can be cross-validated for repository-disjoint development/calibration/holdout partitions, duplicate tasks/source instances, temporal provenance, and visible prompt leakage signals.",
+      "scope": "research",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/benchmark_integrity.py",
+        "ai_workflow/commands/evaluation.py",
+        "ai_workflow/commands/parser.py"
+      ],
+      "verification": [
+        "tests/test_benchmark_integrity.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "agent-retrieval-bench-2026",
+        "swe-bench-pro-2026",
+        "benchmark-contamination-icml-2025"
+      ],
+      "limitations": [
+        "Repository/task/source isolation cannot prove whether proprietary models saw benchmark content during pretraining.",
+        "Gold-file and repository names in task text are leakage signals rather than unconditional failures because real issues can legitimately contain those hints.",
+        "Temporal metadata supports contamination analysis but does not establish undocumented model training cutoffs."
       ]
     },
     {

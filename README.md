@@ -268,11 +268,18 @@ Author and validate research data with:
 ai-workflow benchmark-corpus snapshot --repository . --strict
 ai-workflow benchmark-corpus validate --input corpus-v2.json
 ai-workflow benchmark-corpus validate --input corpus-v2.json --require-ready
+ai-workflow benchmark-corpus integrity \
+  --input development.json \
+  --input calibration.json \
+  --input holdout.json
 ```
 
 Corpus-v2 documents can be passed directly to `ai-workflow benchmark`. Strict
 frozen execution now requires the expected Git HEAD **and** a clean worktree; v2
-research cases additionally bind to a tracked-tree SHA-256 manifest.
+research cases additionally bind to a tracked-tree SHA-256 manifest. The integrity
+command adds repository-disjoint development/calibration/holdout checks, cross-split
+task/source deduplication, temporal-provenance signals, and deterministic corpus
+digests without claiming to prove model pretraining contamination.
 
 Span-labelled cases report span Precision/Recall/F1, line precision/recall, first
 gold rank, and gold-line yield under optional fixed line budgets. The bundled

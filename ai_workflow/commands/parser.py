@@ -19,6 +19,7 @@ from .evaluation import (
     cmd_benchmark_ablate,
     cmd_benchmark_algorithms,
     cmd_benchmark_calibrate,
+    cmd_benchmark_corpus_integrity,
     cmd_benchmark_corpus_snapshot,
     cmd_benchmark_corpus_validate,
     cmd_benchmark_intervene,
@@ -204,6 +205,23 @@ def build_parser():
         help="exit nonzero unless the corpus clears the research-scale floor",
     )
     bc.set_defaults(func=cmd_benchmark_corpus_validate)
+
+    bc = bcsp.add_parser(
+        "integrity",
+        help="check cross-corpus split isolation and leakage signals",
+    )
+    bc.add_argument(
+        "--input",
+        action="append",
+        required=True,
+        help="corpus-v2 JSON file; repeat for multiple partitions",
+    )
+    bc.add_argument(
+        "--fail-on-signals",
+        action="store_true",
+        help="also exit nonzero for non-fatal leakage signals",
+    )
+    bc.set_defaults(func=cmd_benchmark_corpus_integrity)
 
     bc = bcsp.add_parser(
         "snapshot",

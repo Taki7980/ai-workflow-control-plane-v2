@@ -5,6 +5,7 @@ from ..benchmark_corpus import (
     corpus_summary,
     load_corpus_document,
 )
+from ..benchmark_integrity import analyze_partition_integrity
 from ..evaluation import (
     ALGORITHM_PROFILE_ORDER,
     PROFILE_ORDER,
@@ -31,6 +32,19 @@ def cmd_benchmark_corpus_validate(args):
     _json(summary)
     if args.require_ready and not summary["publication_readiness"]["ready"]:
         raise SystemExit(1)
+
+def cmd_benchmark_corpus_integrity(args):
+    documents = [
+        load_corpus_document(Path(path))
+        for path in args.input
+    ]
+    report = analyze_partition_integrity(documents)
+    _json(report)
+    if not report["ready"]:
+        raise SystemExit(1)
+    if args.fail_on_signals and report["leakage_signals"]:
+        raise SystemExit(1)
+
 
 def cmd_benchmark_corpus_snapshot(args):
     root = _root(args)
