@@ -78,6 +78,59 @@ class BenchmarkProtocolTests(unittest.TestCase):
         self.assertEqual(metrics["contamination_count"], 1)
         self.assertEqual(metrics["identity_coverage"], 1.0)
 
+    def test_file_relevance_requires_complete_gold_coverage(self):
+        case = {
+            "task": "fix handler",
+            "gold_files": ["src/a.py", "src/b.py"],
+            "file_relevance": [
+                {"path": "src/a.py", "role": "edit_target"},
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "label every gold_file"):
+            validate_benchmark_cases([case])
+
+    def test_file_relevance_rejects_unknown_role(self):
+        case = {
+            "task": "fix handler",
+            "gold_files": ["src/a.py"],
+            "file_relevance": [
+                {"path": "src/a.py", "role": "maybe_relevant"},
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "role must be one of"):
+            validate_benchmark_cases([case])
+
+    def test_distractor_files_must_be_disjoint_from_gold(self):
+        case = {
+            "task": "fix handler",
+            "gold_files": ["src/a.py"],
+            "file_relevance": [
+                {"path": "src/a.py", "role": "edit_target"},
+            ],
+            "distractor_files": ["src/a.py"],
+        }
+
+        with self.assertRaisesRegex(ValueError, "disjoint"):
+            validate_benchmark_cases([case])
+
+    def test_valid_role_labels_and_distractors_are_backward_compatible(self):
+        case = {
+            "task": "fix handler",
+            "gold_files": ["src/a.py", "tests/test_a.py"],
+            "file_relevance": [
+                {"path": "src/a.py", "role": "edit_target"},
+                {
+                    "path": "tests/test_a.py",
+                    "role": "supporting_context",
+                },
+            ],
+            "distractor_files": ["src/legacy_a.py"],
+        }
+
+        self.assertEqual(validate_benchmark_cases([case]), [case])
+
     def test_research_protocol_requires_gold_for_positive_tasks(self):
         with self.assertRaisesRegex(ValueError, "requires gold_files"):
             validate_benchmark_cases(
