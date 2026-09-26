@@ -6,9 +6,9 @@
     "linux_amd64_digest": "sha256:3103efd3bcfbdba49a003fb7ffa453047a4e59d432236ca4cca37e8079fb165e"
   },
   "python_base": {
-    "ref": "python:3.14.6-slim-trixie",
-    "index_digest": "sha256:7bec7ddcddeff7975d6ba9b4be7dd6f6b2f55e7491539145e2978f7f97ce9144",
-    "linux_amd64_digest": "sha256:b921fe7e7522f828d45197a47656ec465a9b15689b27fa8e1fba2864fca5b967"
+    "ref": "python:3.14.7-slim-trixie",
+    "index_digest": "sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d",
+    "linux_amd64_digest": "sha256:7bf6c3111fe094f8ee1a1cbcdc63c4cfb345b0e3df42d5aa9a90b3b4b022ab6d"
   },
   "uv_image": {
     "ref": "ghcr.io/astral-sh/uv:0.12.19",
