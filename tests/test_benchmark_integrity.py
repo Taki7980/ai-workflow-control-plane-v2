@@ -194,11 +194,11 @@ class BenchmarkIntegrityTests(unittest.TestCase):
 
     def test_near_duplicate_task_is_visible_signal(self) -> None:
         documents = clean_partitions()
-        documents[2]["cases"][0]["task"] = (
-            "Where is request validation handled in the application?"
-        )
         documents[0]["cases"][0]["task"] = (
             "Where is request validation handled in this application?"
+        )
+        documents[2]["cases"][0]["task"] = (
+            "Where is request validation handled in this application today?"
         )
 
         report = analyze_partition_integrity(documents)
