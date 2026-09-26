@@ -57,7 +57,7 @@ get_review_context_tool
 
 The exact plan is bounded by `execution.orchestration_budget.max_crg_calls` and graph depth. If CRG is unavailable, the workflow falls back to bounded source/semantic retrieval.
 
-**Superpowers = software-engineering process.** When detected, V2.2 emits an ordered skill contract rather than duplicating Superpowers internals:
+**Superpowers = software-engineering process.** When detected, V2.3 emits an ordered skill contract rather than duplicating Superpowers internals:
 
 | Task | Superpowers contract |
 |---|---|
@@ -81,7 +81,7 @@ A caller should not begin mutation while `EVIDENCE_STATE=requires_exploration`.
 
 ## Budgeted context selection
 
-V2.2 treats context assembly as a budgeted coverage problem rather than blindly truncating the top-ranked list.
+V2.3 treats context assembly as a budgeted coverage problem rather than blindly truncating the top-ranked list.
 
 For candidate relevance `r_i` and code-aware token sets `T_i`:
 
