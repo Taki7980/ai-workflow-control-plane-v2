@@ -97,21 +97,30 @@ sandbox, replay verification, SQLite WAL mirroring, and release automation.
 ## CI-discovered baseline drift repair
 
 The first exact-head security run exposed a pre-existing reproducibility drift on
-`main`: Dependabot had updated the Dockerfile to
-`python:3.14.6-slim-trixie` and `ghcr.io/astral-sh/uv:0.12.19`, while the
-reviewed container input manifest, setup-uv workflow pins, and hermetic tests still
-described the older Python 3.12.14 / uv 0.12.14 inputs.
+`main`: Dependabot had updated only the Dockerfile while the reviewed container
+input manifest, setup-uv workflow pins, and hermetic tests still described older
+inputs.
 
-The PR repairs the existing contract rather than weakening the gate:
+The first repair synchronized those contracts to the then-current Dockerfile. The
+next exact-head container scan correctly exposed a second problem: the pinned
+`python:3.14.6-slim-trixie` base contained fixable HIGH-severity Debian
+vulnerabilities, including OpenSSL and util-linux findings. The scan was not
+suppressed and no CVE ignore was added.
 
-- Python index digest: `sha256:7bec7ddcddeff7975d6ba9b4be7dd6f6b2f55e7491539145e2978f7f97ce9144`
-- Python linux/amd64 manifest: `sha256:b921fe7e7522f828d45197a47656ec465a9b15689b27fa8e1fba2864fca5b967`
+PR-27 therefore upgrades the base to the current official Python 3.14.7 image and
+records the immutable registry identities resolved from Docker Hub:
+
+- Python ref: `python:3.14.7-slim-trixie`
+- Python index digest: `sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d`
+- Python linux/amd64 manifest: `sha256:7bf6c3111fe094f8ee1a1cbcdc63c4cfb345b0e3df42d5aa9a90b3b4b022ab6d`
+- uv ref: `ghcr.io/astral-sh/uv:0.12.19`
 - uv index digest: `sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424`
 - uv linux/amd64 manifest: `sha256:d46db4c7b7f2e75ff80aeef95da4c2c6ff1ad399c13ab85067db4430b7c3b9c3`
 
-The Python registry values were resolved from Docker Hub's current tag metadata.
-The uv values were verified against the official GitHub Container Registry package
-page. Workflow setup-uv inputs are synchronized to uv 0.12.19 as well.
+The Python 3.14.7 tag was current on Docker Hub at the time of this audit and already
+matches the repository's Python 3.14.7 compatibility jobs. The existing Trivy gate
+remains authoritative: the replacement is accepted only if the final-head container
+scan passes without weakening severity, fixability, or exit-code policy.
 
 ## Non-goals
 
