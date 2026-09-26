@@ -71,19 +71,14 @@ def _normalized_task(value: str) -> str:
     return " ".join(tokens)
 
 
-def _task_shingles(value: str, width: int = 3) -> set[tuple[str, ...]]:
-    tokens = _normalized_task(value).split()
-    if len(tokens) < max(width, 6):
-        return set()
-    return {
-        tuple(tokens[index : index + width])
-        for index in range(len(tokens) - width + 1)
-    }
+def _task_token_set(value: str) -> set[str]:
+    tokens = set(_normalized_task(value).split())
+    return tokens if len(tokens) >= 6 else set()
 
 
 def _jaccard(
-    left: set[tuple[str, ...]],
-    right: set[tuple[str, ...]],
+    left: set[str],
+    right: set[str],
 ) -> float:
     if not left or not right:
         return 0.0
@@ -413,10 +408,10 @@ def analyze_partition_integrity(
             if left["task_fingerprint"] == right["task_fingerprint"]:
                 continue
             similarity = _jaccard(
-                _task_shingles(left["task"]),
-                _task_shingles(right["task"]),
+                _task_token_set(left["task"]),
+                _task_token_set(right["task"]),
             )
-            if similarity >= 0.90:
+            if similarity >= 0.85:
                 signals.append(
                     _issue(
                         "cross_split_near_duplicate_task",
