@@ -179,7 +179,7 @@ Actual corpus expansion remains a reproducible data-collection/annotation proces
 - The bundled legacy regression set is still self-repository and small.
 - Real natural no-gold labels still need upstream/human provenance.
 - Span gold from external corpora has not yet been materialized in this repository.
-- Repository-group and chronological train/calibration/test splits belong to Stage 12.
+- Repository-group and chronological train/calibration/test splits were deferred here; repository-disjoint partition integrity and temporal-provenance signals were added on 2026-09-27 in `docs/research/2026-09-27-pr-28-benchmark-integrity.md`.
 - Multi-repository hierarchical retrieval quality is Stage 10.
 - Line-level evaluation depends on retrievers emitting usable span metadata.
 
