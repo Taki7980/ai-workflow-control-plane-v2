@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         summary = load_and_validate_manifest(manifest, root=root)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"Capability evidence: FAILED: {exc}", file=sys.stderr)
         return 1
 
