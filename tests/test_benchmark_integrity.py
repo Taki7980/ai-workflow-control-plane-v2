@@ -47,7 +47,7 @@ def positive_case(
 
 
 def document(corpus_id: str, split: str, cases: list[dict]) -> dict:
-    return {
+    value = {
         "schema_version": 2,
         "corpus_id": corpus_id,
         "source": {
@@ -58,6 +58,9 @@ def document(corpus_id: str, split: str, cases: list[dict]) -> dict:
         "split": split,
         "cases": cases,
     }
+    if split == "holdout":
+        value["history_isolation"] = "git_metadata_removed"
+    return value
 
 
 def clean_partitions() -> list[dict]:
@@ -188,6 +191,33 @@ class BenchmarkIntegrityTests(unittest.TestCase):
 
         self.assertIn("gold_path_exposed_in_task", codes)
         self.assertIn("repository_identity_exposed_in_task", codes)
+
+    def test_near_duplicate_task_is_visible_signal(self) -> None:
+        documents = clean_partitions()
+        documents[2]["cases"][0]["task"] = (
+            "Where is request validation handled in the application?"
+        )
+        documents[0]["cases"][0]["task"] = (
+            "Where is request validation handled in this application?"
+        )
+
+        report = analyze_partition_integrity(documents)
+
+        self.assertIn(
+            "cross_split_near_duplicate_task",
+            {item["code"] for item in report["leakage_signals"]},
+        )
+
+    def test_missing_holdout_history_isolation_is_visible_signal(self) -> None:
+        documents = clean_partitions()
+        del documents[2]["history_isolation"]
+
+        report = analyze_partition_integrity(documents)
+
+        self.assertIn(
+            "holdout_history_isolation_unverified",
+            {item["code"] for item in report["leakage_signals"]},
+        )
 
     def test_missing_temporal_provenance_is_visible_signal(self) -> None:
         documents = clean_partitions()
