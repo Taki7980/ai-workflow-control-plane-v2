@@ -39,11 +39,11 @@ def role_aware_file_metrics(
     ranked_files: list[str] = []
     seen: set[str] = set()
     for item in items:
-        path = context_item_file(item)
-        if not path or path in seen:
+        item_path = context_item_file(item)
+        if not item_path or item_path in seen:
             continue
-        seen.add(path)
-        ranked_files.append(path)
+        seen.add(item_path)
+        ranked_files.append(item_path)
         if len(ranked_files) >= cutoff:
             break
 
