@@ -17,6 +17,7 @@ from .benchmark_protocol import (
     snapshot_status,
     validate_benchmark_cases,
 )
+from .benchmark_relevance import role_aware_file_metrics
 from .benchmark_spans import span_retrieval_metrics
 from .benchmark_trajectory import load_trajectory_events, trajectory_metrics
 from .budget import budget_for
@@ -87,6 +88,11 @@ def _group_summary(group: list[dict]) -> dict:
     file_rows = [r["file_retrieval"] for r in group if "file_retrieval" in r]
     span_rows = [r["span_retrieval"] for r in group if "span_retrieval" in r]
     trajectory_rows = [r["trajectory"] for r in group if "trajectory" in r]
+    role_rows = [
+        r["role_aware_retrieval"]
+        for r in group
+        if "role_aware_retrieval" in r
+    ]
     return {
         "cases": len(group),
         "lane_accuracy": _accuracy(group, "lane_correct"),
@@ -137,6 +143,23 @@ def _group_summary(group: list[dict]) -> dict:
         "mean_duplicate_exploration_rate": _mean(
             trajectory_rows, "duplicate_exploration_rate"
         ),
+        "mean_edit_target_recall_at_k": _mean(
+            role_rows, "edit_target_recall_at_k"
+        ),
+        "mean_supporting_context_recall_at_k": _mean(
+            role_rows, "supporting_context_recall_at_k"
+        ),
+        "mean_edit_target_mrr": _mean(role_rows, "edit_target_mrr"),
+        "mean_weighted_recall_at_k": _mean(
+            role_rows, "weighted_recall_at_k"
+        ),
+        "mean_graded_ndcg_at_k": _mean(
+            role_rows, "graded_ndcg_at_k"
+        ),
+        "mean_known_distractor_rate_at_k": _mean(
+            role_rows, "known_distractor_rate_at_k"
+        ),
+        "mean_coverage_balance": _mean(role_rows, "coverage_balance"),
     }
 
 
@@ -293,6 +316,15 @@ def run_benchmark(
             )
             row["file_retrieval"] = file_metrics
 
+        role_metrics = role_aware_file_metrics(
+            items,
+            case.get("file_relevance") or [],
+            case.get("distractor_files") or [],
+            retrieval_k,
+        )
+        if role_metrics:
+            row["role_aware_retrieval"] = role_metrics
+
         span_metrics = span_retrieval_metrics(
             items,
             case.get("gold_spans") or [],
@@ -337,6 +369,11 @@ def run_benchmark(
     file_rows = [r["file_retrieval"] for r in rows if "file_retrieval" in r]
     span_rows = [r["span_retrieval"] for r in rows if "span_retrieval" in r]
     trajectory_rows = [r["trajectory"] for r in rows if "trajectory" in r]
+    role_rows = [
+        r["role_aware_retrieval"]
+        for r in rows
+        if "role_aware_retrieval" in r
+    ]
     frozen_rows = [r for r in rows if r["snapshot"]["match"] is not None]
 
     by_query_groups = defaultdict(list)
@@ -368,6 +405,8 @@ def run_benchmark(
                 require_research_protocol
             ),
             "trajectory_utilization_metrics_supported": True,
+            "role_aware_file_relevance_supported": True,
+            "known_distractor_scoring_supported": True,
             "task_types": [
                 "code2test",
                 "comment2context",
@@ -378,8 +417,9 @@ def run_benchmark(
         },
         "warning": (
             "Estimated context tokens are not provider-billed tokens. "
-            "Retrieval metrics measure supplied gold patterns/files/spans and "
-            "do not prove downstream task correctness."
+            "Retrieval metrics measure supplied gold patterns/files/spans, "
+            "optional edit/support roles, and labelled distractors; they do "
+            "not prove downstream task correctness."
         ),
         "providers": providers.to_dict(),
         "cases": rows,
@@ -458,6 +498,27 @@ def run_benchmark(
             ),
             "mean_duplicate_exploration_rate": _mean(
                 trajectory_rows, "duplicate_exploration_rate"
+            ),
+            "mean_edit_target_recall_at_k": _mean(
+                role_rows, "edit_target_recall_at_k"
+            ),
+            "mean_supporting_context_recall_at_k": _mean(
+                role_rows, "supporting_context_recall_at_k"
+            ),
+            "mean_edit_target_mrr": _mean(
+                role_rows, "edit_target_mrr"
+            ),
+            "mean_weighted_recall_at_k": _mean(
+                role_rows, "weighted_recall_at_k"
+            ),
+            "mean_graded_ndcg_at_k": _mean(
+                role_rows, "graded_ndcg_at_k"
+            ),
+            "mean_known_distractor_rate_at_k": _mean(
+                role_rows, "known_distractor_rate_at_k"
+            ),
+            "mean_coverage_balance": _mean(
+                role_rows, "coverage_balance"
             ),
             "frozen_snapshot_match_rate": (
                 round(
