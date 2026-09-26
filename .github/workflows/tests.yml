@@ -375,6 +375,13 @@ jobs:
                       ],
                       "symbol": "BM25Scorer",
                       "gold_files": ["ai_workflow/math_retrieval.py"],
+                      "file_relevance": [
+                          {
+                              "path": "ai_workflow/math_retrieval.py",
+                              "role": "supporting_context",
+                          }
+                      ],
+                      "distractor_files": ["ai_workflow/benchmark.py"],
                       "gold_spans": [
                           {
                               "path": "ai_workflow/math_retrieval.py",
@@ -413,7 +420,22 @@ jobs:
           assert case["snapshot"]["worktree_clean"] is True
           assert "span_retrieval" in case
           assert case["span_retrieval"]["line_recall"] > 0
+          assert "role_aware_retrieval" in case
+          assert (
+              case["role_aware_retrieval"][
+                  "supporting_context_recall_at_k"
+              ]
+              > 0
+          )
           assert data["research_protocol"]["span_level_gold_supported"] is True
+          assert (
+              data["research_protocol"]["role_aware_file_relevance_supported"]
+              is True
+          )
+          assert (
+              data["research_protocol"]["known_distractor_scoring_supported"]
+              is True
+          )
           assert (
               data["research_protocol"][
                   "persistent_project_knowledge_isolated"
