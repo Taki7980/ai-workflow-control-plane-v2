@@ -122,6 +122,17 @@ matches the repository's Python 3.14.7 compatibility jobs. The existing Trivy ga
 remains authoritative: the replacement is accepted only if the final-head container
 scan passes without weakening severity, fixability, or exit-code policy.
 
+The 3.14.7 base removed the operating-system findings, but the next exact-head scan
+still found two fixable HIGH Python-package findings: `msgpack 1.1.2` and
+`setuptools 70.3.0`. Neither is an AI Workflow runtime dependency. They are packaging
+surface brought into the final Python image. PR-27 therefore keeps build tooling in
+the isolated build stage, installs the dependency-free AI Workflow wheel in the
+runtime stage, and then removes runtime `msgpack`, `setuptools`, installed `pip`,
+and `ensurepip`. A hermetic container contract test makes that reduction explicit.
+
+This does not weaken the scanner or add an exception. The final image must still pass
+the unchanged fixable HIGH/CRITICAL Trivy policy.
+
 ## Non-goals
 
 PR-27 does not:
