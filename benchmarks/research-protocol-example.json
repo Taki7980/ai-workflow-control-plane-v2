@@ -57,7 +57,21 @@
     "base_commit": "7ee86f63f7a4759020b6ca497974d45caf66555e",
     "repository_path": ".",
     "control_type": "positive",
-    "retrieval_k": 8
+    "retrieval_k": 8,
+    "file_relevance": [
+      {
+        "path": "ai_workflow/benchmark.py",
+        "role": "edit_target"
+      },
+      {
+        "path": "ai_workflow/benchmark_regression.py",
+        "role": "supporting_context"
+      },
+      {
+        "path": "tests/test_benchmark_regression_policy.py",
+        "role": "supporting_context"
+      }
+    ]
   },
   {
     "task": "Where is the built-in PostgreSQL vector-index migration for retrieval stored?",
