@@ -1,0 +1,401 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "repository": "Taki7980/ai-workflow-control-plane-v2",
+    "commit": "c5757873bdea2124e6c077fc2ce35a7e4396531c",
+    "date": "2026-09-27"
+  },
+  "research_sources": [
+    {
+      "id": "agent-retrieval-bench-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2607.24882",
+      "scope": "repository retrieval evaluation, frozen snapshots, selective retrieval"
+    },
+    {
+      "id": "openssf-machine-readable-signals-2026",
+      "kind": "guidance",
+      "url": "https://openssf.org/blog/2026/05/29/aligning-on-machine-readable-signals-as-the-foundation-for-due-diligence/",
+      "scope": "machine-readable evidence as transparency signals rather than guarantees"
+    },
+    {
+      "id": "slsa-provenance-v1.2",
+      "kind": "specification",
+      "url": "https://slsa.dev/spec/v1.2/provenance",
+      "scope": "provenance and verifiable build/evidence identity"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "deterministic-safety-routing",
+      "claim": "High-risk mutations are deterministically escalated and cannot be downgraded by retrieval confidence.",
+      "scope": "runtime",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/classifier.py",
+        "ai_workflow/selective_retrieval.py"
+      ],
+      "verification": [
+        "tests/test_classifier.py",
+        "tests/test_selective_retrieval_workflow.py"
+      ],
+      "benchmarks": [
+        "benchmarks/sample-tasks.json"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Routing remains policy/heuristic logic; verification does not prove downstream patch correctness."
+      ]
+    },
+    {
+      "id": "task-conditioned-retrieval-fusion",
+      "claim": "Retrieval ranking can select task-conditioned fusion profiles while preserving deterministic repository and provider authority boundaries.",
+      "scope": "runtime",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/task_retrieval.py",
+        "ai_workflow/math_retrieval.py"
+      ],
+      "verification": [
+        "tests/test_task_retrieval.py",
+        "tests/test_math_retrieval.py"
+      ],
+      "benchmarks": [
+        "ai_workflow/benchmark_algorithm_ablation.py"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Task-profile tests verify policy behavior, not universal superiority across unseen repositories."
+      ]
+    },
+    {
+      "id": "budgeted-context-selection",
+      "claim": "Context selection enforces hard budgets and uses deterministic relevance/coverage selection rather than filling the model context window by default.",
+      "scope": "runtime",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/context_selection.py",
+        "ai_workflow/budget.py"
+      ],
+      "verification": [
+        "tests/test_context_selection.py",
+        "tests/test_budget.py"
+      ],
+      "benchmarks": [
+        "ai_workflow/benchmark_algorithm_ablation.py"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "The selector uses repository-local lexical/structural proxies; efficiency gains require task-specific empirical validation."
+      ]
+    },
+    {
+      "id": "hierarchical-multi-repo-routing",
+      "claim": "Multi-repository retrieval starts from bounded primary repositories and expands only through reviewed repository relationships.",
+      "scope": "runtime",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/repository_graph.py",
+        "ai_workflow/multi_repo_retrieval.py"
+      ],
+      "verification": [
+        "tests/test_repository_graph.py",
+        "tests/test_multi_repo_retrieval.py",
+        "tests/test_workflow_multi_repo_routing.py"
+      ],
+      "benchmarks": [
+        "tests/test_benchmark_multi_repo_isolation.py"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Cross-repository graph quality depends on reviewed relationship data and is not inferred as authority from repository content."
+      ]
+    },
+    {
+      "id": "selective-evidence-gate",
+      "claim": "Read-only queries can abstain and mutation tasks can require exploration when selected repository evidence is missing, stale, conflicting, irrelevant, or outside authorized repository identity.",
+      "scope": "runtime",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/selective_retrieval.py",
+        "ai_workflow/evidence.py"
+      ],
+      "verification": [
+        "tests/test_selective_retrieval.py",
+        "tests/test_selective_retrieval_workflow.py"
+      ],
+      "benchmarks": [
+        "benchmarks/research-protocol-example.json"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Selective thresholds are heuristics and are not represented as calibrated probabilities of correctness."
+      ]
+    },
+    {
+      "id": "untrusted-evidence-capability-boundary",
+      "claim": "Retrieved repository/provider/memory content is data only and cannot grant tool, policy, repository-activation, network, secret, safety-lane, or verification-bypass authority.",
+      "scope": "security",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/evidence.py",
+        "ai_workflow/capability_gate.py"
+      ],
+      "verification": [
+        "tests/test_evidence_envelope.py",
+        "tests/test_capability_gate.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "openssf-machine-readable-signals-2026"
+      ],
+      "limitations": [
+        "The capability gate governs AI Workflow-owned actions; host-level sandbox guarantees depend on the configured runtime and operating system."
+      ]
+    },
+    {
+      "id": "provider-sandbox",
+      "claim": "Command providers run through bounded, validated execution contracts with restricted environment/process behavior and fail-closed output parsing.",
+      "scope": "security",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/provider_runner.py",
+        "ai_workflow/provider_sandbox.py"
+      ],
+      "verification": [
+        "tests/test_provider_security.py",
+        "tests/test_provider_sandbox.py",
+        "tests/test_provider_protocol_hardening.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "openssf-machine-readable-signals-2026"
+      ],
+      "limitations": [
+        "Isolation strength is platform-dependent and does not claim a universal kernel/container sandbox on every host."
+      ]
+    },
+    {
+      "id": "reproducible-run-journal",
+      "claim": "Prepared runs can record immutable policy/workspace/provider identities and verify replay preconditions without persisting raw task text in the run metadata.",
+      "scope": "observability",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/provenance.py",
+        "ai_workflow/run_journal.py"
+      ],
+      "verification": [
+        "tests/test_run_journal.py",
+        "tests/test_final_audit_target.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "slsa-provenance-v1.2",
+        "openssf-machine-readable-signals-2026"
+      ],
+      "limitations": [
+        "Replay verification checks identity/preconditions; it intentionally does not re-execute models, tools, providers, or external systems."
+      ]
+    },
+    {
+      "id": "benchmark-corpus-v2",
+      "claim": "Research evaluation supports frozen repository identity, span-level gold, fixed evidence budgets, control provenance, and explicit publication-readiness blockers.",
+      "scope": "research",
+      "status": "experimental",
+      "evidence_level": "experimental",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/benchmark_corpus.py",
+        "ai_workflow/benchmark_spans.py",
+        "ai_workflow/benchmark_protocol.py"
+      ],
+      "verification": [
+        "tests/test_benchmark_corpus.py",
+        "tests/test_benchmark_spans.py",
+        "tests/test_benchmark_protocol.py"
+      ],
+      "benchmarks": [
+        "benchmarks/research-protocol-example.json"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "The bundled corpus is not claimed to be publication-scale evidence; external/human-labelled corpus expansion remains required."
+      ]
+    },
+    {
+      "id": "adaptive-retrieval-learning",
+      "claim": "Low-risk retrieval-policy learning infrastructure can log propensities, evaluate off-policy evidence, and keep learned changes out of production defaults until explicit promotion.",
+      "scope": "research",
+      "status": "experimental",
+      "evidence_level": "experimental",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/retrieval_learning.py",
+        "ai_workflow/learning_ope.py",
+        "ai_workflow/contextual_policy.py"
+      ],
+      "verification": [
+        "tests/test_retrieval_learning.py",
+        "tests/test_learning_ope.py",
+        "tests/test_contextual_policy.py"
+      ],
+      "benchmarks": [
+        "ai_workflow/benchmark_policy_advisor.py"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Learning is opt-in and evidence remains insufficient to claim broad production improvement across repositories/tasks."
+      ]
+    },
+    {
+      "id": "controlled-policy-deployment",
+      "claim": "Opt-in learned retrieval policies use signed state, bounded canary exposure, guardrails, generation checks, and automatic rollback to the baseline.",
+      "scope": "research",
+      "status": "experimental",
+      "evidence_level": "experimental",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/deployment_state.py",
+        "ai_workflow/deployment_guardrails.py",
+        "ai_workflow/deployment_runtime.py"
+      ],
+      "verification": [
+        "tests/test_deployment_state.py",
+        "tests/test_deployment_guardrails.py",
+        "tests/test_deployment_runtime.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "openssf-machine-readable-signals-2026"
+      ],
+      "limitations": [
+        "Deployment machinery is disabled by default and does not establish that any candidate policy is superior without validated outcome evidence."
+      ]
+    },
+    {
+      "id": "same-host-production-evidence-mirror",
+      "claim": "Canonical learning events can be mirrored to SQLite WAL for same-host querying and reconciled against immutable JSON evidence.",
+      "scope": "observability",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/production_store.py",
+        "ai_workflow/sqlite_runtime.py"
+      ],
+      "verification": [
+        "tests/test_production_store.py",
+        "tests/test_sqlite_runtime.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "openssf-machine-readable-signals-2026"
+      ],
+      "limitations": [
+        "The WAL mirror is explicitly same-host only and is not a distributed consensus or network-filesystem coordination mechanism."
+      ]
+    },
+    {
+      "id": "crg-structural-integration",
+      "claim": "Structural retrieval through Code Review Graph is optional, bounded, and regression-tested against a pinned CRG contract and semantic golden benchmark.",
+      "scope": "integration",
+      "status": "implemented",
+      "evidence_level": "measured",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/code_review_graph.py"
+      ],
+      "verification": [
+        "tests/test_code_review_graph.py",
+        "tests/test_crg_semantic_benchmark.py",
+        ".github/workflows/tests.yml"
+      ],
+      "benchmarks": [
+        "benchmarks/crg-semantic-v1",
+        "scripts/run_crg_semantic_benchmark.py"
+      ],
+      "research_refs": [
+        "agent-retrieval-bench-2026"
+      ],
+      "limitations": [
+        "Measured regression protects the repository's golden cases; it is not evidence that graph retrieval dominates other retrieval families on all task types."
+      ]
+    },
+    {
+      "id": "release-integrity",
+      "claim": "Release workflows use pinned build inputs, cross-platform smoke tests, reproducibility checks, checksums and artifact/container verification paths.",
+      "scope": "distribution",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": false,
+      "implementation": [
+        ".github/workflows/release.yml",
+        "scripts/verify_container_attestations.py",
+        "scripts/verify_release_authorization.py"
+      ],
+      "verification": [
+        "tests/test_release_distribution.py",
+        "tests/test_release_authorization.py",
+        "tests/test_hermetic_python_inputs.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "slsa-provenance-v1.2",
+        "openssf-machine-readable-signals-2026"
+      ],
+      "limitations": [
+        "Repository controls do not prove external PyPI/package-index account configuration or third-party distribution approval state."
+      ]
+    },
+    {
+      "id": "superpowers-orchestration-contract",
+      "claim": "AI Workflow emits a bounded orchestration contract for optional Superpowers execution rather than reimplementing the external methodology.",
+      "scope": "integration",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": false,
+      "implementation": [
+        "ai_workflow/orchestration.py"
+      ],
+      "verification": [
+        "tests/test_orchestration.py",
+        "tests/test_brief_format.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [],
+      "limitations": [
+        "The control plane emits and verifies its contract; it does not claim to control the internals or availability of the external Superpowers implementation."
+      ]
+    }
+  ]
+}

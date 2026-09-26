@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_UV_SHA = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
-UV_VERSION = "0.12.14"
+UV_VERSION = "0.12.19"
 
 
 class HermeticPythonInputTests(unittest.TestCase):
@@ -112,7 +112,7 @@ class HermeticPythonInputTests(unittest.TestCase):
 
         self.assertIn("COPY pyproject.toml uv.lock", dockerfile)
         self.assertIn(
-            "ghcr.io/astral-sh/uv:0.12.14@sha256:",
+            "ghcr.io/astral-sh/uv:0.12.19@sha256:",
             dockerfile,
         )
         self.assertIn("COPY --from=uv /uv /usr/local/bin/uv", dockerfile)

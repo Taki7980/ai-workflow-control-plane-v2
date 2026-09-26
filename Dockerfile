@@ -2,7 +2,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424 AS uv
 
-FROM python:3.14.6-slim-trixie@sha256:7bec7ddcddeff7975d6ba9b4be7dd6f6b2f55e7491539145e2978f7f97ce9144 AS build
+FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS build
 ARG SOURCE_DATE_EPOCH
 WORKDIR /src
 COPY --from=uv /uv /usr/local/bin/uv
@@ -11,7 +11,7 @@ COPY ai_workflow ./ai_workflow
 RUN uv sync --locked --only-group build \
     && uv run --locked --no-sync python -m build --wheel --no-isolation
 
-FROM python:3.14.6-slim-trixie@sha256:7bec7ddcddeff7975d6ba9b4be7dd6f6b2f55e7491539145e2978f7f97ce9144 AS runtime
+FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime
 ARG SOURCE_DATE_EPOCH
 COPY packaging/container/debian.sources /etc/apt/sources.list.d/debian.sources
 COPY packaging/container/runtime-packages.txt /tmp/runtime-packages.txt
@@ -29,7 +29,19 @@ RUN rm -f /etc/apt/sources.list \
     && useradd --no-log-init --create-home --uid 10001 aiworkflow
 COPY --from=build /src/dist/*.whl /tmp/
 RUN python -m pip install --no-cache-dir --no-deps /tmp/*.whl \
-    && rm -f /tmp/*.whl
+    && python -m pip uninstall -y msgpack setuptools \
+    && rm -rf \
+        /usr/local/lib/python3.14/site-packages/pip \
+        /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+        /usr/local/lib/python3.14/site-packages/msgpack \
+        /usr/local/lib/python3.14/site-packages/msgpack-*.dist-info \
+        /usr/local/lib/python3.14/site-packages/setuptools \
+        /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info \
+        /usr/local/lib/python3.14/ensurepip \
+        /usr/local/bin/pip \
+        /usr/local/bin/pip3 \
+        /usr/local/bin/pip3.14 \
+        /tmp/*.whl
 USER aiworkflow
 WORKDIR /workspace
 ENTRYPOINT ["ai-workflow"]

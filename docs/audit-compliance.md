@@ -1,5 +1,9 @@
 # Technical audit compliance matrix
 
+> Historical point-in-time matrix. Current capability claims and their implementation,
+> verification, benchmark, research, default-state, and limitation evidence are tracked in
+> `evidence/capabilities.json` and enforced by `scripts/check_capability_evidence.py`.
+
 This matrix records the implementation status of the research-backed Technical Audit and Improvement Plan as of 2026-09-10. It distinguishes implemented repository controls from external release activation and from recommendations that were explicitly conditional on profiling evidence.
 
 Status meanings: **Complete** means the behavior is implemented and covered by repository verification. **External activation** means the repository path exists but a third-party account or review must still be configured. **Conditional** means the audit itself required evidence before implementation, so adding the feature without that evidence would be contrary to the plan.
