@@ -36,6 +36,11 @@ _TEMPORAL_FIELDS = (
     "observed_at",
 )
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_./:-]+")
+_HISTORY_ISOLATION_VALUES = {
+    "git_metadata_removed",
+    "exported_tree",
+    "sandboxed_no_history",
+}
 
 
 def canonical_document_sha256(document: dict[str, Any]) -> str:
@@ -64,6 +69,26 @@ def split_role(document: dict[str, Any]) -> str | None:
 def _normalized_task(value: str) -> str:
     tokens = _TOKEN_RE.findall(value.casefold())
     return " ".join(tokens)
+
+
+def _task_shingles(value: str, width: int = 3) -> set[tuple[str, ...]]:
+    tokens = _normalized_task(value).split()
+    if len(tokens) < max(width, 6):
+        return set()
+    return {
+        tuple(tokens[index : index + width])
+        for index in range(len(tokens) - width + 1)
+    }
+
+
+def _jaccard(
+    left: set[tuple[str, ...]],
+    right: set[tuple[str, ...]],
+) -> float:
+    if not left or not right:
+        return 0.0
+    union = left | right
+    return len(left & right) / len(union) if union else 0.0
 
 
 def task_fingerprint(case: dict[str, Any]) -> str:
@@ -219,8 +244,29 @@ def analyze_partition_integrity(
                 "split_role": role or "unclassified",
                 "document_sha256": canonical_document_sha256(document),
                 "cases": len(document["cases"]),
+                "history_isolation": str(
+                    document.get("history_isolation", "")
+                ).strip()
+                or None,
             }
         )
+
+        if role == "holdout":
+            history_isolation = str(
+                document.get("history_isolation", "")
+            ).strip()
+            if history_isolation not in _HISTORY_ISOLATION_VALUES:
+                signals.append(
+                    _issue(
+                        "holdout_history_isolation_unverified",
+                        (
+                            "Holdout corpus does not attest that future Git "
+                            "history is unavailable to evaluated agents."
+                        ),
+                        corpora=[corpus_id],
+                        splits=[role],
+                    )
+                )
 
         for case in document["cases"]:
             case_id = str(case.get("case_id", "")).strip()
@@ -230,6 +276,8 @@ def analyze_partition_integrity(
                 "split": role or "unclassified",
                 "case_id": case_id,
                 "repository_id": repository_id,
+                "task": str(case.get("task", "")),
+                "task_fingerprint": task_fingerprint(case),
             }
             case_records.append(record)
             if role in _PROTECTED_SPLITS and not case_id:
@@ -354,6 +402,45 @@ def analyze_partition_integrity(
                 )
             )
 
+    for left_index, left in enumerate(case_records):
+        if left["split"] not in _PROTECTED_SPLITS:
+            continue
+        for right in case_records[left_index + 1 :]:
+            if right["split"] not in _PROTECTED_SPLITS:
+                continue
+            if left["split"] == right["split"]:
+                continue
+            if left["task_fingerprint"] == right["task_fingerprint"]:
+                continue
+            similarity = _jaccard(
+                _task_shingles(left["task"]),
+                _task_shingles(right["task"]),
+            )
+            if similarity >= 0.90:
+                signals.append(
+                    _issue(
+                        "cross_split_near_duplicate_task",
+                        (
+                            "Task wording is highly similar across protected "
+                            "splits."
+                        ),
+                        corpora=[
+                            left["corpus_id"],
+                            right["corpus_id"],
+                        ],
+                        splits=[left["split"], right["split"]],
+                        case_ids=[
+                            left["case_id"],
+                            right["case_id"],
+                        ],
+                        repositories=[
+                            left["repository_id"],
+                            right["repository_id"],
+                        ],
+                    )
+                    | {"similarity": round(similarity, 4)}
+                )
+
     for records in source_fingerprints.values():
         splits = {row["split"] for row in records}
         protected = splits.intersection(_PROTECTED_SPLITS)
@@ -423,6 +510,10 @@ def analyze_partition_integrity(
             (
                 "Temporal provenance coverage supports contamination analysis but "
                 "does not establish a proprietary model's training cutoff."
+            ),
+            (
+                "History-isolation is an attestation in corpus metadata; execution "
+                "environments must still enforce that Git history is inaccessible."
             ),
         ],
     }
