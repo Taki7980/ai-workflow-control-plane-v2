@@ -15,6 +15,7 @@ POSITIVE_TASK_TYPES = frozenset(
     {"code2test", "comment2context", "trace2code", "edit2ripple"}
 )
 CONTROL_TYPES = frozenset({"positive", "natural_no_gold", "wrong_repo"})
+FILE_RELEVANCE_ROLES = frozenset({"edit_target", "supporting_context"})
 _PATH_KEYS = ("file", "path", "relative_path", "file_path")
 _REPOSITORY_KEYS = ("repository_id", "remote_identity", "repository", "repo", "repo_id")
 _GIT_SHA = re.compile(r"^[0-9a-fA-F]{40,64}$")
@@ -27,6 +28,14 @@ def normalize_file_path(value: str) -> str:
         normalized = normalized[2:]
     normalized = re.sub(r"/+", "/", normalized)
     return normalized.strip("/")
+
+
+def _benchmark_relative_path(value: str, *, field: str) -> str:
+    normalized = normalize_file_path(value)
+    path = Path(normalized)
+    if not normalized or path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"{field} must stay inside its repository")
+    return normalized
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
@@ -227,6 +236,73 @@ def validate_benchmark_cases(
                 f"benchmark case {index} gold_files must be a list of paths"
             )
 
+        file_relevance = case.get("file_relevance") or []
+        if not isinstance(file_relevance, list) or not all(
+            isinstance(row, dict) for row in file_relevance
+        ):
+            raise ValueError(
+                f"benchmark case {index} file_relevance must be a list "
+                "of objects"
+            )
+        relevance_paths: list[str] = []
+        for relevance_index, row in enumerate(file_relevance, 1):
+            path = _benchmark_relative_path(
+                str(row.get("path", "")),
+                field=(
+                    f"benchmark case {index} file relevance "
+                    f"{relevance_index} path"
+                ),
+            )
+            role = str(row.get("role", "")).strip()
+            if role not in FILE_RELEVANCE_ROLES:
+                raise ValueError(
+                    f"benchmark case {index} file relevance "
+                    f"{relevance_index} role must be one of "
+                    f"{sorted(FILE_RELEVANCE_ROLES)}"
+                )
+            if path in relevance_paths:
+                raise ValueError(
+                    f"benchmark case {index} file_relevance paths "
+                    "must be unique"
+                )
+            relevance_paths.append(path)
+
+        normalized_gold_files = {
+            normalize_file_path(path) for path in gold_files
+        }
+        if file_relevance and set(relevance_paths) != normalized_gold_files:
+            raise ValueError(
+                f"benchmark case {index} file_relevance must label every "
+                "gold_file exactly once"
+            )
+
+        distractor_files = case.get("distractor_files") or []
+        if not isinstance(distractor_files, list) or not all(
+            isinstance(path, str) and path.strip()
+            for path in distractor_files
+        ):
+            raise ValueError(
+                f"benchmark case {index} distractor_files must be a list "
+                "of paths"
+            )
+        normalized_distractors = [
+            _benchmark_relative_path(
+                path,
+                field=f"benchmark case {index} distractor file",
+            )
+            for path in distractor_files
+        ]
+        if len(set(normalized_distractors)) != len(normalized_distractors):
+            raise ValueError(
+                f"benchmark case {index} distractor_files must be unique"
+            )
+        overlap = normalized_gold_files.intersection(normalized_distractors)
+        if overlap:
+            raise ValueError(
+                f"benchmark case {index} distractor_files must be disjoint "
+                "from gold_files"
+            )
+
         gold_spans = case.get("gold_spans") or []
         if not isinstance(gold_spans, list) or not all(
             isinstance(span, dict) for span in gold_spans
@@ -283,10 +359,15 @@ def validate_benchmark_cases(
                 f"benchmark case {index} schema v2 positive cases "
                 "require gold_spans"
             )
-        if control_type != "positive" and (gold_files or gold_spans):
+        if control_type != "positive" and (
+            gold_files
+            or gold_spans
+            or file_relevance
+            or distractor_files
+        ):
             raise ValueError(
                 f"benchmark case {index} selective controls must not "
-                "define gold files or spans"
+                "define gold files, spans, relevance roles, or distractors"
             )
 
         if schema_version == 2:
