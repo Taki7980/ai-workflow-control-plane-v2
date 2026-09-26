@@ -104,6 +104,8 @@ jobs:
         run: uv run --locked --no-sync python -m compileall -q ai_workflow
       - name: Repository hygiene gate
         run: uv run --locked --no-sync python scripts/check_repository_hygiene.py --root .
+      - name: Capability evidence manifest gate
+        run: uv run --locked --no-sync python scripts/check_capability_evidence.py --root .
       - name: Ruff whole-repository quality gate
         run: uv run --locked --no-sync ruff check ai_workflow tests security_tests scripts
       - name: Mypy whole-package gate
