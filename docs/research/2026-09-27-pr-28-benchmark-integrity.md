@@ -87,7 +87,9 @@ Some facts must be surfaced without pretending they are universally invalid:
 
 - gold file paths/basenames appearing in task text;
 - repository identity appearing in task text;
+- highly similar task wording across protected splits;
 - missing source-event time metadata;
+- holdout data without an attestation that future Git history is inaccessible;
 - an integrity run missing one or more protected split roles;
 - custom split names that cannot be classified.
 
@@ -122,6 +124,11 @@ This PR does **not** claim that:
 
 The gate protects evidence hygiene inside AI Workflow. It cannot observe proprietary
 model training data.
+
+For agent-executed holdouts, corpus metadata can attest `history_isolation` as
+`git_metadata_removed`, `exported_tree`, or `sandboxed_no_history`. This is a
+visible evidence claim, not enforcement by itself; the runner still has to make future
+Git history inaccessible.
 
 ## Acceptance criteria
 
