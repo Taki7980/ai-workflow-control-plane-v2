@@ -74,6 +74,21 @@ class HermeticContainerInputTests(unittest.TestCase):
         }
         self.assertEqual(actual, expected)
 
+    def test_runtime_strips_packaging_toolchain_after_install(self) -> None:
+        dockerfile = self._read("Dockerfile")
+        self.assertIn(
+            "python -m pip uninstall -y msgpack setuptools",
+            dockerfile,
+        )
+        for path in (
+            "/usr/local/lib/python3.14/site-packages/pip",
+            "/usr/local/lib/python3.14/site-packages/msgpack",
+            "/usr/local/lib/python3.14/site-packages/setuptools",
+            "/usr/local/lib/python3.14/ensurepip",
+            "/usr/local/bin/pip3.14",
+        ):
+            self.assertIn(path, dockerfile)
+
     def test_uv_bootstrap_is_an_immutable_oci_material(self) -> None:
         dockerfile = self._read("Dockerfile")
         self.assertIn("COPY --from=uv /uv /usr/local/bin/uv", dockerfile)
