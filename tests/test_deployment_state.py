@@ -1,4 +1,4 @@
-import tempfile
+import threading\nfrom concurrent.futures import ThreadPoolExecutor\nimport tempfile
 import unittest
 from pathlib import Path
 
@@ -194,6 +194,51 @@ class DeploymentStateTests(unittest.TestCase):
 
         self.assertEqual(current["stage"], "canary_1")
         self.assertEqual(current["generation"], 2)
+
+    def test_concurrent_transitions_from_same_generation_serialize(self):
+        key = b"stage7-key"
+        manifest = signed_manifest(key)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "active.json"
+            state = create_deployment_state(
+                root,
+                manifest,
+                passing_shadow(manifest),
+                key,
+                approved_by="release-owner",
+            )
+            write_new_deployment_state(path, state, key)
+            barrier = threading.Barrier(2)
+
+            def attempt(target):
+                barrier.wait()
+                try:
+                    return (
+                        "ok",
+                        update_deployment_state_file(
+                            path,
+                            key,
+                            to_stage=target,
+                            actor="release-owner",
+                            expected_generation=1,
+                        ),
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    return ("error", type(exc).__name__)
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(
+                    pool.map(attempt, ("canary_1", "rolled_back"))
+                )
+            current = load_deployment_state(path)
+
+        self.assertEqual(
+            sum(result[0] == "ok" for result in results),
+            1,
+        )
+        self.assertEqual(current["generation"], 2)
+        self.assertIn(current["stage"], {"canary_1", "rolled_back"})
 
     def test_rollback_is_terminal_for_same_state(self):
         key = b"stage7-key"
