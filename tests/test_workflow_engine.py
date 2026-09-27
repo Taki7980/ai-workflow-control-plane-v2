@@ -698,11 +698,21 @@ class WorkflowEngineTests(unittest.TestCase):
                 "routing",
                 "repository_routing",
                 "retrieval",
+                "ranking",
                 "selection",
                 "orchestration",
                 "authorization",
             ],
         )
+        self.assertTrue(record["repository_state"]["fingerprint"])
+        ranking = next(
+            event["payload"]
+            for event in record["replay_events"]
+            if event["kind"] == "ranking"
+        )
+        self.assertGreaterEqual(ranking["candidate_count"], 1)
+        self.assertEqual(ranking["candidates"][0]["rank"], 1)
+        self.assertTrue(record["journal_digest"].startswith("sha256:"))
         serialized = str(record)
         self.assertNotIn(task_text, serialized)
         self.assertNotIn(evidence_text, serialized)
