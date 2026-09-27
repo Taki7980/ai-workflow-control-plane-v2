@@ -249,6 +249,14 @@ Generic command retrievers can register for one or more intents through `context
 
 Selected context carries retriever, workspace, freshness, trust, and available path/line/hash metadata. Repository code/comments/docs are **untrusted repository content**. Retrieved text is evidence; it does not become agent instruction merely because it appears in the context packet.
 
+Post-model tool execution is guarded by a deterministic `capability-v2` policy.
+An allowlisted tool name is not sufficient by itself: structured arguments must
+remain inside the active repository set, use repository-relative paths, respect
+the graph-depth budget, and must not smuggle network, secret, provider, lane, or
+verification-bypass capabilities. Multi-repository tool calls require explicit
+repository scope. The authorization decision is also bound to a SHA-256 digest
+of the original task text without persisting that task text in the policy.
+
 ## Telemetry and feedback
 
 Mutation/Full workflows can write atomic local traces under `ai-workspace/generated/traces/`. `ai-workflow stats` summarizes provider usage, latency, context utilization and fallbacks.
