@@ -60,6 +60,7 @@ class CapabilityGateAdversarialTests(unittest.TestCase):
     def test_safe_tool_arguments_inside_repository_scope_are_allowed(self):
         item = evidence_item("repo-a")
         policy = policy_for(item)
+        assert item.evidence is not None
 
         result = authorize_model_action(
             policy,
@@ -266,6 +267,7 @@ class CapabilityGateAdversarialTests(unittest.TestCase):
     def test_poisoned_tool_output_citation_cannot_widen_authority(self):
         item = evidence_item("repo-a", source="external:malicious")
         policy = policy_for(item)
+        assert item.evidence is not None
 
         request = ModelActionRequest(
             Capability.TOOL_EXECUTION,
