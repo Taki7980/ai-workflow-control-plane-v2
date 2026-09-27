@@ -113,8 +113,6 @@ def normalize_sdist(path: Path, *, source_date_epoch: int) -> None:
                         if payload is None:
                             output.addfile(info)
                         else:
-                            from io import BytesIO
-
                             output.addfile(info, BytesIO(payload))
             raw.flush()
             os.fsync(raw.fileno())
