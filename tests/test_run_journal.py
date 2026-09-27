@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 from ai_workflow.code_review_graph import workspace_graph_fingerprint
 from ai_workflow.run_journal import (
+    REPLAY_MODE,
+    REPLAY_SCHEMA_VERSION,
+    build_replay_journal,
     read_run_journal,
+    replay_run_journal,
+    verify_replay_journal,
     verify_run_journal,
     write_run_journal,
 )
@@ -93,6 +98,98 @@ class RunJournalTests(unittest.TestCase):
             self.assertNotIn("evidence text", str(loaded).lower())
             with self.assertRaises(FileExistsError):
                 write_run_journal(root, record)
+
+    def test_hash_chained_replay_events_detect_tampering(self):
+        record = build_replay_journal(
+            {
+                "run_id": "run-123",
+                "policy_identity": {
+                    "config_digest": "cfg",
+                    "retrieval_policy_version": "2",
+                },
+                "workspace_state": {"fingerprint": "workspace"},
+                "graph_state": {"fingerprint": "graph"},
+                "changed_files": [],
+            },
+            [
+                {
+                    "kind": "routing",
+                    "payload": {"lane": "small", "risk": "low"},
+                },
+                {
+                    "kind": "authorization",
+                    "payload": {"schema": "capability-v2"},
+                },
+            ],
+        )
+
+        valid = verify_replay_journal(record)
+        self.assertTrue(valid["valid"])
+        self.assertEqual(valid["event_count"], 2)
+
+        record["replay_events"][0]["payload"]["lane"] = "full"
+        invalid = verify_replay_journal(record)
+        self.assertFalse(invalid["valid"])
+        self.assertIn("event_0_digest_mismatch", invalid["errors"])
+
+    def test_replay_is_read_only_and_reports_current_state_drift(self):
+        record = build_replay_journal(
+            {
+                "run_id": "run-123",
+                "policy_identity": {
+                    "config_digest": "cfg-a",
+                    "retrieval_policy_version": "2",
+                },
+                "workspace_state": {"fingerprint": "workspace-a"},
+                "graph_state": {"fingerprint": "graph-a"},
+                "changed_files": [],
+            },
+            [
+                {
+                    "kind": "routing",
+                    "payload": {"lane": "small", "risk": "low"},
+                }
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            write_run_journal(root, record)
+            with (
+                patch(
+                    "ai_workflow.run_journal.config_digest",
+                    return_value="cfg-b",
+                ),
+                patch(
+                    "ai_workflow.run_journal.workspace_fingerprint",
+                    return_value={"fingerprint": "workspace-a"},
+                ),
+                patch(
+                    "ai_workflow.run_journal.workspace_graph_fingerprint",
+                    return_value={"fingerprint": "graph-a"},
+                ),
+            ):
+                replay = replay_run_journal(
+                    root,
+                    "run-123",
+                    {"version": 2},
+                )
+
+        self.assertTrue(replay["found"])
+        self.assertEqual(
+            replay["schema_version"],
+            REPLAY_SCHEMA_VERSION,
+        )
+        self.assertEqual(replay["replay_mode"], REPLAY_MODE)
+        self.assertTrue(replay["integrity"]["valid"])
+        self.assertFalse(replay["compatibility"]["compatible"])
+        self.assertEqual(
+            replay["compatibility"]["mismatches"],
+            ["config_digest"],
+        )
+        self.assertTrue(replay["read_only"])
+        self.assertFalse(replay["external_execution_performed"])
+        self.assertEqual(replay["events"][0]["kind"], "routing")
 
     def test_verify_reports_exact_identity_mismatches(self):
         record = {
