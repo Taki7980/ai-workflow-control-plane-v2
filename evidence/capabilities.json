@@ -47,6 +47,24 @@
       "kind": "paper",
       "url": "https://arxiv.org/abs/2602.05892",
       "scope": "process-oriented coding-agent context retrieval and explored-versus-utilized context metrics"
+    },
+    {
+      "id": "coding-agent-context-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2607.09691",
+      "scope": "coding-agent edit-context representation, compression, and context-token efficiency"
+    },
+    {
+      "id": "tokenomics-agentic-se-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2601.14470",
+      "scope": "stage-level token-consumption accounting in agentic software engineering"
+    },
+    {
+      "id": "dynamic-context-selection-2025",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2512.14313",
+      "scope": "query-specific context sizing, distractor reduction, and fixed-top-k limitations"
     }
   ],
   "capabilities": [
@@ -329,6 +347,39 @@
         "Role labels and known distractors are supplied benchmark evidence and are only as reliable as their annotation process.",
         "Known-distractor rate does not estimate all irrelevant repository content.",
         "Graded relevance metrics do not prove downstream patch correctness or establish a universal utility function."
+      ]
+    },
+    {
+      "id": "context-token-economics",
+      "claim": "Retrieval runs and research benchmarks expose provider-neutral estimated-token accounting across raw retrieval, exact deduplication, ranking, selection, labelled gold roles, retrieval calls, and latency without changing production retrieval behavior.",
+      "scope": "observability",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/context_economics.py",
+        "ai_workflow/workflow_engine.py",
+        "ai_workflow/benchmark.py",
+        "ai_workflow/benchmark_algorithm_ablation.py"
+      ],
+      "verification": [
+        "tests/test_context_economics.py",
+        ".github/workflows/tests.yml"
+      ],
+      "benchmarks": [
+        "benchmarks/research-protocol-example.json",
+        "ai_workflow/benchmark_algorithm_ablation.py"
+      ],
+      "research_refs": [
+        "coding-agent-context-2026",
+        "tokenomics-agentic-se-2026",
+        "dynamic-context-selection-2025"
+      ],
+      "limitations": [
+        "Token counts are provider-neutral estimates and are not provider-billed input, output, cached, or reasoning tokens.",
+        "Gold-file token share treats selected text from a labelled gold file as gold-associated context and does not prove every token was necessary.",
+        "Exact duplicate accounting does not detect paraphrased or semantically redundant context.",
+        "Token efficiency does not establish downstream coding correctness; seed-intervention experiments remain the causal outcome bridge."
       ]
     },
     {
