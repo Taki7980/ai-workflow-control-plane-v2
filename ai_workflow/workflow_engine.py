@@ -16,6 +16,7 @@ from .context_broker import (
     crg_context as default_structural_provider,
     gather as default_base_gather,
 )
+from .context_economics import retrieval_token_funnel
 from .context_selection import select_context
 from .config import estimate_tokens
 from .deployment_runtime import resolve_runtime_deployment
@@ -927,6 +928,14 @@ class WorkflowEngine:
         trace.used_chars = sum(len(item.text) for item in selected)
 
         elapsed_ms = (time.perf_counter() - started) * 1000
+        token_funnel = retrieval_token_funnel(
+            [*base_items, *specialist_items],
+            candidates,
+            selected,
+            hard_budget_tokens=budget.estimated_tokens,
+            adaptive_budget_tokens=adaptive_tokens,
+            retrieval_call_count=len(trace.providers_attempted),
+        )
         diagnostics: dict[str, Any] = {
             "run_id": execution_run_id,
             "retrieval_intent": plan.intent.value,
@@ -950,6 +959,7 @@ class WorkflowEngine:
                 "enabled": selective_enabled,
             },
             "selector": selector,
+            "token_funnel": token_funnel,
             "adaptive_context_chars": adaptive_chars,
             "hard_context_chars": budget.context_chars,
             "adaptive_context_tokens": adaptive_tokens,
@@ -1067,6 +1077,7 @@ class WorkflowEngine:
                         "enabled": selective_enabled,
                     },
                     "selector": selector,
+                    "token_funnel": dict(token_funnel),
                     "fallbacks": list(trace.fallbacks),
                     "scheduler": dict(diagnostics["scheduler"]),
                     "authorization_policy": dict(
