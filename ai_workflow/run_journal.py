@@ -174,10 +174,16 @@ def verify_replay_journal(
     if record.get("replay_mode") != REPLAY_MODE:
         errors.append("replay_mode_mismatch")
 
+    raw_run_id = record.get("run_id")
     try:
-        recorded_run_id = _safe_run_id(str(record.get("run_id") or ""))
+        recorded_run_id = (
+            _safe_run_id(raw_run_id)
+            if isinstance(raw_run_id, str)
+            else ""
+        )
     except ValueError:
         recorded_run_id = ""
+    if not recorded_run_id:
         errors.append("run_id_invalid")
     if expected_run_id is not None:
         try:
@@ -266,9 +272,11 @@ def verify_replay_journal(
         errors.append("head_digest_mismatch")
 
     retrieval_payload = event_payloads.get("retrieval")
+    recorded_retrieval = record.get("retrieval")
     if (
         isinstance(retrieval_payload, Mapping)
-        and dict(retrieval_payload) != dict(record.get("retrieval") or {})
+        and isinstance(recorded_retrieval, Mapping)
+        and dict(retrieval_payload) != dict(recorded_retrieval)
     ):
         errors.append("retrieval_snapshot_mismatch")
 
@@ -348,7 +356,6 @@ def _compatibility_from_record(
 
     current_workspace = workspace_fingerprint(root, changed_files)
     current_graph = workspace_graph_fingerprint(root, config)
-    current_repository = aggregate_workspace_fingerprint(root, config)
     current = {
         "config_digest": config_digest(config),
         "retrieval_policy_version": str(
@@ -380,6 +387,7 @@ def _compatibility_from_record(
         recorded_repository.get("fingerprint", "")
     )
     if recorded_repository_fingerprint:
+        current_repository = aggregate_workspace_fingerprint(root, config)
         current["repository_fingerprint"] = str(
             current_repository.get("fingerprint", "")
         )
