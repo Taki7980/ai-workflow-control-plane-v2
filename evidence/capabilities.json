@@ -89,6 +89,24 @@
       "kind": "paper",
       "url": "https://arxiv.org/abs/2603.10749",
       "scope": "action-level causal attribution for tool calls under untrusted observations"
+    },
+    {
+      "id": "sqlite-wal-2026",
+      "kind": "official_documentation",
+      "url": "https://www.sqlite.org/wal.html",
+      "scope": "WAL concurrency, checkpoints, crash behavior, and the 2026 WAL-reset bug"
+    },
+    {
+      "id": "sqlite-corruption-guidance-2026",
+      "kind": "official_documentation",
+      "url": "https://www.sqlite.org/howtocorrupt.html",
+      "scope": "filesystem locking, sync semantics, WAL corruption risks, and local-filesystem assumptions"
+    },
+    {
+      "id": "python-os-replace-3.14",
+      "kind": "official_documentation",
+      "url": "https://docs.python.org/3/library/os.html#os.replace",
+      "scope": "same-filesystem atomic replacement semantics"
     }
   ],
   "capabilities": [
@@ -511,6 +529,38 @@
       ],
       "limitations": [
         "The WAL mirror is explicitly same-host only and is not a distributed consensus or network-filesystem coordination mechanism."
+      ]
+    },
+    {
+      "id": "crash-consistent-local-state",
+      "claim": "Mutable state uses fsynced atomic replacement, immutable learning/audit records are published only after complete temp-file fsync, stale deployment locks protect live local POSIX owners, and JSON/SQLite reconciliation fails closed on invalid or extra mirror evidence.",
+      "scope": "reliability",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/io_utils.py",
+        "ai_workflow/retrieval_learning.py",
+        "ai_workflow/deployment_state.py",
+        "ai_workflow/production_store.py"
+      ],
+      "verification": [
+        "tests/test_io_crash_consistency.py",
+        "tests/test_deployment_lock_recovery.py",
+        "tests/test_deployment_state.py",
+        "tests/test_production_store_concurrency.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "sqlite-wal-2026",
+        "sqlite-corruption-guidance-2026",
+        "python-os-replace-3.14"
+      ],
+      "limitations": [
+        "Python does not expose a portable directory-fsync primitive on Windows, so parent-directory durability cannot be claimed there.",
+        "Deployment locks and the SQLite WAL mirror are same-host/local-filesystem mechanisms, not distributed coordination primitives.",
+        "Immutable publication depends on filesystem hard-link support and fails rather than silently downgrading when unavailable.",
+        "Fault-injection tests cover application/process/I/O failures but cannot emulate every kernel, storage-controller, or hardware power-loss behavior."
       ]
     },
     {
