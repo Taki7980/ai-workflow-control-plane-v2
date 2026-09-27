@@ -66,6 +66,10 @@ _PATH_PARAMETER_KEYS = frozenset(
 )
 
 
+class _ParameterBudgetError(ValueError):
+    """Structured action parameters exceeded deterministic safety bounds."""
+
+
 class Capability(str, Enum):
     """Privileged effects a post-LLM action may request."""
 
@@ -184,13 +188,17 @@ def _canonical_value(
         budget = [0]
     budget[0] += 1
     if budget[0] > _MAX_PARAMETER_NODES or depth > _MAX_PARAMETER_DEPTH:
-        raise ValueError("action parameters exceed structural budget")
+        raise _ParameterBudgetError(
+            "action parameters exceed structural budget"
+        )
 
     if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, str):
         if len(value) > _MAX_PARAMETER_STRING_CHARS:
-            raise ValueError("action parameter string is too large")
+            raise _ParameterBudgetError(
+                "action parameter string is too large"
+            )
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -199,7 +207,9 @@ def _canonical_value(
     if isinstance(value, Mapping):
         normalized: dict[str, Any] = {}
         if len(value) > _MAX_PARAMETER_NODES:
-            raise ValueError("action parameter mapping is too large")
+            raise _ParameterBudgetError(
+                "action parameter mapping is too large"
+            )
         for raw_key, raw_value in value.items():
             if (
                 not isinstance(raw_key, str)
@@ -217,7 +227,9 @@ def _canonical_value(
         return normalized
     if isinstance(value, (list, tuple)):
         if len(value) > _MAX_PARAMETER_NODES:
-            raise ValueError("action parameter sequence is too large")
+            raise _ParameterBudgetError(
+                "action parameter sequence is too large"
+            )
         return [
             _canonical_value(
                 item,
@@ -478,6 +490,15 @@ def authorize_model_action(
 
     try:
         digest = action_request_digest(request)
+    except _ParameterBudgetError:
+        digest = "sha256:" + ("0" * 64)
+        return _decision(
+            policy,
+            request,
+            allowed=False,
+            reason=DenialReason.PARAMETER_BUDGET_EXCEEDED.value,
+            digest=digest,
+        )
     except (TypeError, ValueError, RecursionError):
         digest = "sha256:" + ("0" * 64)
         return _decision(
