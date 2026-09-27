@@ -1,4 +1,6 @@
-import threading\nfrom concurrent.futures import ThreadPoolExecutor\nimport tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import tempfile
 import unittest
 from pathlib import Path
 
