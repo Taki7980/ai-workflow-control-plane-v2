@@ -6,6 +6,7 @@ import gzip
 import os
 import tarfile
 import tempfile
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 
 
