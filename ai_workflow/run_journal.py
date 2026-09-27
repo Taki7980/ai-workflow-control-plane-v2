@@ -495,6 +495,10 @@ def replay_run_journal(
             record,
         )
         raw_events = record.get("replay_events")
+        if not isinstance(raw_events, list):
+            raise RuntimeError(
+                "verified replay journal lost its event list"
+            )
         events = [
             dict(item)
             for item in raw_events
