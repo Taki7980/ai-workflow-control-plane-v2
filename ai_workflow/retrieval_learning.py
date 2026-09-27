@@ -17,6 +17,7 @@ from .contextual_features import (
     build_context_features,
 )
 from .models import RouteDecision
+from .io_utils import atomic_create_json
 from .outcome_verification import validate_verified_outcome
 
 
@@ -345,26 +346,11 @@ def _record_path(root: Path, kind: str, decision_id: str) -> Path:
 
 
 def _write_immutable(path: Path, payload: dict[str, Any]) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    raw = json.dumps(
+    atomic_create_json(
+        path,
         payload,
-        ensure_ascii=False,
         sort_keys=True,
-        indent=2,
-    ) + "\n"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    fd = os.open(path, flags, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(raw)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except Exception:
-        try:
-            path.unlink()
-        except OSError:
-            pass
-        raise
+    )
     return path.as_posix()
 
 
