@@ -217,6 +217,8 @@ ai-workflow context "task text" --symbol Foo --endpoint /api/v1/foo --trace
 ai-workflow index --incremental
 ai-workflow stats
 ai-workflow stats --recommend --minimum-runs 20
+ai-workflow replay <run-id>
+ai-workflow replay <run-id> --strict
 ai-workflow doctor --strict
 ai-workflow verify --check "python -m unittest discover -s tests -v" --strict
 ai-workflow handoff validate
@@ -257,11 +259,28 @@ verification-bypass capabilities. Multi-repository tool calls require explicit
 repository scope. The authorization decision is also bound to a SHA-256 digest
 of the original task text without persisting that task text in the policy.
 
-## Telemetry and feedback
+## Telemetry, replay and feedback
 
-Mutation/Full workflows can write atomic local traces under `ai-workspace/generated/traces/`. `ai-workflow stats` summarizes provider usage, latency, context utilization and fallbacks.
+Mutation/Full workflows can write atomic local traces under
+`ai-workspace/generated/traces/`. The same traced run writes an immutable
+versioned replay journal under `ai-workspace/generated/run-journal/`.
 
-`ai-workflow stats --recommend` generates reviewable recommendations only after a minimum sample count. It never changes deterministic safety rules or rewrites configuration automatically.
+`ai-workflow replay <run-id>` reconstructs the recorded routing, repository
+routing, retrieval, selection, orchestration, and authorization history without
+calling models, tools, providers, MCP servers, or the network. Replay validates
+a SHA-256-linked event chain and separately reports whether the current config,
+workspace, and graph fingerprints still match. Use `--strict` to fail on
+either integrity failure or current-state drift.
+
+Replay journals retain IDs, content hashes, safe locators, policy identities,
+and provider versions rather than raw task/evidence text. The local hash chain
+detects inconsistent history but is not a cryptographic signature against an
+attacker who can rewrite the entire file.
+
+`ai-workflow stats` summarizes provider usage, latency, context utilization
+and fallbacks. `ai-workflow stats --recommend` generates reviewable
+recommendations only after a minimum sample count. It never changes
+deterministic safety rules or rewrites configuration automatically.
 
 ## Benchmarking
 
