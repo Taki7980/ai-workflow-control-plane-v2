@@ -74,8 +74,13 @@ class NormalizePythonSdistTests(unittest.TestCase):
     def test_metadata_and_order_differences_normalize_byte_identically(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            first = root / "first.tar.gz"
-            second = root / "second.tar.gz"
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            name = "ai_workflow_control_plane-2.3.0.tar.gz"
+            first = first_dir / name
+            second = second_dir / name
             self._write_archive(
                 first,
                 gzip_mtime=10,
@@ -118,7 +123,10 @@ class NormalizePythonSdistTests(unittest.TestCase):
 
     def test_path_traversal_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "unsafe.tar.gz"
+            path = (
+                Path(td)
+                / "ai_workflow_control_plane-2.3.0.tar.gz"
+            )
             unsafe = tarfile.TarInfo("../escape")
             unsafe.size = 0
             self._write_archive(
@@ -134,7 +142,10 @@ class NormalizePythonSdistTests(unittest.TestCase):
 
     def test_links_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "link.tar.gz"
+            path = (
+                Path(td)
+                / "ai_workflow_control_plane-2.3.0.tar.gz"
+            )
             link = tarfile.TarInfo(
                 "ai_workflow_control_plane-2.3.0/link"
             )
@@ -154,9 +165,25 @@ class NormalizePythonSdistTests(unittest.TestCase):
             ):
                 normalize_sdist(path, source_date_epoch=1)
 
+    def test_archive_filename_must_match_top_level_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "wrong-name-1.0.tar.gz"
+            self._write_archive(
+                path,
+                gzip_mtime=1,
+                member_mtime=1,
+                uid=1,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "top-level directory must match",
+            ):
+                normalize_sdist(path, source_date_epoch=1)
+
     def test_required_sdist_metadata_is_enforced(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "missing.tar.gz"
+            path = Path(td) / "pkg-1.0.tar.gz"
             with path.open("wb") as raw:
                 with gzip.GzipFile(
                     filename="",
