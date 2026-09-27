@@ -152,9 +152,12 @@ machine-local state.
 Release Python distributions use a measured reproducibility gate rather than
 assuming that lockfiles imply deterministic output. CI and the release workflow
 derive `SOURCE_DATE_EPOCH` from the exact source commit, create two independent
-clean source trees with `git archive HEAD`, build a wheel and sdist from each
-using the locked toolchain, then require byte-identical names, sizes and SHA-256
-digests.
+clean source trees with `git archive HEAD`, and build a wheel and sdist from
+each using the locked toolchain. Wheels are compared directly. Each project
+sdist is first normalized with a stdlib-only pax/gzip normalizer that fixes
+archive timestamps, ownership fields, ordering and portable modes while
+preserving file bytes and validating the sdist structure. The resulting release
+artifacts must then have byte-identical names, sizes and SHA-256 digests.
 
 The release emits `python-reproducibility.json` alongside the Python build
 toolchain record. The first verified candidate becomes the published artifact;
