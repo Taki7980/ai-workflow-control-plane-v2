@@ -146,3 +146,33 @@ partial tampering, not a malicious writer with full file-rewrite capability.
 
 The journal lives below `ai-workspace/generated/`, which remains ignored
 machine-local state.
+
+## Release reproducibility and publishing boundary
+
+Release Python distributions use a measured reproducibility gate rather than
+assuming that lockfiles imply deterministic output. CI and the release workflow
+derive `SOURCE_DATE_EPOCH` from the exact source commit, create two independent
+clean source trees with `git archive HEAD`, build a wheel and sdist from each
+using the locked toolchain, then require byte-identical names, sizes and SHA-256
+digests.
+
+The release emits `python-reproducibility.json` alongside the Python build
+toolchain record. The first verified candidate becomes the published artifact;
+there is no third unverified rebuild.
+
+PyPI publishing is a separate trust boundary. The `pypi` environment job does
+not checkout source or run build tools. It downloads only the wheel and sdist
+from the draft GitHub release, verifies their GitHub artifact attestations
+against the exact tag SHA/ref and release workflow, then invokes the official
+PyPA Trusted Publishing action. PyPI's PEP 740 publish attestations are therefore
+complementary to the repository's GitHub build attestations.
+
+All external GitHub Actions used by repository workflows are required by tests
+to remain pinned to full commit SHAs, and Dependabot tracks the
+`github-actions` ecosystem so pin updates arrive as reviewable changes.
+
+The reproducibility claim is deliberately narrow: wheel/sdist and the release
+container are measured; platform-specific PyInstaller binaries are not claimed
+to be reproducible. Attestations prove origin/integrity properties and do not
+prove that released code is safe or correct.
+
