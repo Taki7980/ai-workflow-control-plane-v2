@@ -85,39 +85,55 @@ Defaults are conservative: a provider with no declaration is not cache eligible.
 `AsyncRetriever` mirrors the synchronous `Retriever` result contract. `SyncRetrieverAdapter` can run a legacy synchronous retriever without changing its output semantics, while `CommandRetrieverAdapter` uses the native asyncio subprocess path. This provides a migration boundary without forcing the existing control-plane scheduler or every local filesystem operation to become async.
 
 
-## Unified run identity and replay checks
+## Unified run identity and deterministic replay
 
 Retrieval diagnostics, local retrieval traces, and `RunMetadata` share one
 control-plane `run_id`. The identifier correlates one preparation event; it is
 not presented as a W3C `trace-id` or OpenTelemetry span identifier.
 
-When retrieval telemetry is enabled, AI Workflow also writes one immutable
-debug record per run under:
+When retrieval telemetry is enabled, AI Workflow writes one immutable
+`ai-workflow-run-journal-v2` record per run under:
 
 ```
 ai-workspace/generated/run-journal/<run-id>.json
 ```
 
 The journal contains policy/config identity, workspace and graph fingerprints,
-bounded retrieval diagnostics, and selected evidence descriptors. It does not
-store raw task text or raw `ContextItem.text`.
+configured provider versions, bounded retrieval diagnostics, selected evidence
+identities, and an ordered SHA-256-linked control-plane event history:
 
-Inspect a stored record:
-
-```bash
-ai-workflow run inspect <run-id>
+```text
+routing
+ -> repository_routing
+ -> retrieval
+ -> selection
+ -> orchestration
+ -> authorization
 ```
 
-Verify whether current local state is compatible with that recorded run:
+It does not store raw task text or raw `ContextItem.text`.
+
+Replay a stored run without executing external effects:
 
 ```bash
-ai-workflow run verify <run-id>
+ai-workflow replay <run-id>
 ```
 
-Verification compares the current configuration digest, config/policy version,
-workspace fingerprint, and aggregate graph fingerprint with the recorded
-identities. It is a replay-precondition/debug check only: it does not execute
-retrievers, tools, models, or providers.
+Require both valid journal integrity and a matching current workspace:
+
+```bash
+ai-workflow replay <run-id> --strict
+```
+
+Replay separates two questions:
+
+- **integrity** — is the recorded event chain internally consistent?
+- **compatibility** — do current config, workspace, and graph identities still
+  match the recorded run?
+
+The command never re-executes retrievers, tools, models, providers, MCP calls,
+or network requests. The hash chain is not a signature: an attacker able to
+rewrite the entire local journal can recompute its hashes.
 
 The journal lives below `ai-workspace/generated/`, which remains ignored
 machine-local state.
