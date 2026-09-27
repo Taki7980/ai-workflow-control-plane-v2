@@ -29,6 +29,7 @@ EXPECTED_REPLAY_EVENT_KINDS = (
 )
 _MAX_CHANGED_FILES = 4096
 _MAX_CHANGED_FILE_CHARS = 4096
+_MAX_JOURNAL_BYTES = 8 * 1024 * 1024
 
 
 def _safe_run_id(run_id: str) -> str:
@@ -74,8 +75,14 @@ def _journal_digest(record: Mapping[str, Any]) -> str:
     return _sha256(payload)
 
 
-def _validated_changed_files(record: Mapping[str, Any]) -> list[str]:
+def _validated_changed_files(
+    record: Mapping[str, Any],
+    *,
+    required: bool = True,
+) -> list[str]:
     raw = record.get("changed_files")
+    if raw is None and not required:
+        return []
     if not isinstance(raw, list):
         raise ValueError("changed_files must be a list")
     if len(raw) > _MAX_CHANGED_FILES:
@@ -316,10 +323,16 @@ def write_run_journal(root: Path, record: Mapping[str, Any]) -> str:
 
 def read_run_journal(root: Path, run_id: str) -> dict[str, Any] | None:
     try:
-        raw = json.loads(
-            _journal_path(root, run_id).read_text(encoding="utf-8")
-        )
-    except (FileNotFoundError, OSError, ValueError):
+        path = _journal_path(root, run_id)
+        if path.stat().st_size > _MAX_JOURNAL_BYTES:
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (
+        FileNotFoundError,
+        OSError,
+        RecursionError,
+        ValueError,
+    ):
         return None
     return raw if isinstance(raw, dict) else None
 
@@ -331,7 +344,10 @@ def _compatibility_from_record(
     record: Mapping[str, Any],
 ) -> dict[str, Any]:
     try:
-        changed_files = _validated_changed_files(record)
+        changed_files = _validated_changed_files(
+            record,
+            required=record.get("schema_version") == REPLAY_SCHEMA_VERSION,
+        )
     except ValueError:
         return {
             "run_id": run_id,
@@ -419,6 +435,19 @@ def verify_run_journal(
             "compatible": False,
             "mismatches": ["missing_journal"],
         }
+    if record.get("schema_version") == REPLAY_SCHEMA_VERSION:
+        integrity = verify_replay_journal(
+            record,
+            expected_run_id=run_id,
+        )
+        if not integrity["valid"]:
+            return {
+                "run_id": run_id,
+                "compatible": False,
+                "mismatches": ["invalid_journal"],
+                "recorded": {},
+                "current": {},
+            }
     return _compatibility_from_record(root, run_id, config, record)
 
 
