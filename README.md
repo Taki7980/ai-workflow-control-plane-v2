@@ -810,3 +810,12 @@ Research/design rationale and formulas are documented in:
 - optional integrations must degrade safely;
 - retrieved repository text is untrusted data;
 - learning from telemetry is advisory until verified outcome data justifies stronger adaptation.
+
+
+## Crash consistency
+
+Mutable local state is published through fsynced same-directory temp files and
+atomic replacement, with parent-directory fsync where supported. Immutable
+learning/audit records are published only after complete temp-file fsync.
+Deployment stale-lock recovery avoids stealing locks from live local POSIX
+owners, and the SQLite production mirror is reconciled against canonical JSON.
