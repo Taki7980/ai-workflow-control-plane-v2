@@ -266,16 +266,22 @@ Mutation/Full workflows can write atomic local traces under
 versioned replay journal under `ai-workspace/generated/run-journal/`.
 
 `ai-workflow replay <run-id>` reconstructs the recorded routing, repository
-routing, retrieval, selection, orchestration, and authorization history without
-calling models, tools, providers, MCP servers, or the network. Replay validates
-a SHA-256-linked event chain and separately reports whether the current config,
-workspace, and graph fingerprints still match. Use `--strict` to fail on
-either integrity failure or current-state drift.
+routing, retrieval, ranking, selection, orchestration, and authorization history
+without calling models, tools, providers, MCP servers, or the network. Replay
+validates both the ordered SHA-256 event chain and a digest over the complete
+journal record. Invalid journals fail closed: compatibility checks are not run
+and recorded events are not released to the caller.
+
+Compatibility is reported separately and compares the current configuration,
+root workspace, aggregate active-repository state, and Code Review Graph state
+with the recorded identities. Use `--strict` to fail on either integrity
+failure or current-state drift.
 
 Replay journals retain IDs, content hashes, safe locators, policy identities,
-and provider versions rather than raw task/evidence text. The local hash chain
-detects inconsistent history but is not a cryptographic signature against an
-attacker who can rewrite the entire file.
+provider versions, and ranked candidate descriptors rather than raw task/evidence
+text. The local hashes detect inconsistent or accidental modification but are not
+cryptographic signatures against an attacker who can rewrite the entire file and
+recompute every digest.
 
 `ai-workflow stats` summarizes provider usage, latency, context utilization
 and fallbacks. `ai-workflow stats --recommend` generates reviewable
