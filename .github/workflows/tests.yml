@@ -437,6 +437,23 @@ jobs:
               is True
           )
           assert (
+              data["research_protocol"]["context_token_economics_supported"]
+              is True
+          )
+          assert "context_economics" in case
+          assert (
+              case["context_economics"]["selected_estimated_tokens"]
+              > 0
+          )
+          assert (
+              case["context_economics"]["retrieved_estimated_tokens"]
+              >= case["context_economics"]["selected_estimated_tokens"]
+          )
+          assert (
+              case["context_economics"]["retrieval_call_count"]
+              >= 1
+          )
+          assert (
               data["research_protocol"][
                   "persistent_project_knowledge_isolated"
               ]
