@@ -106,6 +106,10 @@ class EvidenceEnvelopeTests(unittest.TestCase):
         self.assertFalse(envelope.authority.tools)
         self.assertFalse(envelope.authority.policy)
         self.assertFalse(envelope.authority.repository_activation)
+        self.assertFalse(envelope.authority.network_access)
+        self.assertFalse(envelope.authority.secret_access)
+        self.assertFalse(envelope.authority.memory_write)
+        self.assertFalse(envelope.authority.verification_bypass)
         self.assertEqual(envelope.provenance["retriever"], "external:malicious")
         self.assertNotIn("authority", envelope.provenance)
 
@@ -176,6 +180,10 @@ class EvidenceEnvelopeTests(unittest.TestCase):
                 "tools": False,
                 "policy": False,
                 "repository_activation": False,
+                "network_access": False,
+                "secret_access": False,
+                "memory_write": False,
+                "verification_bypass": False,
             },
         )
         self.assertEqual(
