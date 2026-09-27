@@ -65,6 +65,30 @@
       "kind": "paper",
       "url": "https://arxiv.org/abs/2512.14313",
       "scope": "query-specific context sizing, distractor reduction, and fixed-top-k limitations"
+    },
+    {
+      "id": "mcp-tool-annotations-2026",
+      "kind": "official_guidance",
+      "url": "https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/",
+      "scope": "MCP tool annotations are untrusted hints; deterministic host authorization must enforce safety"
+    },
+    {
+      "id": "owasp-agent-security-2026",
+      "kind": "guidance",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html",
+      "scope": "least-privilege agent tools, prompt-injection boundaries, and execution-layer authorization"
+    },
+    {
+      "id": "indirect-prompt-injection-competition-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2603.15714",
+      "scope": "large-scale evidence that indirect prompt injection remains practical across tool-using and coding agents"
+    },
+    {
+      "id": "attriguard-2026",
+      "kind": "paper",
+      "url": "https://arxiv.org/abs/2603.10749",
+      "scope": "action-level causal attribution for tool calls under untrusted observations"
     }
   ],
   "capabilities": [
@@ -215,6 +239,38 @@
       ],
       "limitations": [
         "The capability gate governs AI Workflow-owned actions; host-level sandbox guarantees depend on the configured runtime and operating system."
+      ]
+    },
+    {
+      "id": "scoped-model-action-authorization",
+      "claim": "Post-model tool actions require a code-owned allowlist and deterministic argument scope checks for repository identity, relative paths, graph depth, parameter structure, and privileged-capability smuggling; authorization decisions are bound to the original task digest.",
+      "scope": "security",
+      "status": "implemented",
+      "evidence_level": "verified",
+      "production_default": true,
+      "implementation": [
+        "ai_workflow/capability_gate.py",
+        "ai_workflow/evidence.py",
+        "ai_workflow/workflow_engine.py",
+        "ai_workflow/api.py"
+      ],
+      "verification": [
+        "tests/test_capability_gate.py",
+        "tests/test_capability_gate_adversarial.py",
+        "tests/test_evidence_envelope.py"
+      ],
+      "benchmarks": [],
+      "research_refs": [
+        "mcp-tool-annotations-2026",
+        "owasp-agent-security-2026",
+        "indirect-prompt-injection-competition-2026",
+        "attriguard-2026"
+      ],
+      "limitations": [
+        "Deterministic parameter validation does not solve semantic prompt injection inside arbitrary free-text query values.",
+        "AI Workflow can enforce only authorization paths that host/tool integrations route through its capability gate.",
+        "Repository-relative path validation is not a substitute for an operating-system or container filesystem sandbox.",
+        "The task digest binds audit state to original intent but does not semantically prove that every allowed read-only action is necessary."
       ]
     },
     {
