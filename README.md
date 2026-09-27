@@ -305,6 +305,11 @@ recall, weighted recall, graded nDCG, coverage balance, and known-distractor rat
 This follows the Level-2 issue-to-edit versus Level-3 broader-context distinction
 used by CORE-Bench while preserving the existing binary metrics for older cases.
 
+Context-efficiency reports also expose the estimated-token funnel from raw provider
+retrieval through exact deduplication, ranking, and final selection. Benchmark rows
+add gold/edit/support/distractor token shares, retrieval-call count, and end-to-end
+retrieval latency. These are provider-neutral estimates for comparative evaluation;
+they are not billed-token or dollar-cost claims.
 
 ```bash
 ai-workflow benchmark \
