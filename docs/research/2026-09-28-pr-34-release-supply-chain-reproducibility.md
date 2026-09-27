@@ -70,7 +70,27 @@ https://reproducible-builds.org/docs/source-date-epoch/
 
 PR-34 does not infer reproducibility from `SOURCE_DATE_EPOCH`. It builds the
 Python distributions twice from two clean `git archive HEAD` source trees and
-compares the resulting wheel and sdist byte-for-byte.
+compares the release artifacts byte-for-byte.
+
+The first CI run provided useful counter-evidence: the wheel was already
+byte-identical, but Setuptools produced different raw `.tar.gz` sdists from the
+two clean source trees even with the same `SOURCE_DATE_EPOCH`. This is
+consistent with the long-standing Setuptools sdist timestamp/gzip-header issue.
+
+https://github.com/pypa/setuptools/issues/2133
+
+The Python packaging specification requires modern POSIX.1-2001 pax tar for
+sdists and defines the safe archive feature boundary.
+
+https://packaging.python.org/en/latest/specifications/source-distribution-format/
+
+Rather than adding another third-party build backend/wrapper, PR-34 therefore
+normalizes each project-built sdist with Python's standard library before the
+comparison and before publication. The normalizer fixes gzip/tar timestamps,
+uid/gid/user/group fields, member order and portable file modes while preserving
+file bytes, enforcing one filename-matching top-level directory, requiring
+`pyproject.toml` and `PKG-INFO`, and rejecting unsafe paths, links and device
+members.
 
 ### SLSA
 
@@ -90,16 +110,18 @@ Both CI package smoke and the release build:
 1. derive `SOURCE_DATE_EPOCH` from the exact Git commit timestamp;
 2. create two independent clean source trees with `git archive HEAD`;
 3. build wheel + sdist in each tree using the same locked build toolchain;
-4. compare artifact filenames, sizes, and SHA-256 digests;
-5. fail if either artifact is absent or any bytes differ.
+4. normalize each raw sdist into deterministic, spec-compatible pax/gzip
+   metadata using the same source timestamp;
+5. compare artifact filenames, sizes, and SHA-256 digests;
+6. fail if either artifact is absent or any bytes differ.
 
 Release builds emit:
 
 `release-metadata/python-reproducibility.json`
 
 The report records the source timestamp and exact artifact digests. The first
-verified candidate becomes the release artifact; a third unverified rebuild is
-not performed.
+verified candidate—including its normalized sdist—becomes the release artifact;
+a third unverified rebuild is not performed.
 
 ### PyPI trust-boundary split
 
