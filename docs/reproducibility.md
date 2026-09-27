@@ -106,12 +106,15 @@ identities, and an ordered SHA-256-linked control-plane event history:
 routing
  -> repository_routing
  -> retrieval
+ -> ranking
  -> selection
  -> orchestration
  -> authorization
 ```
 
-It does not store raw task text or raw `ContextItem.text`.
+The ranking event records only bounded candidate descriptors such as rank,
+source, content-derived dedupe key, score, and safe locator/provenance fields;
+it does not store raw task text or raw `ContextItem.text`.
 
 Replay a stored run without executing external effects:
 
@@ -127,13 +130,19 @@ ai-workflow replay <run-id> --strict
 
 Replay separates two questions:
 
-- **integrity** — is the recorded event chain internally consistent?
-- **compatibility** — do current config, workspace, and graph identities still
-  match the recorded run?
+- **integrity** — do the fixed event order, per-event chain, duplicated snapshots,
+  run identity, and complete-journal digest all agree?
+- **compatibility** — do current config, root-workspace, aggregate repository,
+  and graph identities still match the recorded run?
 
-The command never re-executes retrievers, tools, models, providers, MCP calls,
-or network requests. The hash chain is not a signature: an attacker able to
-rewrite the entire local journal can recompute its hashes.
+Integrity is checked before compatibility. If a v2 journal is invalid, replay
+does not inspect journal-controlled compatibility inputs and does not return its
+recorded events. The command never re-executes retrievers, tools, models,
+providers, MCP calls, or network requests.
+
+The hashes are not signatures: an attacker able to rewrite the entire local
+journal can recompute them. They protect against accidental modification and
+partial tampering, not a malicious writer with full file-rewrite capability.
 
 The journal lives below `ai-workspace/generated/`, which remains ignored
 machine-local state.
