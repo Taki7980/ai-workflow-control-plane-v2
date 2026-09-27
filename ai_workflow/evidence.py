@@ -51,6 +51,10 @@ class EvidenceAuthority:
     tools: bool = False
     policy: bool = False
     repository_activation: bool = False
+    network_access: bool = False
+    secret_access: bool = False
+    memory_write: bool = False
+    verification_bypass: bool = False
 
     def to_dict(self) -> dict[str, bool]:
         return {
@@ -58,6 +62,10 @@ class EvidenceAuthority:
             "tools": self.tools,
             "policy": self.policy,
             "repository_activation": self.repository_activation,
+            "network_access": self.network_access,
+            "secret_access": self.secret_access,
+            "memory_write": self.memory_write,
+            "verification_bypass": self.verification_bypass,
         }
 
 
