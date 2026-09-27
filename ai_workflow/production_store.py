@@ -168,6 +168,14 @@ def open_production_store(
                 f"production store requires SQLite WAL mode; got {mode or 'unknown'}"
             )
         connection.execute("PRAGMA synchronous=FULL")
+        synchronous_row = connection.execute(
+            "PRAGMA synchronous"
+        ).fetchone()
+        synchronous = int(synchronous_row[0]) if synchronous_row else -1
+        if synchronous != 2:
+            raise RuntimeError(
+                "production store requires SQLite synchronous=FULL"
+            )
         connection.execute(f"PRAGMA busy_timeout={timeout_ms}")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("BEGIN IMMEDIATE")
@@ -438,6 +446,7 @@ def reconcile_learning_store(
             "digest_mismatches": [],
         }
     expected: dict[str, str] = {}
+    invalid_canonical_files: list[str] = []
     base = _learning_root(root)
     for directory, event_type in (
         ("decisions", "decision"),
@@ -447,9 +456,15 @@ def reconcile_learning_store(
         for file_path in sorted((base / directory).glob("*.json")):
             payload = _load_json(file_path)
             if payload is None:
+                invalid_canonical_files.append(
+                    file_path.relative_to(root.resolve()).as_posix()
+                )
                 continue
             decision_id = str(payload.get("decision_id", "")).strip()
             if not decision_id:
+                invalid_canonical_files.append(
+                    file_path.relative_to(root.resolve()).as_posix()
+                )
                 continue
             event_id = f"{event_type}:{decision_id}"
             expected[event_id] = _sha256_text(_canonical(payload))
@@ -476,10 +491,16 @@ def reconcile_learning_store(
     )
     extra = sorted(set(actual) - set(expected))
     return {
-        "consistent": not missing and not mismatched,
+        "consistent": (
+            not missing
+            and not mismatched
+            and not extra
+            and not invalid_canonical_files
+        ),
         "expected_events": len(expected),
         "stored_events": len(actual),
         "missing_in_store": missing,
         "digest_mismatches": mismatched,
         "extra_in_store": extra,
+        "invalid_canonical_files": sorted(invalid_canonical_files),
     }
