@@ -293,6 +293,36 @@ class RunJournalTests(unittest.TestCase):
         self.assertFalse(replay["events_released"])
         self.assertEqual(replay["events"], [])
 
+    def test_direct_verify_rejects_invalid_v2_before_compatibility(self):
+        record = self._replay_record()
+        record["workspace_state"]["fingerprint"] = "tampered"
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            write_run_journal(root, record)
+            with (
+                patch(
+                    "ai_workflow.run_journal.workspace_fingerprint",
+                    side_effect=AssertionError("must not run"),
+                ),
+                patch(
+                    "ai_workflow.run_journal.workspace_graph_fingerprint",
+                    side_effect=AssertionError("must not run"),
+                ),
+                patch(
+                    "ai_workflow.run_journal.aggregate_workspace_fingerprint",
+                    side_effect=AssertionError("must not run"),
+                ),
+            ):
+                result = verify_run_journal(
+                    root,
+                    "run-123",
+                    {"version": 2},
+                )
+
+        self.assertFalse(result["compatible"])
+        self.assertEqual(result["mismatches"], ["invalid_journal"])
+
     def test_replay_is_read_only_and_reports_current_state_drift(self):
         record = self._replay_record()
 
@@ -386,7 +416,6 @@ class RunJournalTests(unittest.TestCase):
             },
             "workspace_state": {"fingerprint": "workspace-a"},
             "graph_state": {"fingerprint": "graph-a"},
-            "changed_files": [],
             "retrieval": {},
             "selected_evidence": [],
         }
