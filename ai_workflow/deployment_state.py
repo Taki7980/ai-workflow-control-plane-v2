@@ -19,7 +19,7 @@ from .contextual_features import (
     FEATURE_SCHEMA_VERSION,
     context_key,
 )
-from .io_utils import atomic_write_json
+from .io_utils import atomic_create_json, atomic_write_json
 from .policy_manifest import verify_policy_manifest
 from .retrieval_learning import BASELINE_ARM, load_learning_records
 
@@ -504,6 +504,28 @@ def load_deployment_state(path: Path) -> dict[str, Any]:
     return data
 
 
+def _host_fingerprint() -> str:
+    return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:16]
+
+
+def _pid_is_alive(pid: int) -> bool | None:
+    """Return local PID liveness when the platform exposes a safe probe."""
+
+    if os.name == "nt":
+        return None
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return None
+    return True
+
+
 def _read_lock_owner(lock: Path) -> dict[str, Any]:
     owner_path = lock / "owner.json"
     try:
@@ -520,6 +542,14 @@ def _recover_stale_lock(lock: Path) -> bool:
         return False
     if age <= STATE_LOCK_LEASE_SECONDS:
         return False
+
+    owner = _read_lock_owner(lock)
+    if owner.get("host_fingerprint") == _host_fingerprint():
+        pid = owner.get("pid")
+        if isinstance(pid, int) and not isinstance(pid, bool):
+            if _pid_is_alive(pid) is True:
+                return False
+
     stale = lock.with_name(
         f"{lock.name}.stale-{secrets.token_hex(6)}"
     )
@@ -550,19 +580,15 @@ def _state_lock(path: Path) -> Iterator[None]:
     if not acquired:
         raise RuntimeError(f"failed to acquire deployment state lock: {lock}")
 
-    host = socket.gethostname().encode()
     owner = {
         "token": token,
         "pid": os.getpid(),
-        "host_fingerprint": hashlib.sha256(host).hexdigest()[:16],
+        "host_fingerprint": _host_fingerprint(),
         "acquired_at": _utc_now(),
         "lease_seconds": STATE_LOCK_LEASE_SECONDS,
     }
     owner_path = lock / "owner.json"
-    owner_path.write_text(
-        json.dumps(owner, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(owner_path, owner, sort_keys=True)
     try:
         yield
     finally:
@@ -580,7 +606,8 @@ def _write_audit_event(path: Path, state: dict[str, Any]) -> None:
     event_path = events / (
         f"{generation:06d}-{policy_id[:12]}-{stage}.json"
     )
-    raw = json.dumps(
+    atomic_create_json(
+        event_path,
         {
             "policy_id": policy_id,
             "generation": generation,
@@ -593,16 +620,8 @@ def _write_audit_event(path: Path, state: dict[str, Any]) -> None:
                 else None
             ),
         },
-        ensure_ascii=False,
         sort_keys=True,
-        indent=2,
-    ) + "\n"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    fd = os.open(event_path, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-        handle.write(raw)
-        handle.flush()
-        os.fsync(handle.fileno())
+    )
 
 
 def write_new_deployment_state(
