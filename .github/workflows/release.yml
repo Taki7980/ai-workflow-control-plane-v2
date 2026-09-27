@@ -104,10 +104,9 @@ jobs:
         shell: bash
         run: gh release upload "$GITHUB_REF_NAME" release-authorization.json --clobber
 
-  publish-pypi:
+  build-python-distributions:
     needs: prepare-release
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: write
       id-token: write
@@ -125,33 +124,99 @@ jobs:
           cache-dependency-glob: "uv.lock"
       - name: Sync locked Python build toolchain
         run: uv sync --locked --only-group build
-      - name: Build Python distributions from locked inputs
+      - name: Build Python distributions twice from clean source snapshots
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release-metadata
-          uv run --locked --no-sync python -m build --no-isolation --report "$RUNNER_TEMP/build-report.json"
+          source_date_epoch="$(git log -1 --pretty=%ct)"
+          export SOURCE_DATE_EPOCH="$source_date_epoch"
+          source_a="$RUNNER_TEMP/python-source-a"
+          source_b="$RUNNER_TEMP/python-source-b"
+          dist_a="$RUNNER_TEMP/python-dist-a"
+          dist_b="$RUNNER_TEMP/python-dist-b"
+          mkdir -p \
+            "$source_a" "$source_b" "$dist_a" "$dist_b" \
+            dist release-metadata
+
+          git archive --format=tar HEAD | tar -xf - -C "$source_a"
+          git archive --format=tar HEAD | tar -xf - -C "$source_b"
+
+          uv run --locked --no-sync python -m build \
+            --no-isolation \
+            --outdir "$dist_a" \
+            --report "$RUNNER_TEMP/build-report-a.json" \
+            "$source_a"
+          uv run --locked --no-sync python -m build \
+            --no-isolation \
+            --outdir "$dist_b" \
+            "$source_b"
+
+          uv run --locked --no-sync python scripts/verify_python_reproducibility.py \
+            --candidate-a "$dist_a" \
+            --candidate-b "$dist_b" \
+            --source-date-epoch "$source_date_epoch" \
+            --output release-metadata/python-reproducibility.json
+
+          cp "$dist_a"/* dist/
           uv run --locked --no-sync python scripts/record_python_toolchain.py \
             --package build \
             --package setuptools \
             --output release-metadata/python-build-toolchain.json
+
           python -m venv "$RUNNER_TEMP/release-smoke"
           "$RUNNER_TEMP/release-smoke/bin/python" -m pip install --no-deps dist/*.whl
           "$RUNNER_TEMP/release-smoke/bin/ai-workflow" --version
-          cat "$RUNNER_TEMP/build-report.json"
+          cat "$RUNNER_TEMP/build-report-a.json"
+          cat release-metadata/python-reproducibility.json
           cat release-metadata/python-build-toolchain.json
-      - name: Attest Python distributions and build toolchain
+      - name: Attest reproducible Python distributions and build evidence
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             dist/*
+            release-metadata/python-reproducibility.json
             release-metadata/python-build-toolchain.json
-      - name: Attach Python distributions to draft release
+      - name: Attach Python distributions and evidence to draft release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: >-
           gh release upload "$GITHUB_REF_NAME"
-          dist/* release-metadata/python-build-toolchain.json --clobber
+          dist/*
+          release-metadata/python-reproducibility.json
+          release-metadata/python-build-toolchain.json
+          --clobber
+
+  publish-pypi:
+    needs: build-python-distributions
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+    steps:
+      - name: Retrieve and verify attested Python distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$GITHUB_REF_NAME" \
+            --dir dist \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --clobber
+          count="$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          test "$count" = "2"
+          for asset in dist/*; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
       - name: Publish package distributions to PyPI with Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
