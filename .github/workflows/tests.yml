@@ -141,14 +141,24 @@ jobs:
           git archive --format=tar HEAD | tar -xf - -C "$source_a"
           git archive --format=tar HEAD | tar -xf - -C "$source_b"
 
-          uv run --locked --no-sync python -m build \
-            --no-isolation \
+          uv run --locked --no-sync python -m build --no-isolation \
             --outdir "$dist_a" \
             "$source_a"
-          uv run --locked --no-sync python -m build \
-            --no-isolation \
+          uv run --locked --no-sync python -m build --no-isolation \
             --outdir "$dist_b" \
             "$source_b"
+
+          shopt -s nullglob
+          sdists_a=("$dist_a"/*.tar.gz)
+          sdists_b=("$dist_b"/*.tar.gz)
+          test "${#sdists_a[@]}" -eq 1
+          test "${#sdists_b[@]}" -eq 1
+          uv run --locked --no-sync python scripts/normalize_python_sdist.py \
+            --sdist "${sdists_a[0]}" \
+            --source-date-epoch "$source_date_epoch"
+          uv run --locked --no-sync python scripts/normalize_python_sdist.py \
+            --sdist "${sdists_b[0]}" \
+            --source-date-epoch "$source_date_epoch"
 
           uv run --locked --no-sync python scripts/verify_python_reproducibility.py \
             --candidate-a "$dist_a" \
