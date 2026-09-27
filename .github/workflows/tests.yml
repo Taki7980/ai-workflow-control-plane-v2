@@ -126,17 +126,43 @@ jobs:
           cache-dependency-glob: "uv.lock"
       - name: Sync locked package toolchain
         run: uv sync --locked --only-group package-smoke
-      - name: Build wheel and sdist from locked build inputs
+      - name: Build wheel and sdist reproducibly from locked inputs
         shell: bash
         run: |
           set -euo pipefail
-          uv run --locked --no-sync python -m build --no-isolation --report "$RUNNER_TEMP/build-report.json"
+          source_date_epoch="$(git log -1 --pretty=%ct)"
+          export SOURCE_DATE_EPOCH="$source_date_epoch"
+          source_a="$RUNNER_TEMP/python-source-a"
+          source_b="$RUNNER_TEMP/python-source-b"
+          dist_a="$RUNNER_TEMP/python-dist-a"
+          dist_b="$RUNNER_TEMP/python-dist-b"
+          mkdir -p "$source_a" "$source_b" "$dist_a" "$dist_b" dist
+
+          git archive --format=tar HEAD | tar -xf - -C "$source_a"
+          git archive --format=tar HEAD | tar -xf - -C "$source_b"
+
+          uv run --locked --no-sync python -m build \
+            --no-isolation \
+            --outdir "$dist_a" \
+            "$source_a"
+          uv run --locked --no-sync python -m build \
+            --no-isolation \
+            --outdir "$dist_b" \
+            "$source_b"
+
+          uv run --locked --no-sync python scripts/verify_python_reproducibility.py \
+            --candidate-a "$dist_a" \
+            --candidate-b "$dist_b" \
+            --source-date-epoch "$source_date_epoch" \
+            --output "$RUNNER_TEMP/python-reproducibility.json"
+
+          cp "$dist_a"/* dist/
           uv run --locked --no-sync python scripts/record_python_toolchain.py \
             --package build \
             --package setuptools \
             --package pipx \
             --output "$RUNNER_TEMP/python-build-toolchain.json"
-          cat "$RUNNER_TEMP/build-report.json"
+          cat "$RUNNER_TEMP/python-reproducibility.json"
           cat "$RUNNER_TEMP/python-build-toolchain.json"
       - name: Clean wheel smoke
         shell: bash
