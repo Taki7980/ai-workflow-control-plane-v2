@@ -56,6 +56,7 @@ class ReleaseSupplyChainTests(unittest.TestCase):
         self.assertIn("SOURCE_DATE_EPOCH", package_job)
         self.assertGreaterEqual(package_job.count("git archive --format=tar HEAD"), 2)
         self.assertGreaterEqual(package_job.count("python -m build"), 2)
+        self.assertIn("normalize_python_sdist.py", package_job)
         self.assertIn("verify_python_reproducibility.py", package_job)
         self.assertIn("python-reproducibility.json", package_job)
 
@@ -69,6 +70,7 @@ class ReleaseSupplyChainTests(unittest.TestCase):
         self.assertIn("SOURCE_DATE_EPOCH", build_job)
         self.assertGreaterEqual(build_job.count("git archive --format=tar HEAD"), 2)
         self.assertGreaterEqual(build_job.count("python -m build"), 2)
+        self.assertIn("normalize_python_sdist.py", build_job)
         self.assertIn("verify_python_reproducibility.py", build_job)
         self.assertIn("python-reproducibility.json", build_job)
         self.assertIn("actions/attest@", build_job)
@@ -97,6 +99,10 @@ class ReleaseSupplyChainTests(unittest.TestCase):
         owners = self._read(".github/CODEOWNERS")
         self.assertIn(
             "/scripts/verify_python_reproducibility.py @Taki7980",
+            owners,
+        )
+        self.assertIn(
+            "/scripts/normalize_python_sdist.py @Taki7980",
             owners,
         )
 
