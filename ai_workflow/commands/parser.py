@@ -47,6 +47,7 @@ from .production import (
     cmd_production_status,
     cmd_production_sync,
 )
+from .replay import cmd_replay
 from .workspace import (
     cmd_bootstrap,
     cmd_brief,
@@ -627,6 +628,18 @@ def build_parser():
         help="verify SQLite learning-event digests against canonical files",
     )
     x.set_defaults(func=cmd_production_reconcile)
+
+    q = sp.add_parser(
+        "replay",
+        help="reconstruct one recorded run without re-executing external effects",
+    )
+    q.add_argument("run_id")
+    q.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit nonzero if the journal is invalid or current state drifted",
+    )
+    q.set_defaults(func=cmd_replay)
 
     q = sp.add_parser("stats")
     q.add_argument("--limit", type=int, default=200)
