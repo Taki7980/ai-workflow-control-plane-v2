@@ -9,7 +9,6 @@ from unittest.mock import patch
 from ai_workflow.deployment_state import (
     STATE_LOCK_LEASE_SECONDS,
     _host_fingerprint,
-    _recover_stale_lock,
     _state_lock,
 )
 
