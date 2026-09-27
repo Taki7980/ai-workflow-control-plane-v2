@@ -167,6 +167,12 @@
       "kind": "specification",
       "url": "https://reproducible-builds.org/docs/source-date-epoch/",
       "scope": "stable source-derived timestamps for reproducible build outputs"
+    },
+    {
+      "id": "python-sdist-format-2026",
+      "kind": "specification",
+      "url": "https://packaging.python.org/en/latest/specifications/source-distribution-format/",
+      "scope": "sdist filename, pax tar format, required metadata, safe archive features and portable modes"
     }
   ],
   "capabilities": [
@@ -676,7 +682,8 @@
         ".github/workflows/tests.yml",
         ".github/dependabot.yml",
         ".github/CODEOWNERS",
-        "scripts/verify_python_reproducibility.py"
+        "scripts/verify_python_reproducibility.py",
+        "scripts/normalize_python_sdist.py"
       ],
       "verification": [
         "tests/test_release_distribution.py",
@@ -684,7 +691,8 @@
         "tests/test_hermetic_python_inputs.py",
         "tests/test_python_reproducibility.py",
         "tests/test_release_supply_chain.py",
-        "tests/test_hermetic_container_inputs.py"
+        "tests/test_hermetic_container_inputs.py",
+        "tests/test_normalize_python_sdist.py"
       ],
       "benchmarks": [],
       "research_refs": [
@@ -695,10 +703,12 @@
         "github-dependabot-actions-2026",
         "pypi-trusted-publishing-security-2026",
         "pypi-attestations-2026",
-        "source-date-epoch-reproducible-builds"
+        "source-date-epoch-reproducible-builds",
+        "python-sdist-format-2026"
       ],
       "limitations": [
-        "The byte-for-byte reproducibility claim covers Python wheel/sdist outputs and the separately tested release container; it does not claim reproducibility for platform-specific PyInstaller binaries.",
+        "The byte-for-byte reproducibility claim covers Python wheels and normalized project sdists plus the separately tested release container; it does not claim reproducibility for platform-specific PyInstaller binaries.",
+        "Sdist normalization fixes archive metadata nondeterminism after the locked build backend produces the source distribution; it does not hide differences in packaged file contents, which still fail the SHA-256 comparison.",
         "GitHub and PyPI attestations establish provenance/publisher identity and artifact integrity; they do not prove that released code is secure or correct.",
         "Repository tests can require full-SHA workflow references, but organization/repository UI policies such as tag protection and mandatory SHA-pinning remain operator-controlled settings.",
         "Dependabot configuration surfaces reviewable GitHub Actions updates only when Dependabot is enabled for the repository.",
