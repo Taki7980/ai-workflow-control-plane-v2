@@ -995,6 +995,7 @@ class WorkflowEngine:
             decision,
             orchestration_contract,
             selected,
+            task_text=query,
         ).to_dict()
         if learning_path is not None:
             try:
