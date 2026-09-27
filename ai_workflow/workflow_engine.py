@@ -29,7 +29,7 @@ from .math_retrieval import BM25Scorer, maximal_marginal_relevance, reciprocal_r
 from .models import ContextItem, Lane, RouteDecision
 from .multi_repo_retrieval import plan_repository_retrieval
 from .orchestration import build_orchestration_contract
-from .provenance import config_digest
+from .provenance import config_digest, provider_versions_from_config
 from .providers import ProviderStatus
 from .retrieval_contracts import ProviderResult
 from .retrieval_policy import classify_retrieval_intent, evaluate_sufficiency
@@ -40,7 +40,7 @@ from .retrieval_learning import (
 )
 from .retrieval_scheduler import BoundedRetrievalScheduler, ScheduledCall, SchedulerOutcome
 from .retriever_plugins import configured_retrievers, run_retriever_result as default_external_provider
-from .run_journal import write_run_journal
+from .run_journal import build_replay_journal, write_run_journal
 from .semantic import semantic_result as default_semantic_provider
 from .scip import scip_context as default_scip_provider
 from .selective_retrieval import evaluate_selective_retrieval
@@ -1051,64 +1051,109 @@ class WorkflowEngine:
                 "fresh",
                 "trust",
             }
-            journal_record = {
-                "run_id": execution_run_id,
-                "policy_identity": policy_identity,
-                "workspace_state": {
-                    "fingerprint": snapshot.get("fingerprint"),
-                    "git_head": snapshot.get("git_head"),
-                },
-                "graph_state": graph_state,
-                "changed_files": list(changed),
-                "retrieval": {
-                    "retrieval_intent": plan.intent.value,
-                    "retrieval_reason": plan.reason,
-                    "evidence_state": state,
-                    "providers_attempted": list(
-                        trace.providers_attempted
+            selected_evidence = [
+                {
+                    "source": item.source,
+                    "dedupe_key": item.dedupe_key,
+                    "stale": item.stale,
+                    "evidence": (
+                        item.evidence.to_dict()
+                        if item.evidence is not None
+                        else None
                     ),
-                    "providers_skipped": dict(
-                        trace.providers_skipped
-                    ),
-                    "provider_errors": safe_error_kinds,
-                    "algorithm_policy": algorithm_policy,
-                    "sufficiency": dict(trace.sufficiency),
-                    "selective_retrieval": {
-                        **selective.to_dict(),
-                        "enabled": selective_enabled,
+                    "metadata": {
+                        key: value
+                        for key, value in item.metadata.items()
+                        if key in safe_metadata_keys
                     },
-                    "selector": selector,
-                    "token_funnel": dict(token_funnel),
-                    "fallbacks": list(trace.fallbacks),
-                    "scheduler": dict(diagnostics["scheduler"]),
-                    "authorization_policy": dict(
-                        diagnostics["authorization_policy"]
-                    ),
+                    "provenance": {
+                        key: value
+                        for key, value in item.provenance.items()
+                        if key in safe_provenance_keys
+                    },
+                }
+                for item in selected
+            ]
+            safe_repository_routes = [
+                {
+                    "repository_id": route.repository_id,
+                    "tier": route.tier,
+                    "prior": route.prior,
+                    "relationship": route.relationship,
+                }
+                for route in selected_routes
+            ]
+            retrieval_record = {
+                "retrieval_intent": plan.intent.value,
+                "retrieval_reason": plan.reason,
+                "evidence_state": state,
+                "providers_attempted": list(trace.providers_attempted),
+                "providers_skipped": dict(trace.providers_skipped),
+                "provider_errors": safe_error_kinds,
+                "algorithm_policy": algorithm_policy,
+                "sufficiency": dict(trace.sufficiency),
+                "selective_retrieval": {
+                    **selective.to_dict(),
+                    "enabled": selective_enabled,
                 },
-                "selected_evidence": [
-                    {
-                        "source": item.source,
-                        "dedupe_key": item.dedupe_key,
-                        "stale": item.stale,
-                        "evidence": (
-                            item.evidence.to_dict()
-                            if item.evidence is not None
-                            else None
-                        ),
-                        "metadata": {
-                            key: value
-                            for key, value in item.metadata.items()
-                            if key in safe_metadata_keys
-                        },
-                        "provenance": {
-                            key: value
-                            for key, value in item.provenance.items()
-                            if key in safe_provenance_keys
-                        },
-                    }
-                    for item in selected
-                ],
+                "selector": selector,
+                "token_funnel": dict(token_funnel),
+                "fallbacks": list(trace.fallbacks),
+                "scheduler": dict(diagnostics["scheduler"]),
+                "authorization_policy": dict(
+                    diagnostics["authorization_policy"]
+                ),
             }
+            journal_record = build_replay_journal(
+                {
+                    "run_id": execution_run_id,
+                    "policy_identity": policy_identity,
+                    "workspace_state": {
+                        "fingerprint": snapshot.get("fingerprint"),
+                        "git_head": snapshot.get("git_head"),
+                    },
+                    "graph_state": graph_state,
+                    "changed_files": list(changed),
+                    "provider_versions": provider_versions_from_config(
+                        config
+                    ),
+                    "retrieval": retrieval_record,
+                    "selected_evidence": selected_evidence,
+                },
+                [
+                    {
+                        "kind": "routing",
+                        "payload": decision.to_dict(),
+                    },
+                    {
+                        "kind": "repository_routing",
+                        "payload": {
+                            "repositories": safe_repository_routes,
+                        },
+                    },
+                    {
+                        "kind": "retrieval",
+                        "payload": retrieval_record,
+                    },
+                    {
+                        "kind": "selection",
+                        "payload": {
+                            "selected_count": len(selected_evidence),
+                            "selected_evidence": selected_evidence,
+                        },
+                    },
+                    {
+                        "kind": "orchestration",
+                        "payload": orchestration_contract,
+                    },
+                    {
+                        "kind": "authorization",
+                        "payload": dict(
+                            diagnostics["authorization_policy"]
+                        ),
+                    },
+                ],
+            )
             try:
                 diagnostics["journal"] = write_run_journal(
                     root,
