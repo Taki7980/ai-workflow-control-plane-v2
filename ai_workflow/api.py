@@ -154,6 +154,7 @@ class WorkflowClient:
             decision,
             orchestration if isinstance(orchestration, Mapping) else {},
             items,
+            task_text=task.text,
         )
         return WorkflowResult(
             task=task,
