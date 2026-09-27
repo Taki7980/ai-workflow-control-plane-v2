@@ -75,9 +75,10 @@ The ordered event history is:
 1. `routing`
 2. `repository_routing`
 3. `retrieval`
-4. `selection`
-5. `orchestration`
-6. `authorization`
+4. `ranking`
+5. `selection`
+6. `orchestration`
+7. `authorization`
 
 Each event contains:
 
@@ -87,14 +88,20 @@ Each event contains:
 - structured safe payload;
 - SHA-256 digest of the event body.
 
-The journal stores the final event digest and event count.
+The journal stores the final event digest and event count, plus a SHA-256
+digest over the complete journal record (excluding the digest field itself).
+The ranking event records bounded text-free candidate descriptors so ranking
+order can be reconstructed without persisting repository content.
 
 ### Integrity versus compatibility
 
 These are intentionally separate checks.
 
-**Integrity** asks whether the stored event history is internally consistent:
-sequence, previous digest, event digest, event count, and head digest.
+**Integrity** asks whether the stored record is internally consistent:
+schema/run identity, exact v2 event order, previous/event/head digests, event
+count, duplicated retrieval/selection snapshots, and the complete-journal
+digest. Integrity failure stops replay before compatibility checks and prevents
+recorded events from being released.
 
 **Compatibility** asks whether the current local state still matches the
 recorded run:
@@ -102,6 +109,7 @@ recorded run:
 - config digest;
 - retrieval-policy/config version;
 - workspace fingerprint;
+- aggregate active-repository fingerprint;
 - aggregate graph fingerprint.
 
 A journal can be internally valid while the workspace has legitimately changed.
@@ -113,8 +121,9 @@ ai-workflow replay <run-id>
 ai-workflow replay <run-id> --strict
 ```
 
-Replay is read-only. It reads the local journal, validates its event chain,
-checks current-state compatibility, and returns the recorded events.
+Replay is read-only. It reads the local journal once, validates the complete
+record, then checks current-state compatibility from that same verified snapshot.
+Recorded events are returned only when integrity validation succeeds.
 
 `--strict` exits nonzero when:
 
@@ -142,9 +151,9 @@ source labels, and bounded locator/provenance fields.
   externally anchored audit logs would be a separate feature.
 - Replay reconstructs recorded control-plane history; it does not regenerate
   provider/model outputs or prove they would be identical today.
-- Compatibility currently covers config, workspace, and graph identity. It does
-  not attempt to recreate the historical operating system, provider service,
-  network state, or model backend.
+- Compatibility covers config, root-workspace, aggregate active-repository,
+  and graph identity. It does not attempt to recreate the historical operating
+  system, provider service, network state, or model backend.
 - Journals are machine-local generated state and are written only when the
   existing telemetry/trace path is enabled.
 - Timing data is historical observation and is not treated as a deterministic
@@ -155,7 +164,9 @@ source labels, and bounded locator/provenance fields.
 ## Acceptance criteria
 
 - traced runs emit a v2 ordered replay history;
-- event deletion/reordering/payload edits break integrity verification;
+- event deletion/reordering/payload edits and top-level identity edits break
+  integrity verification unless the complete journal is maliciously rewritten
+  and all hashes are recomputed;
 - raw task/evidence content is absent from the journal;
 - `ai-workflow replay` performs no external execution;
 - compatibility drift is reported separately from journal integrity;
