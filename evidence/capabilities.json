@@ -341,7 +341,7 @@
     },
     {
       "id": "reproducible-run-journal",
-      "claim": "Traced runs record immutable policy/workspace/provider identities plus a hash-chained routing-to-authorization event history that can be replayed read-only without persisting raw task or evidence text.",
+      "claim": "Traced runs record policy/provider identity, aggregate repository state, ranked candidate descriptors, selected evidence identity, and a fixed routing-to-authorization history protected by per-event and complete-journal SHA-256 integrity checks; replay is read-only and releases events only after integrity verification.",
       "scope": "observability",
       "status": "implemented",
       "evidence_level": "verified",
@@ -370,8 +370,9 @@
       ],
       "limitations": [
         "Replay reconstructs recorded control-plane decisions and intentionally does not re-execute models, tools, providers, MCP calls, or external systems.",
-        "The local SHA-256 event chain is not authenticated; an actor able to rewrite the entire journal can recompute the chain.",
-        "Compatibility checks cover config, workspace, and graph identity rather than recreating historical operating-system, network, provider-service, or model-backend state.",
+        "The local SHA-256 event chain and complete-journal digest are not authenticated signatures; an actor able to rewrite the entire journal can recompute every digest.",
+        "Compatibility checks cover config, root workspace, aggregate active-repository state, and graph identity rather than recreating historical operating-system, network, provider-service, or model-backend state.",
+        "Ranked candidate records contain text-free hashes, scores, source labels, and bounded locator/provenance metadata; they are not a proof that the historical provider/model backend would return the same candidates today.",
         "Replay journals are generated only when the existing telemetry/trace path is enabled and remain machine-local generated state."
       ]
     },
@@ -672,4 +673,4 @@
       ]
     }
   ]
-}
+}\n
