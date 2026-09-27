@@ -36,7 +36,7 @@ def _process_append_event(store_path: str, index: int, queue) -> None:
             event_id=f"decision:{decision_id}",
             busy_timeout_ms=15000,
         )
-    except Exception as exc:  # pragma: no cover - surfaced in parent
+    except (OSError, RuntimeError, sqlite3.Error, ValueError) as exc:
         queue.put(("error", type(exc).__name__, str(exc)))
     else:
         queue.put(("ok", bool(result["inserted"])))
