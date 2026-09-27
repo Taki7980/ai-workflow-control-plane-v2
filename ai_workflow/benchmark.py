@@ -23,6 +23,7 @@ from .benchmark_trajectory import load_trajectory_events, trajectory_metrics
 from .budget import budget_for
 from .classifier import classify
 from .config import estimate_tokens
+from .context_economics import benchmark_token_economics
 from .providers import detect, execution_provider, model_tier
 
 
@@ -93,6 +94,11 @@ def _group_summary(group: list[dict]) -> dict:
         for r in group
         if "role_aware_retrieval" in r
     ]
+    economics_rows = [
+        r["context_economics"]
+        for r in group
+        if "context_economics" in r
+    ]
     return {
         "cases": len(group),
         "lane_accuracy": _accuracy(group, "lane_correct"),
@@ -160,6 +166,48 @@ def _group_summary(group: list[dict]) -> dict:
             role_rows, "known_distractor_rate_at_k"
         ),
         "mean_coverage_balance": _mean(role_rows, "coverage_balance"),
+        "mean_retrieved_estimated_tokens": _mean(
+            economics_rows, "retrieved_estimated_tokens"
+        ),
+        "mean_unique_retrieved_estimated_tokens": _mean(
+            economics_rows, "unique_retrieved_estimated_tokens"
+        ),
+        "mean_duplicate_estimated_tokens": _mean(
+            economics_rows, "duplicate_estimated_tokens"
+        ),
+        "mean_duplicate_token_fraction": _mean(
+            economics_rows, "duplicate_token_fraction"
+        ),
+        "mean_ranked_candidate_estimated_tokens": _mean(
+            economics_rows, "ranked_candidate_estimated_tokens"
+        ),
+        "mean_selected_estimated_tokens": _mean(
+            economics_rows, "selected_estimated_tokens"
+        ),
+        "mean_selected_vs_retrieved_token_ratio": _mean(
+            economics_rows, "selected_vs_retrieved_token_ratio"
+        ),
+        "mean_estimated_token_reduction_vs_retrieved": _mean(
+            economics_rows, "estimated_token_reduction_vs_retrieved"
+        ),
+        "mean_selected_hard_budget_utilization": _mean(
+            economics_rows, "selected_hard_budget_utilization"
+        ),
+        "mean_selected_adaptive_budget_utilization": _mean(
+            economics_rows, "selected_adaptive_budget_utilization"
+        ),
+        "mean_retrieval_call_count": _mean(
+            economics_rows, "retrieval_call_count"
+        ),
+        "mean_gold_file_token_share": _mean(
+            economics_rows, "gold_file_token_share"
+        ),
+        "mean_known_distractor_token_share": _mean(
+            economics_rows, "known_distractor_token_share"
+        ),
+        "mean_gold_file_tokens_per_1k_retrieved": _mean(
+            economics_rows, "gold_file_tokens_per_1k_retrieved"
+        ),
     }
 
 
@@ -325,6 +373,12 @@ def run_benchmark(
         if role_metrics:
             row["role_aware_retrieval"] = role_metrics
 
+        row["context_economics"] = benchmark_token_economics(
+            items,
+            case,
+            retrieval,
+        )
+
         span_metrics = span_retrieval_metrics(
             items,
             case.get("gold_spans") or [],
@@ -374,6 +428,11 @@ def run_benchmark(
         for r in rows
         if "role_aware_retrieval" in r
     ]
+    economics_rows = [
+        r["context_economics"]
+        for r in rows
+        if "context_economics" in r
+    ]
     frozen_rows = [r for r in rows if r["snapshot"]["match"] is not None]
 
     by_query_groups = defaultdict(list)
@@ -407,6 +466,7 @@ def run_benchmark(
             "trajectory_utilization_metrics_supported": True,
             "role_aware_file_relevance_supported": True,
             "known_distractor_scoring_supported": True,
+            "context_token_economics_supported": True,
             "task_types": [
                 "code2test",
                 "comment2context",
@@ -418,8 +478,9 @@ def run_benchmark(
         "warning": (
             "Estimated context tokens are not provider-billed tokens. "
             "Retrieval metrics measure supplied gold patterns/files/spans, "
-            "optional edit/support roles, and labelled distractors; they do "
-            "not prove downstream task correctness."
+            "optional edit/support roles, labelled distractors, and "
+            "provider-neutral token estimates; they do not prove downstream "
+            "task correctness or provider-billed cost."
         ),
         "providers": providers.to_dict(),
         "cases": rows,
@@ -519,6 +580,49 @@ def run_benchmark(
             ),
             "mean_coverage_balance": _mean(
                 role_rows, "coverage_balance"
+            ),
+            "mean_retrieved_estimated_tokens": _mean(
+                economics_rows, "retrieved_estimated_tokens"
+            ),
+            "mean_unique_retrieved_estimated_tokens": _mean(
+                economics_rows, "unique_retrieved_estimated_tokens"
+            ),
+            "mean_duplicate_estimated_tokens": _mean(
+                economics_rows, "duplicate_estimated_tokens"
+            ),
+            "mean_duplicate_token_fraction": _mean(
+                economics_rows, "duplicate_token_fraction"
+            ),
+            "mean_ranked_candidate_estimated_tokens": _mean(
+                economics_rows, "ranked_candidate_estimated_tokens"
+            ),
+            "mean_selected_estimated_tokens": _mean(
+                economics_rows, "selected_estimated_tokens"
+            ),
+            "mean_selected_vs_retrieved_token_ratio": _mean(
+                economics_rows, "selected_vs_retrieved_token_ratio"
+            ),
+            "mean_estimated_token_reduction_vs_retrieved": _mean(
+                economics_rows,
+                "estimated_token_reduction_vs_retrieved",
+            ),
+            "mean_selected_hard_budget_utilization": _mean(
+                economics_rows, "selected_hard_budget_utilization"
+            ),
+            "mean_selected_adaptive_budget_utilization": _mean(
+                economics_rows, "selected_adaptive_budget_utilization"
+            ),
+            "mean_retrieval_call_count": _mean(
+                economics_rows, "retrieval_call_count"
+            ),
+            "mean_gold_file_token_share": _mean(
+                economics_rows, "gold_file_token_share"
+            ),
+            "mean_known_distractor_token_share": _mean(
+                economics_rows, "known_distractor_token_share"
+            ),
+            "mean_gold_file_tokens_per_1k_retrieved": _mean(
+                economics_rows, "gold_file_tokens_per_1k_retrieved"
             ),
             "frozen_snapshot_match_rate": (
                 round(
