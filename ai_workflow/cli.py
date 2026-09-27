@@ -50,6 +50,7 @@ from .commands.production import (
     cmd_production_status,
     cmd_production_sync,
 )
+from .commands.replay import cmd_replay
 from .commands.workspace import (
     _cmd_repos_set,
     _decision,
@@ -125,6 +126,7 @@ __all__ = [
     "cmd_production_reconcile",
     "cmd_production_status",
     "cmd_production_sync",
+    "cmd_replay",
     "cmd_repos_exclude",
     "cmd_repos_include",
     "cmd_repos_list",
