@@ -56,7 +56,7 @@ class CapabilityGateTests(unittest.TestCase):
         )
 
         self.assertTrue(allowed.allowed)
-        self.assertEqual(allowed.reason, "preauthorized_tool")
+        self.assertEqual(allowed.reason, "preauthorized_scoped_tool")
         self.assertFalse(denied.allowed)
         self.assertEqual(denied.reason, DenialReason.TOOL_NOT_ALLOWLISTED.value)
 
@@ -262,7 +262,8 @@ class CapabilityGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             result = asyncio.run(exercise(Path(td)))
 
-        self.assertEqual(result.capability_policy.schema, "capability-v1")
+        self.assertEqual(result.capability_policy.schema, "capability-v2")
+        self.assertIsNotNone(result.capability_policy.task_digest)
         denied = result.authorize_model_action(
             ModelActionRequest(
                 Capability.SECRET_ACCESS,
@@ -304,7 +305,8 @@ class CapabilityGateTests(unittest.TestCase):
             )
 
         policy = diagnostics["authorization_policy"]
-        self.assertEqual(policy["schema"], "capability-v1")
+        self.assertEqual(policy["schema"], "capability-v2")
+        self.assertIsNotNone(policy["task_digest"])
         self.assertGreaterEqual(policy["verification_passes"], 1)
         self.assertIn("denied_by_default", policy)
 
