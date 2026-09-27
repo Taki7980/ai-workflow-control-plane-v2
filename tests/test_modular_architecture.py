@@ -62,6 +62,7 @@ class ModularArchitectureCompatibilityTests(unittest.TestCase):
                 "learning",
                 "deployment",
                 "production",
+                "replay",
                 "stats",
                 "handoff",
                 "memory",
