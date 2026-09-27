@@ -107,6 +107,30 @@
       "kind": "official_documentation",
       "url": "https://docs.python.org/3/library/os.html#os.replace",
       "scope": "same-filesystem atomic replacement semantics"
+    },
+    {
+      "id": "temporal-deterministic-replay-2026",
+      "kind": "official_documentation",
+      "url": "https://docs.temporal.io/tasks",
+      "scope": "event-history replay reconstructs workflow decisions while completed external operations are not re-executed"
+    },
+    {
+      "id": "otel-genai-observability-2026",
+      "kind": "official_documentation",
+      "url": "https://opentelemetry.io/blog/2026/genai-observability/",
+      "scope": "GenAI observability for model, tool, token, and agent operations"
+    },
+    {
+      "id": "otel-genai-semconv-2026",
+      "kind": "specification",
+      "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
+      "scope": "GenAI retrieval/tool/workflow operation semantics and sensitive-content recording guidance"
+    },
+    {
+      "id": "openlineage-run-facets-1.53",
+      "kind": "specification",
+      "url": "https://openlineage.io/docs/spec/facets/run-facets/",
+      "scope": "unique run identity and extensible run-level metadata"
     }
   ],
   "capabilities": [
@@ -317,26 +341,38 @@
     },
     {
       "id": "reproducible-run-journal",
-      "claim": "Prepared runs can record immutable policy/workspace/provider identities and verify replay preconditions without persisting raw task text in the run metadata.",
+      "claim": "Traced runs record immutable policy/workspace/provider identities plus a hash-chained routing-to-authorization event history that can be replayed read-only without persisting raw task or evidence text.",
       "scope": "observability",
       "status": "implemented",
       "evidence_level": "verified",
       "production_default": false,
       "implementation": [
         "ai_workflow/provenance.py",
-        "ai_workflow/run_journal.py"
+        "ai_workflow/run_journal.py",
+        "ai_workflow/workflow_engine.py",
+        "ai_workflow/commands/replay.py",
+        "ai_workflow/commands/parser.py"
       ],
       "verification": [
         "tests/test_run_journal.py",
+        "tests/test_replay_command.py",
+        "tests/test_workflow_engine.py",
         "tests/test_final_audit_target.py"
       ],
       "benchmarks": [],
       "research_refs": [
         "slsa-provenance-v1.2",
-        "openssf-machine-readable-signals-2026"
+        "openssf-machine-readable-signals-2026",
+        "temporal-deterministic-replay-2026",
+        "otel-genai-observability-2026",
+        "otel-genai-semconv-2026",
+        "openlineage-run-facets-1.53"
       ],
       "limitations": [
-        "Replay verification checks identity/preconditions; it intentionally does not re-execute models, tools, providers, or external systems."
+        "Replay reconstructs recorded control-plane decisions and intentionally does not re-execute models, tools, providers, MCP calls, or external systems.",
+        "The local SHA-256 event chain is not authenticated; an actor able to rewrite the entire journal can recompute the chain.",
+        "Compatibility checks cover config, workspace, and graph identity rather than recreating historical operating-system, network, provider-service, or model-backend state.",
+        "Replay journals are generated only when the existing telemetry/trace path is enabled and remain machine-local generated state."
       ]
     },
     {
@@ -636,4 +672,4 @@
       ]
     }
   ]
-}
+}\n
