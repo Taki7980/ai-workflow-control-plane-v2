@@ -664,7 +664,7 @@
     },
     {
       "id": "release-integrity",
-      "claim": "Release workflows use pinned build inputs, cross-platform smoke tests, reproducibility checks, checksums and artifact/container verification paths.",
+      "claim": "Release workflows use immutable action/build inputs, measured Python and container reproducibility gates, checksums, provenance/attestation verification, and a separated PyPI Trusted Publishing boundary that only publishes prebuilt attested distributions.",
       "scope": "distribution",
       "status": "implemented",
       "evidence_level": "verified",
@@ -672,19 +672,36 @@
       "implementation": [
         ".github/workflows/release.yml",
         "scripts/verify_container_attestations.py",
-        "scripts/verify_release_authorization.py"
+        "scripts/verify_release_authorization.py",
+        ".github/workflows/tests.yml",
+        ".github/dependabot.yml",
+        ".github/CODEOWNERS",
+        "scripts/verify_python_reproducibility.py"
       ],
       "verification": [
         "tests/test_release_distribution.py",
         "tests/test_release_authorization.py",
-        "tests/test_hermetic_python_inputs.py"
+        "tests/test_hermetic_python_inputs.py",
+        "tests/test_python_reproducibility.py",
+        "tests/test_release_supply_chain.py",
+        "tests/test_hermetic_container_inputs.py"
       ],
       "benchmarks": [],
       "research_refs": [
         "slsa-provenance-v1.2",
-        "openssf-machine-readable-signals-2026"
+        "openssf-machine-readable-signals-2026",
+        "github-actions-secure-use-2026",
+        "github-artifact-attestations-2026",
+        "github-dependabot-actions-2026",
+        "pypi-trusted-publishing-security-2026",
+        "pypi-attestations-2026",
+        "source-date-epoch-reproducible-builds"
       ],
       "limitations": [
+        "The byte-for-byte reproducibility claim covers Python wheel/sdist outputs and the separately tested release container; it does not claim reproducibility for platform-specific PyInstaller binaries.",
+        "GitHub and PyPI attestations establish provenance/publisher identity and artifact integrity; they do not prove that released code is secure or correct.",
+        "Repository tests can require full-SHA workflow references, but organization/repository UI policies such as tag protection and mandatory SHA-pinning remain operator-controlled settings.",
+        "Dependabot configuration surfaces reviewable GitHub Actions updates only when Dependabot is enabled for the repository.",
         "Repository controls do not prove external PyPI/package-index account configuration or third-party distribution approval state."
       ]
     },
@@ -706,43 +723,6 @@
       "research_refs": [],
       "limitations": [
         "The control plane emits and verifies its contract; it does not claim to control the internals or availability of the external Superpowers implementation."
-      ]
-    },
-    {
-      "id": "release-supply-chain-reproducibility",
-      "claim": "Release Python distributions are independently rebuilt from clean source snapshots with a fixed source timestamp and must be byte-identical before use; the PyPI OIDC job only retrieves and verifies prebuilt attested artifacts before Trusted Publishing, while external GitHub Actions remain full-SHA pinned and Dependabot-tracked.",
-      "scope": "release",
-      "status": "implemented",
-      "evidence_level": "verified",
-      "production_default": true,
-      "implementation": [
-        ".github/workflows/tests.yml",
-        ".github/workflows/release.yml",
-        ".github/dependabot.yml",
-        ".github/CODEOWNERS",
-        "scripts/verify_python_reproducibility.py"
-      ],
-      "verification": [
-        "tests/test_python_reproducibility.py",
-        "tests/test_release_supply_chain.py",
-        "tests/test_hermetic_python_inputs.py",
-        "tests/test_hermetic_container_inputs.py"
-      ],
-      "benchmarks": [],
-      "research_refs": [
-        "slsa-provenance-v1.2",
-        "github-actions-secure-use-2026",
-        "github-artifact-attestations-2026",
-        "github-dependabot-actions-2026",
-        "pypi-trusted-publishing-security-2026",
-        "pypi-attestations-2026",
-        "source-date-epoch-reproducible-builds"
-      ],
-      "limitations": [
-        "The byte-for-byte reproducibility claim covers Python wheel/sdist outputs and does not claim reproducibility for platform-specific PyInstaller binaries.",
-        "GitHub and PyPI attestations establish provenance/publisher identity and artifact integrity; they do not prove that released code is secure or correct.",
-        "Repository tests can require full-SHA workflow references, but organization/repository UI policies such as tag protection and mandatory SHA-pinning remain operator-controlled settings.",
-        "Dependabot configuration surfaces reviewable GitHub Actions updates only when Dependabot is enabled for the repository."
       ]
     }
   ]
