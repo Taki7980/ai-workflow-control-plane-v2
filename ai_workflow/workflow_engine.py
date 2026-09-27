@@ -47,7 +47,7 @@ from .selective_retrieval import evaluate_selective_retrieval
 from .task_retrieval import TaskRetrievalPolicy, task_retrieval_policy
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
-from .workspace_state import workspace_fingerprint
+from .workspace_state import (\n    aggregate_workspace_fingerprint,\n    workspace_fingerprint,\n)
 
 
 def _provenance(item: ContextItem, workspace_root: Path | None = None) -> ContextItem:
@@ -1051,16 +1051,17 @@ class WorkflowEngine:
                 "fresh",
                 "trust",
             }
-            selected_evidence = [
-                {
+            def safe_item_descriptor(
+                item: ContextItem,
+                *,
+                include_evidence: bool,
+                rank: int | None = None,
+            ) -> dict[str, Any]:
+                descriptor: dict[str, Any] = {
                     "source": item.source,
                     "dedupe_key": item.dedupe_key,
                     "stale": item.stale,
-                    "evidence": (
-                        item.evidence.to_dict()
-                        if item.evidence is not None
-                        else None
-                    ),
+                    "score": float(item.score),
                     "metadata": {
                         key: value
                         for key, value in item.metadata.items()
@@ -1072,17 +1073,44 @@ class WorkflowEngine:
                         if key in safe_provenance_keys
                     },
                 }
+                if rank is not None:
+                    descriptor["rank"] = rank
+                if include_evidence:
+                    descriptor["evidence"] = (
+                        item.evidence.to_dict()
+                        if item.evidence is not None
+                        else None
+                    )
+                return descriptor
+
+            ranked_candidates = [
+                safe_item_descriptor(
+                    item,
+                    include_evidence=False,
+                    rank=index,
+                )
+                for index, item in enumerate(candidates, start=1)
+            ]
+            selected_evidence = [
+                safe_item_descriptor(
+                    item,
+                    include_evidence=True,
+                )
                 for item in selected
             ]
-            safe_repository_routes = [
-                {
-                    "repository_id": route.repository_id,
-                    "tier": route.tier,
-                    "prior": route.prior,
-                    "relationship": route.relationship,
-                }
-                for route in selected_routes
-            ]
+            repository_snapshot = aggregate_workspace_fingerprint(
+                root,
+                config,
+            )
+            repository_state = {
+                "fingerprint": str(
+                    repository_snapshot.get("fingerprint", "")
+                ),
+                "repository_count": int(
+                    repository_snapshot.get("repository_count", 0)
+                ),
+            }
+            repository_routing_record = routing_plan.to_dict()
             retrieval_record = {
                 "retrieval_intent": plan.intent.value,
                 "retrieval_reason": plan.reason,
@@ -1090,7 +1118,6 @@ class WorkflowEngine:
                 "providers_attempted": list(trace.providers_attempted),
                 "providers_skipped": dict(trace.providers_skipped),
                 "provider_errors": safe_error_kinds,
-                "algorithm_policy": algorithm_policy,
                 "sufficiency": dict(trace.sufficiency),
                 "selective_retrieval": {
                     **selective.to_dict(),
@@ -1100,9 +1127,12 @@ class WorkflowEngine:
                 "token_funnel": dict(token_funnel),
                 "fallbacks": list(trace.fallbacks),
                 "scheduler": dict(diagnostics["scheduler"]),
-                "authorization_policy": dict(
-                    diagnostics["authorization_policy"]
-                ),
+            }
+            ranking_record = {
+                "algorithm_policy": dict(algorithm_policy),
+                "task_retrieval_policy": task_policy.to_dict(),
+                "candidate_count": len(ranked_candidates),
+                "candidates": ranked_candidates,
             }
             journal_record = build_replay_journal(
                 {
@@ -1113,6 +1143,7 @@ class WorkflowEngine:
                         "git_head": snapshot.get("git_head"),
                     },
                     "graph_state": graph_state,
+                    "repository_state": repository_state,
                     "changed_files": list(changed),
                     "provider_versions": provider_versions_from_config(
                         config
@@ -1127,13 +1158,15 @@ class WorkflowEngine:
                     },
                     {
                         "kind": "repository_routing",
-                        "payload": {
-                            "repositories": safe_repository_routes,
-                        },
+                        "payload": repository_routing_record,
                     },
                     {
                         "kind": "retrieval",
                         "payload": retrieval_record,
+                    },
+                    {
+                        "kind": "ranking",
+                        "payload": ranking_record,
                     },
                     {
                         "kind": "selection",
