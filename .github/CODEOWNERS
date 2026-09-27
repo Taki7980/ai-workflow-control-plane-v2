@@ -7,6 +7,7 @@
 /pyproject.toml @Taki7980
 /uv.lock @Taki7980
 /scripts/record_python_toolchain.py @Taki7980
+/scripts/verify_python_reproducibility.py @Taki7980
 /scripts/crg_semantic_benchmark.py @Taki7980
 /scripts/run_crg_semantic_benchmark.py @Taki7980
 /scripts/check_crg_semantic_regression.py @Taki7980
