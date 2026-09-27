@@ -10,7 +10,12 @@ from pathlib import Path, PurePosixPath
 
 
 def _safe_member_name(name: str) -> bool:
-    if not name or "\x00" in name or name.startswith("/"):
+    if (
+        not name
+        or "\x00" in name
+        or "\\" in name
+        or name.startswith("/")
+    ):
         return False
     parts = PurePosixPath(name).parts
     return bool(parts) and all(part not in {"", ".", ".."} for part in parts)
@@ -81,6 +86,11 @@ def normalize_sdist(path: Path, *, source_date_epoch: int) -> None:
 
     names = {info.name for info, _ in normalized}
     top = next(iter(top_levels))
+    expected_top = source.name.removesuffix(".tar.gz")
+    if top != expected_top:
+        raise ValueError(
+            "sdist top-level directory must match archive filename"
+        )
     if f"{top}/pyproject.toml" not in names:
         raise ValueError("sdist is missing pyproject.toml")
     if f"{top}/PKG-INFO" not in names:
