@@ -47,7 +47,10 @@ from .selective_retrieval import evaluate_selective_retrieval
 from .task_retrieval import TaskRetrievalPolicy, task_retrieval_policy
 from .telemetry import RetrievalTrace, trace_enabled, write_trace
 from .workspace import workspace_roots
-from .workspace_state import (\n    aggregate_workspace_fingerprint,\n    workspace_fingerprint,\n)
+from .workspace_state import (
+    aggregate_workspace_fingerprint,
+    workspace_fingerprint,
+)
 
 
 def _provenance(item: ContextItem, workspace_root: Path | None = None) -> ContextItem:
