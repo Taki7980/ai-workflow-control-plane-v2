@@ -647,6 +647,66 @@ class WorkflowEngineTests(unittest.TestCase):
         )
 
 
+    def test_traced_run_writes_safe_replay_journal(self):
+        from ai_workflow.run_journal import (
+            REPLAY_SCHEMA_VERSION,
+            read_run_journal,
+            verify_replay_journal,
+        )
+        from ai_workflow.workflow_engine import WorkflowEngine
+
+        cfg = self._config()
+        cfg["context"]["telemetry"]["mode"] = "all"
+        decision = RouteDecision(Lane.SMALL, Risk.LOW, confidence=0.9)
+        budget = ContextBudget(2500, 800, 10000, {})
+        task_text = "private task body should not be persisted"
+        evidence_text = "private evidence body should not be persisted"
+        engine = WorkflowEngine(
+            base_gather=lambda *args, **kwargs: [
+                ContextItem(
+                    "lightweight_index",
+                    evidence_text,
+                    3.0,
+                    False,
+                    {"path": "src/payment.py"},
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _, diagnostics = engine.gather_detailed(
+                root,
+                task_text,
+                decision,
+                budget,
+                cfg,
+                ProviderStatus(False, False, False, False, False),
+                write_telemetry=True,
+            )
+            record = read_run_journal(root, diagnostics["run_id"])
+
+        self.assertIsNotNone(record)
+        self.assertEqual(
+            record["schema_version"],
+            REPLAY_SCHEMA_VERSION,
+        )
+        self.assertTrue(verify_replay_journal(record)["valid"])
+        self.assertEqual(
+            [event["kind"] for event in record["replay_events"]],
+            [
+                "routing",
+                "repository_routing",
+                "retrieval",
+                "selection",
+                "orchestration",
+                "authorization",
+            ],
+        )
+        serialized = str(record)
+        self.assertNotIn(task_text, serialized)
+        self.assertNotIn(evidence_text, serialized)
+
     def test_run_identity_and_policy_identity_are_returned(self):
         from ai_workflow.provenance import config_digest
         from ai_workflow.workflow_engine import WorkflowEngine
