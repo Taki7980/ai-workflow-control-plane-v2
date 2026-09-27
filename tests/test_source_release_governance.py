@@ -73,14 +73,29 @@ class SourceReleaseGovernanceTests(unittest.TestCase):
             encoding="utf-8"
         )
         prepare = _job_block(workflow, "prepare-release")
+        python_build = _job_block(
+            workflow,
+            "build-python-distributions",
+        )
         pypi = _job_block(workflow, "publish-pypi")
         portable = _job_block(workflow, "portable-binaries")
         container = _job_block(workflow, "container")
         finalize = _job_block(workflow, "finalize-release")
 
         self.assertRegex(prepare, r"(?m)^    environment: release$")
+        self.assertRegex(
+            python_build,
+            r"(?m)^    needs: prepare-release$",
+        )
+        self.assertNotRegex(
+            python_build,
+            r"(?m)^    environment: pypi$",
+        )
         self.assertRegex(pypi, r"(?m)^    environment: pypi$")
-        self.assertRegex(pypi, r"(?m)^    needs: prepare-release$")
+        self.assertRegex(
+            pypi,
+            r"(?m)^    needs: build-python-distributions$",
+        )
         self.assertRegex(portable, r"(?m)^    needs: prepare-release$")
         self.assertRegex(container, r"(?m)^    needs: prepare-release$")
         self.assertRegex(
