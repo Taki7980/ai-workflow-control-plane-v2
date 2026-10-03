@@ -2,7 +2,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424 AS uv
 
-FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS build
+FROM python:3.15.0rc2-slim-trixie@sha256:14684656c0069b49e897c63d52bbbe7df8a4bf189911a597403fd3b4ffeaae06 AS build
 ARG SOURCE_DATE_EPOCH
 WORKDIR /src
 COPY --from=uv /uv /usr/local/bin/uv
@@ -11,7 +11,7 @@ COPY ai_workflow ./ai_workflow
 RUN uv sync --locked --only-group build \
     && uv run --locked --no-sync python -m build --wheel --no-isolation
 
-FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime
+FROM python:3.15.0rc2-slim-trixie@sha256:14684656c0069b49e897c63d52bbbe7df8a4bf189911a597403fd3b4ffeaae06 AS runtime
 ARG SOURCE_DATE_EPOCH
 COPY packaging/container/debian.sources /etc/apt/sources.list.d/debian.sources
 COPY packaging/container/runtime-packages.txt /tmp/runtime-packages.txt
